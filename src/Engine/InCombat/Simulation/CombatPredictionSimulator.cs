@@ -117,7 +117,7 @@ internal sealed partial class CombatPredictionSimulator
         State = new CombatPredictionState(combatState);
         Rng = combatState is ICombatPredictionRunSnapshot runSnapshot
             ? runSnapshot.CreatePredictionRngSet()
-            : CombatPredictionRngSet.From(combatState.RunState.Rng);
+            : throw new InvalidOperationException("Combat prediction needs a captured run RNG snapshot, not live run RNG.");
         StateStore = new PredictionStateStore();
         History = new CombatPredictionHistory(_trace, combatState.Players.Count == 1 ? combatState.Players[0] : null);
         if (combatState is ICombatPredictionRootMaterializable materializable)

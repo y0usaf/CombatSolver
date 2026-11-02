@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using CombatSolver;
 using CombatSolver.Engine.Common;
@@ -8,6 +9,8 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Rngs;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Odds;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -20,8 +23,24 @@ internal static class FairObservationChecks
 
     private sealed record HiddenState(
         CardModel[] DrawOrder,
-        SerializableRunRngSet RunRng,
-        SerializablePlayerRngSet PlayerRng);
+        RunRngSet RunRng,
+        SerializableRunRngSet RunRngState,
+        RunRngSet[] MonsterRunRngs,
+        Rng[] MonsterRngs,
+        SerializableRng[] MonsterRngStates,
+        Rng EncounterRng,
+        SerializableRng EncounterRngState,
+        PlayerRngSet PlayerRng,
+        SerializablePlayerRngSet PlayerRngState,
+        PlayerOddsSet PlayerOdds,
+        string PlayerOddsState);
+
+    private static readonly FieldInfo RunRngField = typeof(RunState)
+        .GetField("<Rng>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new MissingFieldException(typeof(RunState).FullName, "<Rng>k__BackingField");
+    private static readonly PropertyInfo OddsCurrentValue = typeof(AbstractOdds)
+        .GetProperty(nameof(AbstractOdds.CurrentValue))
+        ?? throw new MissingMemberException(typeof(AbstractOdds).FullName, nameof(AbstractOdds.CurrentValue));
 
     private sealed record FairRoot(string Stamp, string Forecast, CardModel[] DrawPile);
 
@@ -42,6 +61,17 @@ internal static class FairObservationChecks
                 || line.EndsWith("已装 2 个目标", StringComparison.Ordinal)),
             "all fair draw pile observation patches are installed: " + string.Join(" | ", fairPatches));
         Check(drawPile.Cards.Count >= 2, "fixture needs at least two unknown draw pile cards");
+        string[] extraCards = (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_EXTRA_CARDS") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries);
+        foreach (string id in extraCards)
+        {
+            CardModel canonical = ModelDb.All.OfType<CardModel>().Single(card => card.Id.Entry == id);
+            CardModel card = combat.CreateCard(canonical, player);
+            loop.RunUntilCompleted(
+                CardPileCmd.AddGeneratedCardToCombat(card, PileType.Hand, player),
+                TimeSpan.FromSeconds(30),
+                $"add {id}");
+        }
         HiddenState worldA = Save(combat, player);
         string liveA = ContinuationStamp.CaptureLive(combat).StateText;
         FairRoot rootA = Capture(combat, player, SamplerSeed);
@@ -52,6 +82,17 @@ internal static class FairObservationChecks
         string liveB = ContinuationStamp.CaptureLive(combat).StateText;
         Check(liveA != liveB, "hidden mutation changes the clairvoyant live stamp");
         Check(Field(liveA, "R") != Field(liveB, "R"), "hidden mutation changes every RNG stream");
+        Check(combat.RunState.Rng.StringSeed != worldA.RunRng.StringSeed, "hidden mutation changes the run seed string");
+        Check(Fingerprint(worldA) != Fingerprint(worldB)
+                && worldA.PlayerRng.Seed != worldB.PlayerRng.Seed
+                && Enum.GetValues<PlayerRngType>().All(type => !SameRng(
+                    worldA.PlayerRngState.Rngs[type], worldB.PlayerRngState.Rngs[type]))
+                && worldA.PlayerOddsState != worldB.PlayerOddsState
+                && worldA.MonsterRngStates.Zip(worldB.MonsterRngStates).All(pair => !SameRng(pair.First, pair.Second))
+                && !SameRng(worldA.EncounterRngState, worldB.EncounterRngState),
+            "hidden mutation changes every player RNG stream, player odds, per-monster and encounter RNGs");
+        Check(Field(liveA, "MS0") == Field(liveB, "MS0") && Field(liveA, "AI0") == Field(liveB, "AI0"),
+            "hidden mutation keeps displayed enemy move history and history-derived AI state");
         Check(Field(liveA, "D") != Field(liveB, "D"), "hidden mutation changes the draw order");
         Check(Field(liveA, "H") == Field(liveB, "H") && Field(liveA, "C") == Field(liveB, "C"),
             "hidden mutation keeps hand and discard");
@@ -77,8 +118,12 @@ internal static class FairObservationChecks
             ulong seed = SamplerSeed + 1000UL + (ulong)sample;
             Restore(combat, player, worldA);
             string[] routeA = Solve(combat, options, loop, seed);
+            Check(Fingerprint(Save(combat, player)) == Fingerprint(worldA) && ContinuationStamp.CaptureLive(combat).StateText == liveA,
+                $"seed {seed}: search consumes no live hidden RNG in world A");
             Restore(combat, player, worldB);
             string[] routeB = Solve(combat, options, loop, seed);
+            Check(Fingerprint(Save(combat, player)) == Fingerprint(worldB) && ContinuationStamp.CaptureLive(combat).StateText == liveB,
+                $"seed {seed}: search consumes no live hidden RNG in world B");
             Check(routeA.SequenceEqual(routeB), $"seed {seed}: identical chosen route across hidden states");
             identicalRoutes++;
             distinctRoutes.Add(string.Join('|', routeA));
@@ -214,10 +259,23 @@ internal static class FairObservationChecks
     }
 
     private static HiddenState Save(CombatState combat, Player player)
-        => new(
+    {
+        MonsterModel[] monsters = Monsters(combat);
+        Rng encounterRng = combat.Encounter!._rng ?? throw new InvalidOperationException("Encounter RNG is missing.");
+        return new(
             [.. player.PlayerCombatState!.DrawPile.Cards],
+            combat.RunState.Rng,
             combat.RunState.Rng.ToSerializable(),
-            player.PlayerRng.ToSerializable());
+            [.. monsters.Select(monster => monster._runRng!)],
+            [.. monsters.Select(monster => monster._rng!)],
+            [.. monsters.Select(monster => monster._rng!.ToSerializable())],
+            encounterRng,
+            encounterRng.ToSerializable(),
+            player.PlayerRng,
+            player.PlayerRng.ToSerializable(),
+            player.PlayerOdds,
+            JsonSerializer.Serialize(player.PlayerOdds.ToSerializable(), FieldJson));
+    }
 
     private static void Restore(CombatState combat, Player player, HiddenState hidden)
     {
@@ -226,8 +284,20 @@ internal static class FairObservationChecks
             throw new InvalidOperationException("Hidden state restore needs the same draw pile cards.");
         cards.Clear();
         cards.AddRange(hidden.DrawOrder);
-        combat.RunState.Rng.LoadFromSerializable(hidden.RunRng);
-        player.PlayerRng.LoadFromSerializable(hidden.PlayerRng);
+        RunRngField.SetValue(combat.RunState, hidden.RunRng);
+        hidden.RunRng.LoadFromSerializable(hidden.RunRngState);
+        MonsterModel[] monsters = Monsters(combat);
+        for (int index = 0; index < monsters.Length; index++)
+        {
+            monsters[index]._runRng = hidden.MonsterRunRngs[index];
+            monsters[index]._rng = hidden.MonsterRngs[index];
+            hidden.MonsterRngs[index].LoadFromSerializable(hidden.MonsterRngStates[index]);
+        }
+        combat.Encounter!._rng = hidden.EncounterRng;
+        hidden.EncounterRng.LoadFromSerializable(hidden.EncounterRngState);
+        player.PlayerRng = hidden.PlayerRng;
+        hidden.PlayerRng.LoadFromSerializable(hidden.PlayerRngState);
+        player.PlayerOdds = hidden.PlayerOdds;
     }
 
     private static void MutateHiddenState(CombatState combat, Player player)
@@ -242,10 +312,44 @@ internal static class FairObservationChecks
                 break;
         }
         ulong seed = 0xBADC0DEUL;
+        RunRngSet runRng = new("FAIRWORLDB" + combat.RunState.Rng.StringSeed);
         foreach (RunRngType type in Enum.GetValues<RunRngType>())
-            combat.RunState.Rng.GetRng(type).LoadFromSerializable(new Rng(seed++).ToSerializable());
-        player.PlayerRng.Rewards.LoadFromSerializable(new Rng(seed).ToSerializable());
+            runRng.GetRng(type).LoadFromSerializable(new Rng(seed++).ToSerializable());
+        RunRngField.SetValue(combat.RunState, runRng);
+        foreach (MonsterModel monster in Monsters(combat))
+        {
+            monster._runRng = runRng;
+            monster._rng = new Rng(seed++);
+        }
+        combat.Encounter!._rng = new Rng(seed++);
+        PlayerRngSet playerRng = new(player.PlayerRng.Seed ^ 0x5A5A5A5AUL);
+        foreach (PlayerRngType type in Enum.GetValues<PlayerRngType>())
+            playerRng.GetRng(type).LoadFromSerializable(new Rng(seed++).ToSerializable());
+        PlayerOddsSet odds = new(playerRng);
+        OddsCurrentValue.SetValue(odds.PotionReward, 0.9f);
+        OddsCurrentValue.SetValue(odds.CardRarity, odds.CardRarity.CurrentValue + 0.07f);
+        player.PlayerRng = playerRng;
+        player.PlayerOdds = odds;
     }
+
+    private static MonsterModel[] Monsters(CombatState combat)
+        => [.. combat.Enemies.Select(enemy => enemy.Monster).OfType<MonsterModel>()];
+
+    private static string Fingerprint(HiddenState hidden)
+        => JsonSerializer.Serialize(new
+        {
+            run = hidden.RunRng.ToSerializable(),
+            monsters = hidden.MonsterRngs.Select(rng => rng.ToSerializable()).ToArray(),
+            monsterRunRngs = hidden.MonsterRunRngs.Select(rng => rng.ToSerializable()).ToArray(),
+            encounter = hidden.EncounterRng.ToSerializable(),
+            player = hidden.PlayerRng.ToSerializable(),
+            odds = JsonSerializer.Serialize(hidden.PlayerOdds.ToSerializable(), FieldJson),
+        }, FieldJson);
+
+    private static bool SameRng(SerializableRng first, SerializableRng second)
+        => JsonSerializer.Serialize(first, FieldJson) == JsonSerializer.Serialize(second, FieldJson);
+
+    private static readonly JsonSerializerOptions FieldJson = new() { IncludeFields = true };
 
     private static string Multiset(IEnumerable<CardModel> cards)
         => string.Join(',', cards.Select(card => card.Id.Entry).Order(StringComparer.Ordinal));
