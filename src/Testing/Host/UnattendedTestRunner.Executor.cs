@@ -693,9 +693,9 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "ONLINE-PRESENCE-CONTRACT")
             {
                 if (!OnlinePresence.IsHeadless()) throw new InvalidOperationException("Presence fixture requires headless isolation.");
-                if (!new SolverSettingsData().OnlineStatisticsEnabled
-                    || SolverSettings.RoundTripForTesting(new SolverSettingsData { OnlineStatisticsEnabled = false }).OnlineStatisticsEnabled)
-                    throw new InvalidOperationException("Presence opt-out did not persist.");
+                if (new SolverSettingsData().OnlineStatisticsEnabled
+                    || !SolverSettings.RoundTripForTesting(new SolverSettingsData { OnlineStatisticsEnabled = true }).OnlineStatisticsEnabled)
+                    throw new InvalidOperationException("Presence opt-in did not persist.");
                 OnlinePresencePayload payload = OnlinePresence.Capture("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "test");
                 if (payload.Floor != combatState.RunState.TotalFloor || payload.Character.Length == 0 || payload.Encounter.Length == 0 || payload.HpLoss != null)
                     throw new InvalidOperationException("Presence scalar snapshot differs from the current combat.");

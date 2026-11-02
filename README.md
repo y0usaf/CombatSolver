@@ -1,5 +1,14 @@
 # 战斗路线求解器 / Combat Solver
 
+> **Fair fork.** This branch (`fair-mode`, manifest version `0.50.1+fair.1`, mod id still `CombatSolver`) plans only from what a player can see. Upstream copies the live game's RNG streams, ordered draw pile and enemy AI rolls into every search root; this fork keeps the visible state and resamples everything else at each root (`src/Runtime/FairObservation.cs`).
+>
+> - **Visible, kept:** hand, discard, exhaust, draw pile contents, draw pile positions the player saw being set (cards put on top/bottom, tracked by `src/Runtime/FairDrawPileKnowledge.cs` and forgotten on shuffles or random inserts), HP, block, energy, stars, gold, powers, orbs, relics and relic counters, potions, enemy displayed moves, enemy move history and the history-derived counters the AI uses.
+> - **Hidden, resampled from OS entropy:** all run RNG streams (shuffle, card/potion/orb generation, card selection, energy costs, targets, monster AI, niche, and the non-combat ones), the unknown part of the draw order, future enemy move rolls and the intent forecast.
+> - **Hidden, disabled:** potion reward forecast (reads the reward RNG and drop odds) and the Windows pre-combat forecast API.
+> - Deployment replans whenever an action rolled RNG or drew from the draw pile; turn-start route reuse is off because predicted hidden state never matches.
+> - Online statistics are off by default (new settings key `fairForkOnlineStatisticsEnabled`, so an old upstream opt-in is not inherited).
+> - Fairness check (Linux, no game window): build the mod and `tools/search/OfflineSearchHarness`, then run `OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS=1 dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll --character SILENT --encounter KNIGHTS_ELITE --milestone M1 --budget-ms 120000 --beam 20 --nodes 1500 --dop 1 --out .local/fair/check`. It mutates the live draw order and every RNG stream, asserts the sanitized roots are bit-identical for the same sampler seed, and asserts identical chosen routes across hidden states for many sampler seeds.
+
 Combat Solver 是一个面向《杀戮尖塔 2》单人模式的战斗路线求解器。进入战斗后，它会在后台模拟当前手牌、牌堆、敌人行动、药水、遗物、选牌和跨回合状态，并在预算范围内给出推荐路线、预计战损与关键行动。
 
 玩家可以只查看建议，也可以让求解器执行当前回合，或连续接管整场战斗。搜索不会修改游戏 RNG，也不会在后台操作真实战斗状态。
@@ -24,7 +33,7 @@ Combat Solver 是一个面向《杀戮尖塔 2》单人模式的战斗路线求�
 - **可调搜索预算**：提供低、中、高、极高和自定义配置，并支持单线程或 `2-16` 路并行搜索。
 - **界面与通知**：默认使用深色界面，可切换浅色模式并调整覆盖层透明度；搜索结束可按设置发送 Windows 系统通知和提示音。
 - **问题反馈**：可以从设置中直接上传问题包，也可以导出到本地后手动提交。问题描述会附带本场自动分类，便于定位更优路线、计划外重算、执行中止和搜索失败。
-- **在线统计**：默认每 30 秒向作者发送随机安装标识、昵称、角色、楼层、当前战斗、预计战损和版本，可在设置中关闭；不上传完整路线，离线后清除昵称和战斗详情，保留历史人数及安装标识对应的累计在线时长。详见 [统计字段与关闭方式](docs/ONLINE_STATISTICS.md)。
+- **在线统计**（公平分支默认关闭）：开启后每 30 秒向作者发送随机安装标识、昵称、角色、楼层、当前战斗、预计战损和版本，可在设置中关闭；不上传完整路线，离线后清除昵称和战斗详情，保留历史人数及安装标识对应的累计在线时长。详见 [统计字段与关闭方式](docs/ONLINE_STATISTICS.md)。
 
 ## 工作方式
 
