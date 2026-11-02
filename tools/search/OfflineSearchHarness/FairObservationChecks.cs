@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Rngs;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Saves;
@@ -142,6 +143,27 @@ internal static class FairObservationChecks
         HashSet<string> middleOrders = [.. Enumerable.Range(1, 16).Select(seed => string.Join(',',
             Capture(combat, player, (ulong)seed).DrawPile.Skip(1).SkipLast(1).Select(card => card.Id.Entry)))];
 
+        FairObservation.RevealCursor beforeDraw = FairObservation.CaptureReveal(combat, player);
+        loop.RunUntilCompleted(
+            CardPileCmd.Draw(new BlockingPlayerChoiceContext(), player),
+            TimeSpan.FromSeconds(30),
+            "CardPileCmd.Draw");
+        check(state.Hand.Cards.Contains(top), "native draw takes the known top card");
+        check(FairDrawPileKnowledge.Capture(drawPile) == new DrawPileKnowledge(0, 1), "drawing consumes the known top position");
+        string? drawReveal = FairObservation.DescribeReveal(beforeDraw, combat, player);
+        check(drawReveal != null && drawReveal.EndsWith("draw_pile_left=1", StringComparison.Ordinal),
+            "a draw is reported as revealed information");
+
+        Add(loop, state.Hand.Cards[0], CardPilePosition.Top);
+        check(FairDrawPileKnowledge.Capture(drawPile) == new DrawPileKnowledge(1, 1), "second top insertion is known");
+        loop.RunUntilCompleted(
+            CardPileCmd.Shuffle(new BlockingPlayerChoiceContext(), player),
+            TimeSpan.FromSeconds(60),
+            "CardPileCmd.Shuffle");
+        check(FairDrawPileKnowledge.Capture(drawPile) == default, "a reshuffle forgets every known position");
+
+        Add(loop, state.Hand.Cards[0], CardPilePosition.Top);
+        check(FairDrawPileKnowledge.Capture(drawPile) == new DrawPileKnowledge(1, 0), "top insertion after reshuffle is known");
         CardModel random = state.Hand.Cards[0];
         FairObservation.RevealCursor beforeRandom = FairObservation.CaptureReveal(combat, player);
         Add(loop, random, CardPilePosition.Random);
@@ -149,7 +171,7 @@ internal static class FairObservationChecks
         string? revealed = FairObservation.DescribeReveal(beforeRandom, combat, player);
         check(revealed != null && revealed.Contains("Shuffle", StringComparison.Ordinal),
             "random insertion is reported as revealed information");
-        return new { middleOrdersObserved = middleOrders.Count, randomInsertReveal = revealed };
+        return new { middleOrdersObserved = middleOrders.Count, drawReveal, randomInsertReveal = revealed };
     }
 
     private static void Add(MainLoopContext loop, CardModel card, CardPilePosition position)
