@@ -25,6 +25,7 @@ internal enum SearchReason
     FullAuto,
     DeploymentDrift,
     PlanExhausted,
+    InformationRevealed,
 }
 
 internal enum ReplanCause
@@ -36,6 +37,7 @@ internal enum ReplanCause
     DeploymentDrift,
     PlanExhausted,
     ExplicitRequest,
+    InformationRevealed,
 }
 
 internal static partial class SolverController
@@ -1034,6 +1036,7 @@ internal static partial class SolverController
             SearchReason.AutoTurnStart => ReplanCause.InitialSearch,
             SearchReason.DeploymentDrift => ReplanCause.DeploymentDrift,
             SearchReason.PlanExhausted => ReplanCause.PlanExhausted,
+            SearchReason.InformationRevealed => ReplanCause.InformationRevealed,
             _ => ReplanCause.ExplicitRequest,
         };
         SearchBoundaryReason? previousBoundary = _combat.ContinuationSource?.BoundaryReason;
@@ -1061,7 +1064,7 @@ internal static partial class SolverController
             BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(state);
             setupStage = "live_stamp";
             LiveCombatStamp stamp = LiveCombatStamp.Capture(state);
-            if (reason != SearchReason.AutoTurnStart
+            if (reason is not (SearchReason.AutoTurnStart or SearchReason.InformationRevealed)
                 && _combat.LatestResult is { } previousResult
                 && _combat.LatestStamp is { } previousStamp
                 && previousStamp != stamp)
@@ -1075,7 +1078,9 @@ internal static partial class SolverController
                     CombatBugReportExporter.LastCompletedSearchRootId);
             }
             setupStage = "continuation";
-            ContinuationStamp? continuationStamp = reason == SearchReason.AutoTurnStart && _combat.ContinuationSource != null
+            ContinuationStamp? continuationStamp = reason == SearchReason.AutoTurnStart
+                && _combat.ContinuationSource != null
+                && !FairObservation.Enabled
                 ? ContinuationStamp.CaptureLive(state)
                 : null;
             if (continuationStamp != null
@@ -2490,6 +2495,7 @@ internal static partial class SolverController
             ReplanCause.DeploymentDrift => "deployment_drift",
             ReplanCause.PlanExhausted => "plan_exhausted",
             ReplanCause.ExplicitRequest => "explicit_request",
+            ReplanCause.InformationRevealed => "information_revealed",
             _ => throw new ArgumentOutOfRangeException(nameof(cause), cause, null),
         };
 
@@ -2908,6 +2914,7 @@ internal static partial class SolverController
                     throw new InvalidOperationException("部署途中已不再是原玩家回合。");
 
                 Player player = LocalContext.GetMe(state)!;
+                FairObservation.RevealCursor revealCursor = FairObservation.CaptureReveal(state, player);
                 Creature? target = state.GetCreature(action.TargetCombatId);
                 string actionTitle = action.Kind == PlanActionKind.UsePotion
                     ? SolverUiModelNames.Potion(action.PotionId, action.PotionTitle)
@@ -3052,6 +3059,22 @@ internal static partial class SolverController
                             $"{enemy.Monster?.Id.Entry ?? "null"}:{enemy.CurrentHp}/{enemy.Block}"))} " +
                         $"powers={string.Join(',', player.Creature.Powers.Select(power =>
                             $"{power.Id.Entry}:{power.Amount}/{power.AmountOnTurnStart}"))}");
+                }
+                if (CombatManager.Instance.IsInProgress
+                    && IsSamePlayableTurn(state, turn)
+                    && FairObservation.DescribeReveal(revealCursor, state, player) is { } revealed)
+                {
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] DEPLOY_REPLAN turn={turn} reason=information_revealed " +
+                        $"action_index={actionIndex} {revealed}");
+                    _combat.ContinuationSource = null;
+                    CompleteDeployment(deployment);
+                    RequestSearch(
+                        host,
+                        state,
+                        SearchReason.InformationRevealed,
+                        deployWhenReady: !_combat.FullAutoEnabled);
+                    return;
                 }
                 SolverOverlay.ShowDeploymentStep(turn, actionIndex + 1, actions.Count, null);
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);

@@ -88,6 +88,13 @@ public static class Entry
         patcher.RegisterPatch<RitsuEmptyStarCostFastPathPatch>();
         patcher.RegisterPatch<RitsuEmptyCanPlayFastPathPatch>();
         patcher.RegisterPatch<SimulationCardPileLookupPatch>();
+        patcher.RegisterPatch<FairDrawPileAddRequestPatch>();
+        patcher.RegisterPatch<FairDrawPileShufflePatch>();
+        patcher.RegisterPatch<FairDrawPileInsertPatch>();
+        patcher.RegisterPatch<FairDrawPileRemovePatch>();
+        patcher.RegisterPatch<FairDrawPileMoveToTopPatch>();
+        patcher.RegisterPatch<FairDrawPileMoveToBottomPatch>();
+        patcher.RegisterPatch<FairDrawPileResetPatch>();
         patcher.RegisterPatch<BaseLibCloneConcurrencyPatch>();
         patcher.RegisterPatch<BaseLibDynamicVarCloneMetadataPatch>();
         patcher.RegisterPatch<RitsuDynamicVarCloneMetadataPatch>();

@@ -108,7 +108,7 @@ internal sealed class SolverCombatSession
 
     internal PrimaryIncumbentTable AcquirePrimaryIncumbents(
         CombatRootSnapshot root, SearchPolicySnapshot policy, BattleDamageSnapshot damage)
-        => AcquirePrimaryIncumbents(root.ContinuationStamp.StateText + "\n" +
+        => AcquirePrimaryIncumbents(root.ContinuationStamp.StateText + "\n" + root.FairSamplerSeed + "\n" +
             System.Text.Json.JsonSerializer.Serialize(new
             {
                 damage, policy.PotionPolicy, policy.PotionStrategy, policy.TheftPolicy,

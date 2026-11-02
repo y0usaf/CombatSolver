@@ -29,6 +29,7 @@ internal sealed class CombatRootSnapshot
     public IntentForecast Forecast { get; }
     public LiveCombatStamp LiveStamp { get; }
     public ContinuationStamp ContinuationStamp { get; }
+    internal ulong FairSamplerSeed { get; private init; }
     public int PlayerCount { get; }
     public int StartTurnNumber { get; }
     public int TotalFloor { get; }
@@ -170,7 +171,10 @@ internal sealed class CombatRootSnapshot
         PotionRewardOutlook = potionRewardOutlook;
     }
 
-    public static CombatRootSnapshot Capture(CombatState state, bool predictPotionReward = false)
+    public static CombatRootSnapshot Capture(
+        CombatState state,
+        bool predictPotionReward = false,
+        FairObservation? fair = null)
     {
         if (!NGame.IsMainThread())
             throw new InvalidOperationException("Combat root snapshot must be captured on the main thread.");
@@ -203,7 +207,11 @@ internal sealed class CombatRootSnapshot
                     .Where(candidate => candidate.PlayerCombatState != null)
                     .SelectMany(candidate => candidate.PlayerCombatState!.AllCards));
         }
-        IntentForecast forecast = IntentForecaster.Build(state, SolverWeights.SetupValueHorizonTurns);
+        fair ??= FairObservation.FromEntropy();
+        IntentForecast forecast = IntentForecaster.Build(
+            state,
+            SolverWeights.SetupValueHorizonTurns,
+            fair.CreateMonsterAiRng());
 
         SimulatedCombatState simulatedCombat = new(state, liveCombatHookListeners);
         CombatPredictionSimulator simulator = new(simulatedCombat);
@@ -213,6 +221,7 @@ internal sealed class CombatRootSnapshot
             playerState.TurnNumber,
             forecast,
             playerState.TurnNumber);
+        fair.ApplyToRoot(simulator);
         bool hasUnusedCardReplayAllocator = simulatedCombat.RelicsOf(player)
             .OfType<ThrowingAxe>()
             .Any(relic => !relic.IsMelted && !relic._usedThisCombat);
@@ -221,7 +230,7 @@ internal sealed class CombatRootSnapshot
             .Any(relic => !relic.IsMelted);
         PostCombatRelicHealProfile postCombatRelicHeal = CapturePostCombatRelicHeal(
             simulatedCombat.RelicsOf(player));
-        PotionRewardOutlook potionRewardOutlook = predictPotionReward
+        PotionRewardOutlook potionRewardOutlook = predictPotionReward && !FairObservation.Enabled
             ? PotionRewardOutlook.Capture(player, state, simulatedCombat.RelicsOf(player))
             : PotionRewardOutlook.None;
         SearchablePotionSlotSnapshot[] searchablePotions = player.PotionSlots
@@ -321,7 +330,10 @@ internal sealed class CombatRootSnapshot
             hasUnusedCardReplayAllocator,
             hasRenewablePotionShapedRock,
             postCombatRelicHeal,
-            potionRewardOutlook);
+            potionRewardOutlook)
+        {
+            FairSamplerSeed = fair.Seed,
+        };
     }
 
     private static bool HasHealingVariables(DynamicVarSet variables)

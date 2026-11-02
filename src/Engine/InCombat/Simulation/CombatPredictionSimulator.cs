@@ -23,7 +23,7 @@ internal sealed partial class CombatPredictionSimulator
 
     public CombatPredictionState State { get; }
 
-    public CombatPredictionRngSet Rng { get; }
+    public CombatPredictionRngSet Rng { get; private set; }
 
     public PredictionStateStore StateStore { get; }
 
@@ -170,6 +170,12 @@ internal sealed partial class CombatPredictionSimulator
             TerminalStamp,
             ShuffleEventCount,
             ActionRelicTriggers);
+    }
+
+    internal void ReplaceRootRng(CombatPredictionRngSet rng)
+    {
+        AssertForkable();
+        Rng = rng;
     }
 
     internal void AssertForkable()

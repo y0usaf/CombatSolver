@@ -30,6 +30,13 @@ internal static class ModRuntime
         "CombatSolver.RitsuBaseLibTargetTypeResolutionPatch",
         "CombatSolver.RitsuBaseLibTargetTypeEvidencePatch",
         "CombatSolver.PowerAmountComparisonPatch",
+        "CombatSolver.FairDrawPileAddRequestPatch",
+        "CombatSolver.FairDrawPileShufflePatch",
+        "CombatSolver.FairDrawPileInsertPatch",
+        "CombatSolver.FairDrawPileRemovePatch",
+        "CombatSolver.FairDrawPileMoveToTopPatch",
+        "CombatSolver.FairDrawPileMoveToBottomPatch",
+        "CombatSolver.FairDrawPileResetPatch",
     ];
 
     public static List<string> PatchLog { get; } = [];
@@ -282,7 +289,8 @@ internal static class ModRuntime
         HarnessLog.Trace("probe.hook_listeners");
         var listeners = state.IterateHookListeners().ToArray();
         HarnessLog.Trace($"probe.intent_forecast listeners={listeners.Length}");
-        _ = CombatSolver.IntentForecaster.Build(state, SolverWeights.SetupValueHorizonTurns);
+        _ = CombatSolver.IntentForecaster.Build(
+            state, SolverWeights.SetupValueHorizonTurns, FairObservation.FromEntropy().CreateMonsterAiRng());
         HarnessLog.Trace("probe.simulated_combat_state");
         _ = new SimulatedCombatState(state, listeners);
         HarnessLog.Trace("probe.done");
@@ -339,7 +347,7 @@ internal static class ModRuntime
     /// <c>SearchRequestWorkTotals</c> 回填 Total* 字段，profile 的软时间预算换成 <c>--budget-ms</c>。
     /// 组合成员、协调器的审计通道都不参与，所以它量的是「一棵树自己」的搜索量。
     /// </summary>
-    private static SolverResult SolveEvaluate(
+    internal static SolverResult SolveEvaluate(
         CombatRootSnapshot root,
         SolverDisplayNames names,
         BattleDamageSnapshot damage,

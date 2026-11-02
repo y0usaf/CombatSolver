@@ -54,11 +54,10 @@ internal static class IntentForecaster
             : 0;
     }
 
-    public static IntentForecast Build(CombatState state, int roundCount)
+    public static IntentForecast Build(CombatState state, int roundCount, Rng rng)
     {
         List<Creature> enemies = state.Enemies.Where(enemy => enemy.Monster != null).ToList();
         List<Cursor> cursors = enemies.Select(enemy => new Cursor(enemy.Monster!)).ToList();
-        Rng rng = new(state.RunState.Rng.MonsterAi.ToSerializable());
         List<IReadOnlyList<ForecastMove>> rounds = [];
         bool unsupported = false;
         bool exact = true;

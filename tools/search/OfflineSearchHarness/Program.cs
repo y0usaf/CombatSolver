@@ -150,6 +150,8 @@ internal static class Program
                 HistoryCounterChecks.Run(combat!, options.OutputDirectory);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_INFUSED_CORE_CHECKS") == "1")
                 InfusedCoreChecks.Run(combat!, options.OutputDirectory);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS") == "1")
+                FairObservationChecks.Run(combat!, options, loop);
             payload["budget"] = DescribeBudget(options);
             payload["root"] = OfflineCombat.DescribeRoot(combat!);
             string diagnostics = ModRuntime.DescribeStart(combat!);

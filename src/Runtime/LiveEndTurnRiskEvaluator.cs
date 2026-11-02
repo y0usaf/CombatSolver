@@ -60,6 +60,7 @@ internal static class LiveEndTurnRiskEvaluator
         IReadOnlyList<PlanCardChoice> endTurnChoices)
     {
         CombatPredictionSimulator simulator = new(combat);
+        FairObservation.FromEntropy().ApplyToRoot(simulator);
         SimCreatureState simulatedPlayer = simulator.State.GetCreature(player.Creature);
         int hpBefore = simulatedPlayer.CurrentHp;
         HashSet<uint> processedEnemyDeaths = [];

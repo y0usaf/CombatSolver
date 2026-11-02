@@ -348,7 +348,7 @@ internal sealed record ContinuationStamp(string StateText)
             AppendCard(text, card.Preview, discoverUnregisteredBaseLibModifiers: false);
     }
 
-    private static void AppendCard(
+    internal static void AppendCard(
         StringBuilder text,
         CardModel card,
         bool discoverUnregisteredBaseLibModifiers)

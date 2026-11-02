@@ -71,6 +71,16 @@ internal sealed class SimCardPile
         return true;
     }
 
+    internal void Reorder(IReadOnlyList<PredictedCard> ordered)
+    {
+        if (ordered.Count != _cards.Count
+            || !new HashSet<PredictedCard>(ordered, ReferenceEqualityComparer.Instance).SetEquals(_cards))
+            throw new InvalidOperationException("Pile reorder must keep exactly the same cards.");
+        InvalidateFingerprint();
+        _cards.Clear();
+        _cards.AddRange(ordered);
+    }
+
     public void Clear()
     {
         if (_cards.Count == 0)

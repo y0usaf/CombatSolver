@@ -62,7 +62,7 @@ internal sealed partial class SimulatedCombatState
     private readonly IReadOnlyDictionary<Player, string> _playerNames;
     private readonly IReadOnlySet<CardModel> _rootFloatingCards;
     private readonly IReadOnlySet<Creature> _rootDeadCreatures;
-    private readonly SerializableRunRngSet _runRngSnapshot;
+    private SerializableRunRngSet _runRngSnapshot;
     private readonly int _currentActIndex;
     private readonly RoomType? _currentRoomType;
     private readonly MapCoord? _currentMapCoord;
@@ -1642,6 +1642,14 @@ internal sealed partial class SimulatedCombatState
 
     CombatPredictionRngSet ICombatPredictionRunSnapshot.CreatePredictionRngSet()
         => CombatPredictionRngSet.From(RunRngSet.FromSave(_runRngSnapshot));
+
+    internal void ResampleRootRandomness(CombatPredictionSimulator simulator, SerializableRunRngSet sampled)
+    {
+        if (!_rootMaterialized || !ReferenceEquals(simulator.State.CombatState, this))
+            throw new InvalidOperationException("Only a materialized root can replace its random streams.");
+        _runRngSnapshot = sampled;
+        simulator.ReplaceRootRng(CombatPredictionRngSet.From(RunRngSet.FromSave(sampled)));
+    }
 
     private MirroredHookListenerLayout? _mirroredHookLayout;
     private MirroredHookListenerLayout? _mirroredRunHookLayout;

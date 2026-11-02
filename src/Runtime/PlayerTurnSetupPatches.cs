@@ -1007,10 +1007,13 @@ internal static class PlayerTurnSetupCoordinator
                 ?? throw new InvalidOperationException("回合准备选牌搜索缺少 Play 阶段状态戳。");
             if (expected != actual)
             {
-                SolverController.RecordTurnSetupStateMismatch(
-                    active.Combat,
-                    active.LifecycleGeneration,
-                    expected.DescribeFirstDifference(actual));
+                if (!FairObservation.Enabled)
+                {
+                    SolverController.RecordTurnSetupStateMismatch(
+                        active.Combat,
+                        active.LifecycleGeneration,
+                        expected.DescribeFirstDifference(actual));
+                }
                 Entry.Logger.Warn(
                     $"[CombatSolver/Test] TURN_SETUP_STATE_MISMATCH turn={player.PlayerCombatState!.TurnNumber} " +
                     expected.DescribeFirstDifference(actual));

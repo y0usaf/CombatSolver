@@ -23,7 +23,8 @@ public static class PreCombatForecastApi
     private static readonly ConcurrentDictionary<string, Task<PreCombatForecastResult>> Active = new();
     private static readonly ConcurrentDictionary<string, PreCombatForecastResult> Completed = new();
 
-    public static bool IsAvailable => OperatingSystem.IsWindows()
+    public static bool IsAvailable => !FairObservation.Enabled
+                                      && OperatingSystem.IsWindows()
                                       && Entry.Enabled
                                       && !Entry.IsPreCombatWorker;
 
