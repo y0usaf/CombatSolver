@@ -18,6 +18,25 @@ internal readonly record struct LiveEndTurnRiskProjection(
 
 internal static class LiveEndTurnRiskEvaluator
 {
+    public static LiveEndTurnRiskProjection EvaluateFair(
+        CombatState state,
+        IReadOnlyList<PlanCardChoice>? turnStartChoices,
+        int samples)
+    {
+        LiveEndTurnRiskProjection[] projections = Enumerable.Range(0, Math.Max(1, samples))
+            .Select(_ => Evaluate(state, turnStartChoices))
+            .ToArray();
+        int deaths = projections.Count(projection => projection.PlayerDead);
+        int hpBefore = projections[0].HpBefore;
+        int hpLost = (int)Math.Ceiling(projections.Average(projection => projection.HpLost));
+        return new LiveEndTurnRiskProjection(
+            hpBefore,
+            hpBefore - hpLost,
+            hpLost,
+            deaths * 2 > projections.Length,
+            $"fair_samples={projections.Length} deaths={deaths} {projections[0].MonsterMoves}");
+    }
+
     public static LiveEndTurnRiskProjection Evaluate(
         CombatState state,
         IReadOnlyList<PlanCardChoice>? turnStartChoices)
