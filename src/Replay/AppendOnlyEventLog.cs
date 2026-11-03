@@ -113,6 +113,8 @@ internal sealed class AppendOnlyEventLog<T> : IDisposable
                     file.Write(bytes);
                     file.WriteByte((byte)'\n');
                     count++;
+                    if (!_messages.Reader.TryPeek(out _))
+                        file.Flush();
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or NotSupportedException)
                 { SetError("event_write_failed:" + error.Message); }
