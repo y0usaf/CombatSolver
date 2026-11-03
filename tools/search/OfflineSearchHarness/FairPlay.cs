@@ -139,6 +139,7 @@ internal static class FairPlay
                 Task<FairDecision?> decide = Task.Run(() => FairDecisionPlanner.Decide(
                     roots,
                     (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, policy, prefix, CancellationToken.None),
+                    (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, policy, action, CancellationToken.None),
                     settings,
                     CancellationToken.None));
                 loop.RunUntilCompleted(decide, TimeSpan.FromMinutes(10), "fair v2 decision");

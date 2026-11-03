@@ -284,6 +284,7 @@ internal static class FairObservationChecks
         Task<FairDecision?> task = Task.Run(() => FairDecisionPlanner.Decide(
             roots,
             (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, isolated, prefix, CancellationToken.None),
+            (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, isolated, action, CancellationToken.None),
             settings,
             CancellationToken.None));
         loop.RunUntilCompleted(task, TimeSpan.FromMinutes(5), "multi-sample decision");

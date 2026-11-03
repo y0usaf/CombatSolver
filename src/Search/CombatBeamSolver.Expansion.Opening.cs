@@ -1138,6 +1138,26 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
+    internal IReadOnlyList<PlanAction> BuildOpeningChoiceVariants(Func<PlanAction, bool> sameAction)
+    {
+        SimulationSnapshot rootSnapshot = Replay([]);
+        List<SearchNode> children = [];
+        try
+        {
+            children.AddRange(ExpandOpeningSeed(CreateOpeningSearchSeed(rootSnapshot)));
+            return children
+                .Where(child => child.Action != null && sameAction(child.Action))
+                .Select(child => child.Action!)
+                .ToArray();
+        }
+        finally
+        {
+            foreach (SearchNode child in children)
+                child.Snapshot.ReleaseSimulator();
+            rootSnapshot.ReleaseSimulator();
+        }
+    }
+
     internal PlanAction? BuildOpeningFullRedrawPotionAction(PlanAction selectedPotionAction)
     {
         SimulationSnapshot rootSnapshot = Replay([]);

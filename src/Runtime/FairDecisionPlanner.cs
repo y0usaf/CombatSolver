@@ -58,6 +58,39 @@ internal static class FairDecisionPlanner
             searchProfile: isolatedPolicy.Profile,
             fixedPrefixActions: prefix).Solve();
 
+    public static IReadOnlyList<PlanAction> RevealedVariants(
+        CombatRootSnapshot root,
+        SolverDisplayNames names,
+        BattleDamageSnapshot damage,
+        SearchPolicySnapshot isolatedPolicy,
+        PlanAction action,
+        CancellationToken token)
+    {
+        string unchosen = UnchosenKey(action);
+        return new CombatBeamSolver(
+                root,
+                names,
+                damage,
+                isolatedPolicy with { RequestWorkTotals = new SearchRequestWorkTotals() },
+                token,
+                searchProfile: isolatedPolicy.Profile)
+            .BuildOpeningChoiceVariants(variant => string.Equals(UnchosenKey(variant), unchosen, StringComparison.Ordinal));
+    }
+
+    private static string UnchosenKey(PlanAction action)
+        => Key(action with { Choice = null, NestedChoices = null, NestedChoicesBeforePrimary = 0 });
+
+    private static bool HasRevealedChoice(PlanAction action)
+        => action.GetActionChoicesInExecutionOrder().Any(choice => choice.Effect == PlanChoiceEffect.GenerateToHand);
+
+    public static string CandidateKey(PlanAction action)
+        => HasRevealedChoice(action) ? UnchosenKey(action) : Key(action);
+
+    private static void LogInvalid(int sample, string candidate, InvalidOperationException ex)
+        => Entry.Logger.Info(
+            $"[CombatSolver/Fair] FAIR_CANDIDATE_INVALID sample={sample} candidate={candidate} " +
+            $"error={ex.GetType().Name}: {ex.Message.ReplaceLineEndings(" ")}");
+
     public static double Utility(SolverResult result, FairPlannerSettings settings)
     {
         SolverSnapshot snapshot = result.Snapshot;
@@ -81,6 +114,7 @@ internal static class FairDecisionPlanner
     public static FairDecision? Decide(
         IReadOnlyList<CombatRootSnapshot> samples,
         Func<CombatRootSnapshot, IReadOnlyList<PlanAction>?, SolverResult> solve,
+        Func<CombatRootSnapshot, PlanAction, IReadOnlyList<PlanAction>> revealedVariants,
         FairPlannerSettings settings,
         CancellationToken token)
     {
@@ -91,7 +125,7 @@ internal static class FairDecisionPlanner
 
         string?[] ownKeys = own.Select(result => result.BestNode.Actions.Count == 0
             ? null
-            : Key(result.BestNode.Actions[0])).ToArray();
+            : CandidateKey(result.BestNode.Actions[0])).ToArray();
         var proposals = ownKeys
             .Select((key, sample) => (key, sample))
             .Where(item => item.key != null)
@@ -116,19 +150,51 @@ internal static class FairDecisionPlanner
                 {
                     if (string.Equals(ownKeys[sample], proposals[candidate].Key, StringComparison.Ordinal))
                         continue;
-                    extra[sample]++;
+                    PlanAction action = proposals[candidate].Action;
+                    bool resolved = !HasRevealedChoice(action)
+                        && TryEvaluate(sample, candidate, action, revealedFallback: true);
+                    if (resolved)
+                        continue;
+                    IReadOnlyList<PlanAction> variants;
                     try
                     {
-                        SolverResult result = solve(samples[sample], [proposals[candidate].Action]);
-                        routes[candidate, sample] = result;
-                        utilities[candidate, sample] = Utility(result, settings);
+                        variants = revealedVariants(samples[sample], action);
                     }
-                    catch (InvalidOperationException) when (!token.IsCancellationRequested)
+                    catch (InvalidOperationException ex) when (!token.IsCancellationRequested)
                     {
+                        LogInvalid(sample, proposals[candidate].Key, ex);
+                        continue;
                     }
+                    foreach (PlanAction variant in variants)
+                        TryEvaluate(sample, candidate, variant, revealedFallback: false);
                 }
             });
             solves += extra.Sum();
+
+            bool TryEvaluate(int sample, int candidate, PlanAction action, bool revealedFallback)
+            {
+                extra[sample]++;
+                try
+                {
+                    SolverResult result = solve(samples[sample], [action]);
+                    double utility = Utility(result, settings);
+                    if (utilities[candidate, sample] is not { } known || utility > known)
+                    {
+                        routes[candidate, sample] = result;
+                        utilities[candidate, sample] = utility;
+                    }
+                    return true;
+                }
+                catch (InvalidPlannedChoiceBranchException) when (revealedFallback && !token.IsCancellationRequested)
+                {
+                    return false;
+                }
+                catch (InvalidOperationException ex) when (!token.IsCancellationRequested)
+                {
+                    LogInvalid(sample, proposals[candidate].Key, ex);
+                    return true;
+                }
+            }
         }
         for (int sample = 0; sample < sampleCount; sample++)
         {
@@ -161,8 +227,9 @@ internal static class FairDecisionPlanner
                 values.Length == 0 ? 1 : (double)deaths / values.Length,
                 deviation));
         }
+        int quorum = Math.Max(1, (sampleCount * 3 + 3) / 4);
         FairCandidateScore best = scores
-            .Where(score => score.ValidSamples == sampleCount)
+            .Where(score => score.ValidSamples >= quorum)
             .DefaultIfEmpty(scores.MaxBy(score => score.ValidSamples)!)
             .OrderByDescending(score => Math.Round(score.MeanUtility, 6))
             .ThenBy(score => score.DeathRate)

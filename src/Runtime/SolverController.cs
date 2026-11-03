@@ -2533,6 +2533,7 @@ internal static partial class SolverController
         FairDecision? decision = FairDecisionPlanner.Decide(
             samples,
             (root, prefix) => FairDecisionPlanner.Solve(root, displayNames, battleDamage, isolated, prefix, token),
+            (root, action) => FairDecisionPlanner.RevealedVariants(root, displayNames, battleDamage, isolated, action, token),
             plannerSettings,
             token);
         SolverResult route = decision?.Route
