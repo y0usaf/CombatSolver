@@ -9,7 +9,9 @@ internal static class RuntimeGcStartupConfig
 {
     internal const string ProfileKey = "CombatSolver.RuntimeProfile";
     internal const string PreviousKey = "CombatSolver.PreviousServerGc";
+    internal const string PreviousAdaptationKey = "CombatSolver.PreviousDynamicAdaptationMode";
     private const string ServerKey = "System.GC.Server";
+    private const string AdaptationKey = "System.GC.DynamicAdaptationMode";
 
     internal static string Apply(string path, bool enabled)
     {
@@ -44,11 +46,33 @@ internal static class RuntimeGcStartupConfig
             if (properties[ServerKey] is not JsonValue current
                 || !current.TryGetValue<bool>(out bool server) || !server)
                 throw new InvalidDataException("Owned GC configuration was changed externally.");
-            if (enabled) return "AlreadyConfigured";
-            if (previous == "absent") properties.Remove(ServerKey);
-            else properties[ServerKey] = previous == "true";
-            properties.Remove(ProfileKey);
-            properties.Remove(PreviousKey);
+            string? previousAdaptation = null;
+            if (properties.ContainsKey(PreviousAdaptationKey))
+            {
+                if (properties[PreviousAdaptationKey] is not JsonValue savedAdaptation
+                    || !savedAdaptation.TryGetValue(out previousAdaptation)
+                    || (previousAdaptation != "absent" && !int.TryParse(previousAdaptation, out _)))
+                    throw new InvalidDataException("Unknown or incomplete GC configuration ownership.");
+                if (properties[AdaptationKey] is not JsonValue adaptation
+                    || !adaptation.TryGetValue(out int mode) || mode != 0)
+                    throw new InvalidDataException("Owned GC configuration was changed externally.");
+                if (enabled) return "AlreadyConfigured";
+            }
+            else if (enabled)
+            {
+                properties[PreviousAdaptationKey] = PreviousAdaptation(properties);
+                properties[AdaptationKey] = 0;
+            }
+            if (!enabled)
+            {
+                if (previous == "absent") properties.Remove(ServerKey);
+                else properties[ServerKey] = previous == "true";
+                if (previousAdaptation == "absent") properties.Remove(AdaptationKey);
+                else if (previousAdaptation != null) properties[AdaptationKey] = int.Parse(previousAdaptation);
+                properties.Remove(ProfileKey);
+                properties.Remove(PreviousKey);
+                properties.Remove(PreviousAdaptationKey);
+            }
         }
         else
         {
@@ -61,7 +85,9 @@ internal static class RuntimeGcStartupConfig
                     throw new InvalidDataException("Invalid System.GC.Server value.");
                 previous = server ? "true" : "false";
             }
+            properties[PreviousAdaptationKey] = PreviousAdaptation(properties);
             properties[ServerKey] = true;
+            properties[AdaptationKey] = 0;
             properties[ProfileKey] = RuntimeGcProfile.ServerGenerational;
             properties[PreviousKey] = previous;
         }
@@ -86,6 +112,15 @@ internal static class RuntimeGcStartupConfig
         {
             if (File.Exists(temporary)) File.Delete(temporary);
         }
-        return enabled ? "Prepared" : "Restored";
+        return enabled ? owned ? "Upgraded" : "Prepared" : "Restored";
+    }
+
+    private static string PreviousAdaptation(JsonObject properties)
+    {
+        if (!properties.ContainsKey(AdaptationKey))
+            return "absent";
+        if (properties[AdaptationKey] is not JsonValue current || !current.TryGetValue(out int mode))
+            throw new InvalidDataException("Invalid System.GC.DynamicAdaptationMode value.");
+        return mode.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 }

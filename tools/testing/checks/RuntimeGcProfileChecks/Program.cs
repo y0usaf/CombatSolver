@@ -86,6 +86,8 @@ try
             ["unrelatedRoot"] = "keep" };
         File.WriteAllText(config, document.ToJsonString());
         Check(RuntimeGcStartupConfig.Apply(config, true) == "Prepared", "Prepare mode.");
+        Check(JsonNode.Parse(File.ReadAllText(config))!["runtimeOptions"]!["configProperties"]!["System.GC.DynamicAdaptationMode"]!
+            .GetValue<int>() == 0, "Prepare mode turns off dynamic heap-count adaptation.");
         byte[] prepared = File.ReadAllBytes(config);
         Check(RuntimeGcStartupConfig.Apply(config, true) == "AlreadyConfigured"
             && prepared.SequenceEqual(File.ReadAllBytes(config)), "Repeated launch must not rewrite config.");
@@ -103,6 +105,14 @@ try
         catch (Exception ex) when (ex is InvalidDataException or JsonException) { rejected = true; }
         Check(rejected && File.ReadAllText(config) == invalid, "Reject malformed or foreign ownership without writing.");
     }
+    File.WriteAllText(config, "{\"runtimeOptions\":{\"configProperties\":{\"System.GC.Server\":true,"
+        + "\"CombatSolver.RuntimeProfile\":\"server-generational\",\"CombatSolver.PreviousServerGc\":\"absent\"}}}");
+    Check(RuntimeGcStartupConfig.Apply(config, true) == "Upgraded"
+        && RuntimeGcStartupConfig.Apply(config, true) == "AlreadyConfigured"
+        && RuntimeGcStartupConfig.Apply(config, false) == "Restored"
+        && JsonNode.DeepEquals(JsonNode.Parse("{\"runtimeOptions\":{\"configProperties\":{}}}"),
+            JsonNode.Parse(File.ReadAllText(config))),
+        "A profile prepared by an older build gains and later restores the adaptation setting.");
     File.WriteAllText(config, "{\"runtimeOptions\":{}}");
     Check(RuntimeGcStartupConfig.Apply(config, false) == "Unchanged", "Disabled mode must not add configProperties.");
     RuntimeGcStartupConfig.Apply(config, true);
