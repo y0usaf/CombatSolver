@@ -1223,6 +1223,10 @@ internal static partial class SolverController
                     "combat_root_snapshot",
                     settings.EnableNoGcRegion);
             }
+            CombatRootSnapshot[]? fairSamples = SolverSettings.Current.FairPlanner == FairPlannerMode.MultiSample
+                ? [rootSnapshot, .. Enumerable.Range(1, Math.Max(1, SolverSettings.Current.FairPlannerSamples) - 1)
+                    .Select(_ => CombatRootSnapshot.Capture(state, settings.PredictPotionReward))]
+                : null;
             searchPolicy = searchPolicy with
             {
                 PrimaryIncumbents = _combat.AcquirePrimaryIncumbents(
@@ -1284,7 +1288,8 @@ internal static partial class SolverController
             SolvedRouteCache routeCache = SolvedRouteCache.Capture(state, rootSnapshot, searchPolicy, battleDamage);
             Task<SolverResult> solveTask = Task.Run(() =>
             {
-                if (!searchPolicy.VerifyIncrementalSearch && !searchPolicy.MeasurePhasePerformance
+                if (fairSamples == null
+                    && !searchPolicy.VerifyIncrementalSearch && !searchPolicy.MeasurePhasePerformance
                     && reason is SearchReason.AutoTurnStart or SearchReason.Deploy or SearchReason.FullAuto
                     && routeCache.Read(rootSnapshot.Forecast) is { } cached)
                 {
@@ -1304,16 +1309,18 @@ internal static partial class SolverController
                         settings.NoGcRegionBudgetBytes,
                         searchPolicy.MemoryPressureSignal,
                         token);
-                    SolverResult result = CombatSearchCoordinator.Solve(
-                        rootSnapshot,
-                        displayNames,
-                        battleDamage,
-                        searchPolicy,
-                        token,
-                        progress => PublishSearchProgress(search, progress));
+                    SolverResult result = fairSamples != null
+                        ? SolveFairDecision(fairSamples, displayNames, battleDamage, searchPolicy, generation, token)
+                        : CombatSearchCoordinator.Solve(
+                            rootSnapshot,
+                            displayNames,
+                            battleDamage,
+                            searchPolicy,
+                            token,
+                            progress => PublishSearchProgress(search, progress));
                     finalizedResult = search.Interaction.FinalizeWorkerResult(result);
                     token.ThrowIfCancellationRequested();
-                    if (!search.Interaction.StopRequested)
+                    if (fairSamples == null && !search.Interaction.StopRequested)
                         routeCache.StoreFirst(finalizedResult);
                     return finalizedResult;
                 }
@@ -2499,6 +2506,48 @@ internal static partial class SolverController
             _ => throw new ArgumentOutOfRangeException(nameof(cause), cause, null),
         };
 
+    private static SolverResult SolveFairDecision(
+        IReadOnlyList<CombatRootSnapshot> samples,
+        SolverDisplayNames displayNames,
+        BattleDamageSnapshot battleDamage,
+        SearchPolicySnapshot searchPolicy,
+        int generation,
+        CancellationToken token)
+    {
+        SolverSettingsData data = SolverSettings.Current;
+        int candidates = Math.Max(1, data.FairPlannerCandidates);
+        SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(searchPolicy, searchPolicy.Profile with
+        {
+            BeamWidth = Math.Min(searchPolicy.Profile.BeamWidth, Math.Max(1, data.FairPlannerBeamWidth)),
+            MaxExpandedNodes = Math.Min(searchPolicy.Profile.MaxExpandedNodes, Math.Max(1, data.FairPlannerMaxExpandedNodes)),
+            SoftTimeBudgetMilliseconds = Math.Min(
+                searchPolicy.Profile.SoftTimeBudgetMilliseconds,
+                Math.Max(250, data.FairPlannerSolveBudgetMilliseconds)),
+        });
+        FairPlannerSettings plannerSettings = new(
+            samples.Count,
+            candidates,
+            data.FairPlannerDeathPenalty,
+            data.FairPlannerUnfinishedEnemyHpWeight);
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        FairDecision? decision = FairDecisionPlanner.Decide(
+            samples,
+            (root, prefix) => FairDecisionPlanner.Solve(root, displayNames, battleDamage, isolated, prefix, token),
+            plannerSettings,
+            token);
+        SolverResult route = decision?.Route
+            ?? FairDecisionPlanner.Solve(samples[0], displayNames, battleDamage, isolated, null, token);
+        route.FairCommitActionLimit = 1;
+        Entry.Logger.Info(
+            $"[CombatSolver/Fair] MULTI_SAMPLE_DECISION generation={generation} samples={samples.Count} " +
+            $"solves={decision?.Solves ?? 1} elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F0} " +
+            $"chosen={(decision == null ? "-" : FairDecisionPlanner.Key(decision.Action))} candidates=" +
+            string.Join(' ', decision?.Candidates.Select(score =>
+                $"[{score.Key} mean={score.MeanUtility:F1} death={score.DeathRate:F2} sd={score.StandardDeviation:F1} " +
+                $"proposals={score.Proposals} valid={score.ValidSamples}]") ?? []));
+        return route;
+    }
+
     private static void CompleteSearch(
         NGame host,
         SolverSearchSession search,
@@ -3062,7 +3111,10 @@ internal static partial class SolverController
                 }
                 if (CombatManager.Instance.IsInProgress
                     && IsSamePlayableTurn(state, turn)
-                    && FairObservation.DescribeReveal(revealCursor, state, player) is { } revealed)
+                    && (FairObservation.DescribeReveal(revealCursor, state, player)
+                        ?? (actionIndex + 1 >= result.FairCommitActionLimit
+                            ? $"commit_limit={result.FairCommitActionLimit}"
+                            : null)) is { } revealed)
                 {
                     Entry.Logger.Info(
                         $"[CombatSolver/Test] DEPLOY_REPLAN turn={turn} reason=information_revealed " +

@@ -16,6 +16,14 @@ namespace CombatSolver;
 internal sealed class FairObservation
 {
     private readonly Rng _sampler;
+    private readonly bool _keepDrawOrder;
+
+    private FairObservation(SerializableRunRngSet liveRunRng)
+    {
+        _sampler = new Rng(0);
+        RunRng = liveRunRng;
+        _keepDrawOrder = true;
+    }
 
     private FairObservation(ulong seed)
     {
@@ -38,12 +46,17 @@ internal sealed class FairObservation
 
     public static FairObservation FromSeed(ulong seed) => new(seed);
 
+    internal static FairObservation ClairvoyantForOfflineBenchmark(CombatState state)
+        => new(state.RunState.Rng.ToSerializable());
+
     public Rng CreateMonsterAiRng() => new(RunRng.Rngs[RunRngType.MonsterAi]);
 
     public void ApplyToRoot(CombatPredictionSimulator simulator)
     {
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
         combat.ResampleRootRandomness(simulator, RunRng);
+        if (_keepDrawOrder)
+            return;
         foreach (Player player in simulator.State.Players)
         {
             PlayerCombatState live = player.PlayerCombatState

@@ -77,6 +77,14 @@ internal sealed record SolverSettingsData
     public bool SolverDisabled { get; init; }
     public bool AutomaticCalculationEnabled { get; init; } = true;
     public bool AutoEnableFullAuto { get; init; }
+    public FairPlannerMode FairPlanner { get; init; } = FairPlannerMode.MultiSample;
+    public int FairPlannerSamples { get; init; } = 12;
+    public int FairPlannerCandidates { get; init; } = 4;
+    public double FairPlannerDeathPenalty { get; init; } = 200;
+    public double FairPlannerUnfinishedEnemyHpWeight { get; init; } = 0.25;
+    public int FairPlannerBeamWidth { get; init; } = 20;
+    public int FairPlannerMaxExpandedNodes { get; init; } = 1500;
+    public int FairPlannerSolveBudgetMilliseconds { get; init; } = 3000;
     [JsonPropertyName("fairForkOnlineStatisticsEnabled")]
     public bool OnlineStatisticsEnabled { get; init; }
     public bool StopFullAutoOnCombatEnd { get; init; }
