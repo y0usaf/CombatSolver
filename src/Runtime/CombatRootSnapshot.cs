@@ -377,10 +377,10 @@ internal sealed class CombatRootSnapshot
 
     public CombatPredictionSimulator ForkSimulator() => _rootSimulator.Fork();
 
-    internal void PlaceRevealedDrawsOnTop(IReadOnlyList<CardModel> revealed)
+    internal void RevealUpcomingDraws(IReadOnlyList<CardModel> revealed)
     {
         if (!NGame.IsMainThread())
             throw new InvalidOperationException("Revealed draws must be applied to the root on the main thread.");
-        FairObservation.PlaceRevealedDrawsOnTop(_rootSimulator, PlayerIdentity, revealed);
+        _rootSimulator.RevealUpcomingDraws(revealed);
     }
 }

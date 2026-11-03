@@ -169,7 +169,10 @@ internal sealed partial class CombatPredictionSimulator
             IsAboutToLose,
             TerminalStamp,
             ShuffleEventCount,
-            ActionRelicTriggers);
+            ActionRelicTriggers)
+        {
+            _revealedDraws = _revealedDraws,
+        };
     }
 
     internal void ReplaceRootRng(CombatPredictionRngSet rng)

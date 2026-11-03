@@ -120,7 +120,7 @@ internal sealed partial class CombatPredictionSimulator
         CombatPredictionHistory history = History.ForkManualCardChoice(trace, context, source.HistoryStart);
         frame = source with { Card = card, Play = play, Trace = action, Choice = source.Choice.Fork(context) };
         var child = new CombatPredictionSimulator(trace, state, Rng.Fork(), store, history,
-            IsInProgress, IsAboutToLose, TerminalStamp, ShuffleEventCount, null);
+            IsInProgress, IsAboutToLose, TerminalStamp, ShuffleEventCount, null) { _revealedDraws = _revealedDraws };
         if (frame.Block is { } block) child._blockGainedByCardPlay.Add(play, block);
         return child;
     }

@@ -18,6 +18,29 @@ internal sealed partial class CombatPredictionSimulator
     // returning a partially drawn hand would silently invent a different combat state.
     private const int MaximumNestedDrawDepth = 100;
     private int _activeDrawDepth;
+    private RevealedDrawSequence? _revealedDraws;
+
+    private sealed record RevealedDrawSequence(CardModel[] Cards, int Next);
+
+    /// <summary>
+    /// Forces the next draws to produce cards the live game has already revealed, in order,
+    /// leaving every other card in its sampled position.
+    /// </summary>
+    internal void RevealUpcomingDraws(IReadOnlyList<CardModel> cards)
+    {
+        AssertForkable();
+        _revealedDraws = cards.Count == 0 ? null : new RevealedDrawSequence([.. cards], 0);
+    }
+
+    private PredictedCard NextDrawnCard(SimCardPile drawPile)
+    {
+        if (_revealedDraws is not { } revealed)
+            return drawPile.Cards[0];
+        CardModel next = revealed.Cards[revealed.Next];
+        _revealedDraws = revealed.Next + 1 == revealed.Cards.Length ? null : revealed with { Next = revealed.Next + 1 };
+        return drawPile.Cards.FirstOrDefault(card => ReferenceEquals(card.Original, next))
+            ?? throw new InvalidOperationException($"Revealed draw {next.Id.Entry} is not in the sampled draw pile.");
+    }
 
     /// <summary>
     /// See <see cref="Draw(Player, int, bool)"/> for the main overload.
@@ -80,7 +103,7 @@ internal sealed partial class CombatPredictionSimulator
                 return false;
             }
             if (state.DrawPile.IsEmpty || state.Hand.Cards.Count >= maxHandSize) break;
-            PredictedCard card = state.DrawPile.Cards[0];
+            PredictedCard card = NextDrawnCard(state.DrawPile);
             drawnCards.Add(card);
             AddToPile(card, state.Hand);
             var entry = History.CardDrawn(card, fromHandDraw);

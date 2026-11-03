@@ -222,7 +222,7 @@ internal sealed partial class CombatPredictionSimulator
             step.Scopes?.Fork(context), step.Frame.Fork(context))).ToArray();
         continuation = new(source.HistoryStart, steps);
         var child = new CombatPredictionSimulator(trace, state, Rng.Fork(), store, history,
-            IsInProgress, IsAboutToLose, TerminalStamp, ShuffleEventCount, null);
+            IsInProgress, IsAboutToLose, TerminalStamp, ShuffleEventCount, null) { _revealedDraws = _revealedDraws };
         child._preparedExecutionContinuation = continuation;
         foreach (var (play, block) in _blockGainedByCardPlay)
             child._blockGainedByCardPlay.Add(context.RequireRemap(play), block);

@@ -263,7 +263,7 @@ internal static class FairObservationChecks
         CardModel[]? revealed = FairObservation.RevealedSetupDraws(before, state);
         check(revealed != null && revealed.SequenceEqual(live), "setup draws are revealed as the drawn top prefix in draw order");
         CardModel[] sampled = SimulatedDraws(root, player, drawn);
-        root.PlaceRevealedDrawsOnTop(revealed!);
+        root.RevealUpcomingDraws(revealed!);
         CardModel[] conditioned = SimulatedDraws(root, player, drawn);
         check(conditioned.SequenceEqual(live), "a pre-draw root conditioned on the revealed draws draws the live hand");
 
@@ -272,9 +272,15 @@ internal static class FairObservationChecks
         FairObservation.SetupPiles beforeRefill = FairObservation.CaptureSetupPiles(state);
         check(beforeRefill.DrawPile.Length < 9 && beforeRefill.OtherPiles.Count > 0,
             "refill fixture needs a short draw pile and a non-empty discard pile");
-        Draw(loop, player, beforeRefill.DrawPile.Length + 1);
-        check(FairObservation.RevealedSetupDraws(beforeRefill, state) == null,
-            "a setup draw that reshuffled the discard pile is not treated as a revealed draw prefix");
+        CombatRootSnapshot refillRoot = CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(SamplerSeed));
+        int refillDraws = beforeRefill.DrawPile.Length + 1;
+        Draw(loop, player, refillDraws);
+        CardModel[]? refill = FairObservation.RevealedSetupDraws(beforeRefill, state);
+        check(refill != null && refill.Length == refillDraws && beforeRefill.OtherPiles.Contains(refill[^1]),
+            "a setup draw through a reshuffle reveals the old pile and the reshuffled card in draw order");
+        refillRoot.RevealUpcomingDraws(refill!);
+        check(SimulatedDraws(refillRoot, player, refillDraws).SequenceEqual(refill!),
+            "a pre-draw root conditioned on a reshuffling draw draws the live hand");
         return new
         {
             live = live.Select(card => card.Id.Entry).ToArray(),

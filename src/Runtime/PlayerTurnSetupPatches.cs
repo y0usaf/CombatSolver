@@ -1164,10 +1164,10 @@ internal static class PlayerTurnSetupCoordinator
         {
             Entry.Logger.Info(
                 $"[CombatSolver/Fair] TURN_SETUP_DRAW_UNCONDITIONED turn={state.TurnNumber} " +
-                "reason=draw_not_top_prefix choice=player");
+                "reason=draw_not_revealed_in_hand choice=player");
             return false;
         }
-        context.RootSnapshot.PlaceRevealedDrawsOnTop(revealed);
+        context.RootSnapshot.RevealUpcomingDraws(revealed);
         Entry.Logger.Info(
             $"[CombatSolver/Fair] TURN_SETUP_DRAW_CONDITIONED turn={state.TurnNumber} revealed={revealed.Length}");
         return true;
