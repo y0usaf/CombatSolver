@@ -136,6 +136,18 @@ internal static class FairObservationChecks
         Check(firstActionsA.OrderBy(item => item.Key).SequenceEqual(firstActionsB.OrderBy(item => item.Key)),
             "first action distribution is identical across hidden states");
 
+        List<string> multiSampleDecisions = [];
+        for (int decision = 0; decision < 3; decision++)
+        {
+            ulong seed = SamplerSeed + 5000UL + (ulong)(decision * 16);
+            Restore(combat, player, worldA);
+            string decisionA = Decide(combat, loop, seed);
+            Restore(combat, player, worldB);
+            string decisionB = Decide(combat, loop, seed);
+            Check(decisionA == decisionB, $"seed {seed}: identical multi-sample decision and candidate scores across hidden states");
+            multiSampleDecisions.Add(decisionA);
+        }
+
         Restore(combat, player, worldA);
         object knownPositions = CheckKnownPositions(combat, player, loop, Check);
 
@@ -151,6 +163,7 @@ internal static class FairObservationChecks
             firstActionDistributionWorldB = firstActionsB,
             samples,
             knownPositions,
+            multiSampleDecisions,
             liveDrawA = Field(liveA, "D"),
             liveDrawB = Field(liveB, "D"),
             sanitizedDraw = Field(rootA.Stamp, "D"),
@@ -256,6 +269,27 @@ internal static class FairObservationChecks
             throw new InvalidOperationException("Fair search comparison hit the wall-clock budget; raise --budget-ms.");
         return [.. result.BestNode.Actions.Select(action =>
             $"{action.Turn}:{action.Kind}:{action.CardId}{action.PotionId}:{action.TargetCombatId}:{action.CardStateKey}")];
+    }
+
+    private static string Decide(CombatState combat, MainLoopContext loop, ulong seed)
+    {
+        CombatRootSnapshot[] roots = [.. Enumerable.Range(0, 4).Select(index =>
+            CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(seed + (ulong)index)))];
+        SolverDisplayNames names = SolverDisplayNames.Capture(combat);
+        BattleDamageSnapshot damage = BattleDamageTracker.Observe(combat);
+        SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
+            SolverSettings.Capture(), combat, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(combat));
+        SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(policy, policy.Profile);
+        FairPlannerSettings settings = new(roots.Length, 3, 200, 0.25);
+        Task<FairDecision?> task = Task.Run(() => FairDecisionPlanner.Decide(
+            roots,
+            (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, isolated, prefix, CancellationToken.None),
+            settings,
+            CancellationToken.None));
+        loop.RunUntilCompleted(task, TimeSpan.FromMinutes(5), "multi-sample decision");
+        FairDecision? result = task.GetAwaiter().GetResult();
+        return result == null ? "-" : FairDecisionPlanner.Key(result.Action) + " " + string.Join(';', result.Candidates.Select(score =>
+            $"{score.Key}:{score.MeanUtility:R}:{score.DeathRate:R}:{score.StandardDeviation:R}:{score.ValidSamples}"));
     }
 
     private static HiddenState Save(CombatState combat, Player player)

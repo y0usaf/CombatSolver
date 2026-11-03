@@ -152,6 +152,8 @@ internal static class Program
                 InfusedCoreChecks.Run(combat!, options.OutputDirectory);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS") == "1")
                 FairObservationChecks.Run(combat!, options, loop);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_PLAY") is { Length: > 0 } fairPlayMode)
+                FairPlay.Run(combat!, options, loop, fairPlayMode);
             payload["budget"] = DescribeBudget(options);
             payload["root"] = OfflineCombat.DescribeRoot(combat!);
             string diagnostics = ModRuntime.DescribeStart(combat!);
