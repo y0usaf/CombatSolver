@@ -541,7 +541,19 @@ internal sealed class NativeChoiceSession : IDisposable
                 // is locked, against its current semantic identity, so stale plans fail safely.
                 try
                 {
-                    selected = ResolvePlannedCards(plan, request, useObservedIdentity: false);
+                    try
+                    {
+                        selected = ResolvePlannedCards(plan, request, useObservedIdentity: false);
+                    }
+                    catch (NativeChoicePlanMismatchException mismatch) when (request.Surface is NativeChoiceSurfaceKind.ChooseCard
+                        or NativeChoiceSurfaceKind.CombatPile or NativeChoiceSurfaceKind.SimpleGrid)
+                    {
+                        selected = SubstituteRevealedOptions(plan, request);
+                        Entry.Logger.Warn(
+                            $"[CombatSolver/Test] NATIVE_CHOICE_REVEALED_SUBSTITUTE owner={Owner} sequence={request.Sequence} " +
+                            $"source={request.SourceId} planned={string.Join(',', plan.Cards.Select(card => $"{card.CardId}+{card.UpgradeLevel}"))} " +
+                            $"selected={string.Join(',', selected.Select(card => card.Id.Entry))} mismatch={mismatch.Message}");
+                    }
                     // Confirming the final phase choice can synchronously enter the next player's setup.
                     if (_detachOnLastSelection && planIndex + 1 == plans.Count) Detach();
                     await NativeChoiceSurface.SelectAsync(host, surfaceLock, request, selected, token);
@@ -628,6 +640,41 @@ internal sealed class NativeChoiceSession : IDisposable
         }
         return selected;
     }
+
+    private static IReadOnlyList<CardModel> SubstituteRevealedOptions(
+        PlanCardChoice plan,
+        NativeChoiceRequest request)
+    {
+        int count = Math.Clamp(plan.Cards.Count, request.MinSelect, request.MaxSelect);
+        List<CardModel> remaining = [.. request.Options];
+        List<CardModel> selected = [];
+        foreach (PlanCardToken token in plan.Cards.Take(count))
+        {
+            CardModel? card = remaining.FirstOrDefault(option => CardChoiceSupport.MatchesToken(option, token))
+                ?? remaining.FirstOrDefault(option => option.Id.Entry == token.CardId);
+            if (card != null)
+            {
+                selected.Add(card);
+                remaining.Remove(card);
+            }
+        }
+        foreach (CardModel card in remaining
+            .OrderByDescending(static option => RevealedRarityRank(option.Rarity))
+            .Take(count - selected.Count)
+            .ToList())
+        {
+            selected.Add(card);
+        }
+        return selected;
+    }
+
+    private static int RevealedRarityRank(CardRarity rarity) => rarity switch
+    {
+        CardRarity.Rare => 3,
+        CardRarity.Uncommon => 2,
+        CardRarity.Common => 1,
+        _ => 0,
+    };
 
     private void RecordVisibleOnce(NativeChoiceRequest request)
     {
