@@ -48,10 +48,10 @@ async def run_job(semaphore, out_dir, variant, job, timeout):
     async with semaphore:
         job_dir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ, OFFLINE_HARNESS_FAIR_PLAY=variant["mode"], **{k: str(v) for k, v in variant.get("env", {}).items()})
-        args = ["dotnet", str(HARNESS), "--character", character, "--encounter", encounter, "--seed", seed,
+        args = ["dotnet", str(variant.get("harness", HARNESS)), "--character", character, "--encounter", encounter, "--seed", seed,
                 "--ascension", str(ascension), "--label", label, "--out", str(job_dir), "--milestone", "M1",
                 "--budget-ms", str(variant.get("budgetMs", 60000)), "--beam", str(variant.get("beam", 20)),
-                "--nodes", str(variant.get("nodes", 1500)), "--dop", "1"]
+                "--nodes", str(variant.get("nodes", 1500)), "--dop", "1", *variant.get("args", [])]
         with open(job_dir / "run.log", "wb") as log:
             process = await asyncio.create_subprocess_exec(*args, cwd=ROOT, env=env, stdout=log, stderr=asyncio.subprocess.STDOUT)
             try:
@@ -68,7 +68,10 @@ async def run_job(semaphore, out_dir, variant, job, timeout):
 def summarize(results):
     played = [r for r in results if r["outcome"] in ("victory", "defeat", "timeout")]
     errors = [r["label"] for r in results if r["outcome"] == "error"]
-    decisions = [d["Milliseconds"] for r in played for d in r.get("decisions", [])]
+    records = [d for r in played for d in r.get("decisions", [])]
+    decisions = [d["Milliseconds"] for d in records]
+    allocated = [d.get("AllocatedMb", 0) for d in records]
+    pauses = [d.get("MaxGcPauseMs", 0) for d in records]
     return {
         "fights": len(results),
         "played": len(played),
@@ -80,6 +83,11 @@ def summarize(results):
         "p90DecisionMs": round(sorted(decisions)[int(0.9 * (len(decisions) - 1))], 1) if decisions else None,
         "maxDecisionMs": round(max(decisions), 1) if decisions else None,
         "decisions": len(decisions),
+        "meanAllocMb": round(statistics.mean(allocated), 1) if allocated else None,
+        "p90AllocMb": round(sorted(allocated)[int(0.9 * (len(allocated) - 1))], 1) if allocated else None,
+        "meanGcPauseMsPerDecision": round(statistics.mean(d.get("GcPauseMs", 0) for d in records), 1) if records else None,
+        "p99MaxGcPauseMs": round(sorted(pauses)[int(0.99 * (len(pauses) - 1))], 1) if pauses else None,
+        "maxGcPauseMs": round(max(pauses), 1) if pauses else None,
     }
 
 

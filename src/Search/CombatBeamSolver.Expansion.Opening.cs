@@ -1158,6 +1158,44 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
+    internal (int Length, int EnemyHp) RevealFreePrefixLength(IReadOnlyList<PlanAction> actions)
+    {
+        (string before, int enemyHp) = ReplayRevealSignature([]);
+        int length = 0;
+        for (int index = 0; index < actions.Count; index++)
+        {
+            PlanAction action = actions[index];
+            if (action.Turn != actions[0].Turn)
+                break;
+            length = index + 1;
+            (string after, int afterEnemyHp) = ReplayRevealSignature([.. actions.Take(index + 1)]);
+            enemyHp = afterEnemyHp;
+            if (action.Kind == PlanActionKind.EndTurn || !string.Equals(after, before, StringComparison.Ordinal))
+                break;
+        }
+        return (length, enemyHp);
+    }
+
+    private (string Signature, int EnemyHp) ReplayRevealSignature(IReadOnlyList<PlanAction> prefix)
+    {
+        SimulationSnapshot snapshot = Replay(prefix);
+        try
+        {
+            CombatPredictionSimulator simulator = (CombatPredictionSimulator)snapshot.Simulator;
+            CombatPredictionRngSet rng = simulator.Rng;
+            return (string.Join('|',
+                rng.ShuffleState, rng.CombatCardGenerationState, rng.CombatPotionGenerationState,
+                rng.CombatCardSelectionState, rng.CombatEnergyCostsState, rng.CombatTargetsState,
+                rng.CombatOrbGenerationState, rng.MonsterAiState, rng.NicheState,
+                string.Join(',', simulator.State.GetPlayerCombatState(_player).DrawPile.Cards
+                    .Select(card => card.Preview.Id.Entry))), snapshot.EnemyHp);
+        }
+        finally
+        {
+            snapshot.ReleaseSimulator();
+        }
+    }
+
     internal PlanAction? BuildOpeningFullRedrawPotionAction(PlanAction selectedPotionAction)
     {
         SimulationSnapshot rootSnapshot = Replay([]);

@@ -23,8 +23,12 @@ internal static class LiveEndTurnRiskEvaluator
         IReadOnlyList<PlanCardChoice>? turnStartChoices,
         int samples)
     {
+        Player player = LocalContext.GetMe(state)
+            ?? throw new InvalidOperationException("结束回合复核找不到本地玩家。");
+        ulong seed = FairDecisionPlanner.VisibleSeed(state, player);
         LiveEndTurnRiskProjection[] projections = Enumerable.Range(0, Math.Max(1, samples))
-            .Select(_ => Evaluate(state, turnStartChoices))
+            .Select(index => Evaluate(player, new SimulatedCombatState(state), turnStartChoices,
+                FairObservation.FromSeed(seed + (ulong)index)))
             .ToArray();
         int deaths = projections.Count(projection => projection.PlayerDead);
         int hpBefore = projections[0].HpBefore;
@@ -50,7 +54,8 @@ internal static class LiveEndTurnRiskEvaluator
     internal static LiveEndTurnRiskProjection Evaluate(
         Player player,
         SimulatedCombatState combat,
-        IReadOnlyList<PlanCardChoice>? turnStartChoices)
+        IReadOnlyList<PlanCardChoice>? turnStartChoices,
+        FairObservation? fair = null)
     {
         PlanCardChoice[] endTurnChoices = turnStartChoices?
             .Where(choice => choice.Timing is PlanChoiceTiming.PlayerTurnEnd or PlanChoiceTiming.EnemyTurn)
@@ -59,7 +64,7 @@ internal static class LiveEndTurnRiskEvaluator
             .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
             .ToArray();
         CombatPredictionSimulator simulator = new(combat);
-        FairObservation.FromEntropy().ApplyToRoot(simulator);
+        (fair ?? FairObservation.FromEntropy()).ApplyToRoot(simulator);
         combat.BeginActionChoices(cursorChoices);
         combat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnEnd);
         try

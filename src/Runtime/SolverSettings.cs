@@ -84,8 +84,14 @@ internal sealed record SolverSettingsData
     public double FairPlannerUnfinishedEnemyHpWeight { get; init; } = 0.25;
     public int FairPlannerBeamWidth { get; init; } = 20;
     public int FairPlannerMaxExpandedNodes { get; init; } = 1500;
-    public int FairPlannerSolveBudgetMilliseconds { get; init; } = 3000;
-    public double FairPlannerEvaluationTimeFactor { get; init; } = 3;
+    public int FairPlannerSolveBudgetMilliseconds { get; init; } = 5000;
+    public double FairPlannerEvaluationTimeFactor { get; init; }
+    public double FairPlannerCommitAgreement { get; init; } = 1;
+    public double FairPlannerConsensusShare { get; init; } = 1;
+    public bool FairPlannerForcedEndTurnShortcut { get; init; } = true;
+    public double FairPlannerTieStandardErrors { get; init; } = 1;
+    public bool FairPlannerSegments { get; init; } = true;
+    public double FairPlannerTieMarginHp { get; init; } = 1;
     [JsonPropertyName("fairForkOnlineStatisticsEnabled")]
     public bool OnlineStatisticsEnabled { get; init; }
     public bool StopFullAutoOnCombatEnd { get; init; }

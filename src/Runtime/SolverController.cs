@@ -1210,9 +1210,11 @@ internal static partial class SolverController
             setupStage = "combat_root_snapshot";
             long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
             CombatRootSnapshot rootSnapshot;
+            ulong fairSeed = FairDecisionPlanner.VisibleSeed(state, LocalContext.GetMe(state)!);
             try
             {
-                rootSnapshot = CombatRootSnapshot.Capture(state, settings.PredictPotionReward);
+                rootSnapshot = CombatRootSnapshot.Capture(state, settings.PredictPotionReward,
+                    FairObservation.FromSeed(fairSeed));
             }
             finally
             {
@@ -1223,9 +1225,13 @@ internal static partial class SolverController
                     "combat_root_snapshot",
                     settings.EnableNoGcRegion);
             }
+            bool fairForcedEndTurn = SolverSettings.Current.FairPlanner == FairPlannerMode.MultiSample
+                && SolverSettings.Current.FairPlannerForcedEndTurnShortcut
+                && FairDecisionPlanner.IsForcedEndTurn(LocalContext.GetMe(state)!);
             CombatRootSnapshot[]? fairSamples = SolverSettings.Current.FairPlanner == FairPlannerMode.MultiSample
-                ? [rootSnapshot, .. Enumerable.Range(1, Math.Max(1, SolverSettings.Current.FairPlannerSamples) - 1)
-                    .Select(_ => CombatRootSnapshot.Capture(state, settings.PredictPotionReward))]
+                ? [rootSnapshot, .. Enumerable.Range(1, fairForcedEndTurn ? 0 : Math.Max(1, SolverSettings.Current.FairPlannerSamples) - 1)
+                    .Select(index => CombatRootSnapshot.Capture(state, settings.PredictPotionReward,
+                        FairObservation.FromSeed(fairSeed + (ulong)index)))]
                 : null;
             searchPolicy = searchPolicy with
             {
@@ -1310,7 +1316,7 @@ internal static partial class SolverController
                         searchPolicy.MemoryPressureSignal,
                         token);
                     SolverResult result = fairSamples != null
-                        ? SolveFairDecision(fairSamples, displayNames, battleDamage, searchPolicy, generation, token)
+                        ? SolveFairDecision(fairSamples, fairForcedEndTurn, displayNames, battleDamage, searchPolicy, generation, token)
                         : CombatSearchCoordinator.Solve(
                             rootSnapshot,
                             displayNames,
@@ -2508,6 +2514,7 @@ internal static partial class SolverController
 
     private static SolverResult SolveFairDecision(
         IReadOnlyList<CombatRootSnapshot> samples,
+        bool forcedEndTurn,
         SolverDisplayNames displayNames,
         BattleDamageSnapshot battleDamage,
         SearchPolicySnapshot searchPolicy,
@@ -2524,27 +2531,37 @@ internal static partial class SolverController
                 searchPolicy.Profile.SoftTimeBudgetMilliseconds,
                 Math.Max(250, data.FairPlannerSolveBudgetMilliseconds)),
         });
+        if (forcedEndTurn)
+            isolated = FairDecisionPlanner.ForcedEndTurnPolicy(isolated);
         FairPlannerSettings plannerSettings = new(
             samples.Count,
             candidates,
             data.FairPlannerDeathPenalty,
             data.FairPlannerUnfinishedEnemyHpWeight,
-            data.FairPlannerEvaluationTimeFactor);
+            data.FairPlannerEvaluationTimeFactor,
+            data.FairPlannerCommitAgreement,
+            data.FairPlannerConsensusShare,
+            TieStandardErrors: data.FairPlannerTieStandardErrors,
+            TieMarginHp: data.FairPlannerTieMarginHp);
         Stopwatch stopwatch = Stopwatch.StartNew();
         FairDecision? decision = FairDecisionPlanner.Decide(
             samples,
             (root, prefix) => FairDecisionPlanner.Solve(root, displayNames, battleDamage, isolated, prefix, token),
             (root, action) => FairDecisionPlanner.RevealedVariants(root, displayNames, battleDamage, isolated, action, token),
             plannerSettings,
-            token);
+            token,
+            data.FairPlannerSegments
+                ? (root, actions) => FairDecisionPlanner.RevealFreeLength(root, displayNames, battleDamage, isolated, actions, token)
+                : null);
         SolverResult route = decision?.Route
             ?? FairDecisionPlanner.Solve(samples[0], displayNames, battleDamage, isolated, null, token);
-        route.FairCommitActionLimit = 1;
+        route.FairCommitActionLimit = decision?.CommitCount ?? 1;
         Entry.Logger.Info(
             $"[CombatSolver/Fair] MULTI_SAMPLE_DECISION generation={generation} samples={samples.Count} " +
             $"solves={decision?.Solves ?? 1} elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F0} " +
             $"own_phase_ms={decision?.OwnPhaseMilliseconds ?? 0} slowest_solve_ms={decision?.SlowestSolveMilliseconds ?? 0} " +
-            $"skipped_evaluations={decision?.SkippedEvaluations ?? 0} " +
+            $"skipped_evaluations={decision?.SkippedEvaluations ?? 0} forced_end_turn={forcedEndTurn} " +
+            $"commit_actions={route.FairCommitActionLimit} safety_stops={decision?.SafetyStops ?? 0} " +
             $"chosen={(decision == null ? "-" : FairDecisionPlanner.Key(decision.Action))} candidates=" +
             string.Join(' ', decision?.Candidates.Select(score =>
                 $"[{score.Key} mean={score.MeanUtility:F1} death={score.DeathRate:F2} sd={score.StandardDeviation:F1} " +

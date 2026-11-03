@@ -149,6 +149,18 @@ internal static class FairObservationChecks
         }
 
         Restore(combat, player, worldA);
+        ulong visibleA = FairDecisionPlanner.VisibleSeed(combat, player);
+        string visibleDecisionA = Decide(combat, loop, visibleA);
+        string visibleDecisionA2 = Decide(combat, loop, FairDecisionPlanner.VisibleSeed(combat, player), maxParallelism: 1);
+        Restore(combat, player, worldB);
+        ulong visibleB = FairDecisionPlanner.VisibleSeed(combat, player);
+        string visibleDecisionB = Decide(combat, loop, visibleB);
+        Check(visibleA == visibleB, "visible-state sampler seed is identical across hidden states");
+        Check(visibleDecisionA == visibleDecisionB, "visible-seeded decision is identical across hidden states");
+        Check(visibleDecisionA == visibleDecisionA2, "visible-seeded decision is identical across reruns and parallelism");
+        multiSampleDecisions.Add(visibleDecisionA);
+
+        Restore(combat, player, worldA);
         object knownPositions = CheckKnownPositions(combat, player, loop, Check);
 
         File.WriteAllText(Path.Combine(options.OutputDirectory, "fair-observation-checks.json"), JsonSerializer.Serialize(new
@@ -271,7 +283,7 @@ internal static class FairObservationChecks
             $"{action.Turn}:{action.Kind}:{action.CardId}{action.PotionId}:{action.TargetCombatId}:{action.CardStateKey}")];
     }
 
-    private static string Decide(CombatState combat, MainLoopContext loop, ulong seed)
+    private static string Decide(CombatState combat, MainLoopContext loop, ulong seed, int maxParallelism = 0)
     {
         CombatRootSnapshot[] roots = [.. Enumerable.Range(0, 4).Select(index =>
             CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(seed + (ulong)index)))];
@@ -280,7 +292,7 @@ internal static class FairObservationChecks
         SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
             SolverSettings.Capture(), combat, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(combat));
         SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(policy, policy.Profile);
-        FairPlannerSettings settings = new(roots.Length, 3, 200, 0.25);
+        FairPlannerSettings settings = new(roots.Length, 3, 200, 0.25, MaxParallelism: maxParallelism);
         Task<FairDecision?> task = Task.Run(() => FairDecisionPlanner.Decide(
             roots,
             (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, isolated, prefix, CancellationToken.None),

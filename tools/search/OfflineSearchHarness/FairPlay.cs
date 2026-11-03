@@ -9,6 +9,8 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.TestSupport;
@@ -61,7 +63,15 @@ internal static class FairPlay
     }
 
     private sealed record DecisionRecord(int Turn, string Mode, double Milliseconds, int Solves, int Candidates,
-        string[] Committed, double? MeanUtility);
+        string[] Committed, double? MeanUtility, double AllocatedMb, long OwnPhaseMs, long SlowestSolveMs, int Skipped,
+        bool Forced, double CpuMs, int Gen0, int Gen1, int Gen2, string[]? Scores, int SafetyStops)
+    {
+        public double GcPauseMs { get; set; }
+        public double MaxGcPauseMs { get; set; }
+        public int GcPauses { get; set; }
+    }
+
+    private static readonly GcPauseMonitor PauseMonitor = new();
 
     private static readonly long StartedAt = Environment.TickCount64;
 
@@ -91,11 +101,24 @@ internal static class FairPlay
         InstallPlayBypasses();
         Player player = combat.Players.Single();
         FairPlannerSettings settings = new(
-            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_K") ?? "6"),
+            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_K") ?? "12"),
             int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_CANDIDATES") ?? "4"),
             double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DEATH_PENALTY") ?? "200"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_ENEMY_WEIGHT") ?? "0.25"));
-        SolverSearchProfile profile = SolverSettings.Capture().Profile with
+            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_ENEMY_WEIGHT") ?? "0.25"),
+            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_EVAL_FACTOR") ?? "0"),
+            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_COMMIT_AGREEMENT") ?? "1"),
+            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_CONSENSUS") ?? "1"),
+            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DOP") ?? "0"),
+            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TIE_SE") ?? "1"),
+            Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_EVAL_PROPOSERS") == "1",
+            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TIE_MARGIN") ?? "1"));
+        bool forcedEndTurnShortcut = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_FORCED_END") != "0";
+        bool visibleSeeds = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_VISIBLE_SEED") != "0";
+        bool segments = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_SEGMENTS") != "0";
+        bool determinismCheck = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DETERMINISM") == "1";
+        int determinismMismatches = 0;
+        SolverSettingsSnapshot solverSettings = SolverSettings.Capture();
+        SolverSearchProfile profile = solverSettings.Profile with
         {
             SoftTimeBudgetMilliseconds = options.BudgetMilliseconds,
         };
@@ -104,21 +127,38 @@ internal static class FairPlay
         BenchmarkSelector selector = new();
         using IDisposable selectorScope = CardSelectCmd.PushSelector(selector, localOnly: true);
 
+        PrepareState(combat, player, loop);
+        int stopTurn = int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_STOP_TURN") ?? "41");
         int startHp = player.Creature.CurrentHp;
         List<DecisionRecord> decisions = [];
         Stopwatch total = Stopwatch.StartNew();
+        PauseMonitor.TakeWindow();
+        TimeSpan windowPause = GC.GetTotalPauseDuration();
+        void CloseWindow()
+        {
+            if (decisions.Count == 0)
+                return;
+            TimeSpan pause = GC.GetTotalPauseDuration();
+            (double maxPause, int pauses) = PauseMonitor.TakeWindow();
+            DecisionRecord last = decisions[^1];
+            last.GcPauseMs = (pause - windowPause).TotalMilliseconds;
+            last.MaxGcPauseMs = maxPause;
+            last.GcPauses = pauses;
+            windowPause = pause;
+        }
         string outcome = "timeout";
         int stalls = 0;
         while (true)
         {
             string? ended = WaitForDecisionPoint(combat, player, loop);
+            CloseWindow();
             if (ended != null)
             {
                 outcome = ended;
                 break;
             }
             int turn = player.PlayerCombatState!.TurnNumber;
-            if (turn > 40)
+            if (turn > 40 || turn >= stopTurn)
                 break;
             SolverDisplayNames names = SolverDisplayNames.Capture(combat);
             BattleDamageSnapshot damage = BattleDamageTracker.Observe(combat);
@@ -126,29 +166,79 @@ internal static class FairPlay
                 SolverController.CaptureSearchPolicy(SolverSettings.Capture(), combat, includeTurnSetup: false,
                     theftPolicy: SolverController.ResolveTheftPolicy(combat)),
                 profile);
+            long allocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
+            TimeSpan cpuAtStart = Process.GetCurrentProcess().TotalProcessorTime;
+            int[] collectionsAtStart = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
             Stopwatch watch = Stopwatch.StartNew();
+            long ownPhaseMs = 0, slowestSolveMs = 0;
+            int skipped = 0;
+            int safetyStops = 0;
             IReadOnlyList<PlanAction> route;
             bool commitOne;
+            bool forcedDecision = false;
             int solves = 1;
             int candidates = 1;
             double? meanUtility = null;
+            string[]? scores = null;
             if (mode == "v2")
             {
-                CombatRootSnapshot[] roots = [.. Enumerable.Range(0, settings.Samples).Select(_ =>
-                    CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(samplerBase + (ulong)sampleCounter++)))];
-                Task<FairDecision?> decide = Task.Run(() => FairDecisionPlanner.Decide(
-                    roots,
-                    (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, policy, prefix, CancellationToken.None),
-                    (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, policy, action, CancellationToken.None),
-                    settings,
-                    CancellationToken.None));
-                loop.RunUntilCompleted(decide, TimeSpan.FromMinutes(10), "fair v2 decision");
-                FairDecision? decision = decide.GetAwaiter().GetResult();
-                route = decision == null ? [] : [decision.Action];
+                ulong decisionSeed = visibleSeeds ? FairDecisionPlanner.VisibleSeed(combat, player) : samplerBase + (ulong)sampleCounter;
+                sampleCounter += settings.Samples;
+                bool forced = forcedEndTurnShortcut && FairDecisionPlanner.IsForcedEndTurn(player);
+                CombatRootSnapshot[] roots = [.. Enumerable.Range(0, forced ? 1 : settings.Samples).Select(index =>
+                    CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(decisionSeed + (ulong)index)))];
+                SearchPolicySnapshot decisionPolicy = forced ? FairDecisionPlanner.ForcedEndTurnPolicy(policy) : policy;
+                FairDecision? RunDecide(CombatRootSnapshot[] decisionRoots, FairPlannerSettings decisionSettings)
+                {
+                    Task<FairDecision?> decide = Task.Run(() =>
+                    {
+                        using IDisposable? gcScope = solverSettings.EnableNoGcRegion
+                            ? SearchGcPolicy.EnterSearchScope(true, solverSettings.NoGcRegionBudgetBytes,
+                                policy.MemoryPressureSignal, CancellationToken.None)
+                            : null;
+                        return FairDecisionPlanner.Decide(
+                            decisionRoots,
+                            (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, decisionPolicy, prefix, CancellationToken.None),
+                            (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, decisionPolicy, action, CancellationToken.None),
+                            decisionSettings,
+                            CancellationToken.None,
+                            segments
+                                ? (root, actions) => FairDecisionPlanner.RevealFreeLength(root, names, damage, decisionPolicy, actions, CancellationToken.None)
+                                : null);
+                    });
+                    loop.RunUntilCompleted(decide, TimeSpan.FromMinutes(10), "fair v2 decision");
+                    return decide.GetAwaiter().GetResult();
+                }
+                string Signature(FairDecision? made) => made == null ? "-" : FairDecisionPlanner.Key(made.Action) + "#" + made.CommitCount + " "
+                    + string.Join(';', made.Candidates.Select(score => $"{score.Key}:{score.MeanUtility:R}:{score.DeathRate:R}:{score.ValidSamples}"));
+                FairDecision? decision = RunDecide(roots, settings);
+                safetyStops = decision?.SafetyStops ?? 0;
+                if (determinismCheck)
+                {
+                    ulong repeatSeed = visibleSeeds ? FairDecisionPlanner.VisibleSeed(combat, player) : decisionSeed;
+                    CombatRootSnapshot[] repeatRoots = [.. Enumerable.Range(0, roots.Length).Select(index =>
+                        CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(repeatSeed + (ulong)index)))];
+                    FairDecision? repeat = RunDecide(repeatRoots, settings with { MaxParallelism = 3 });
+                    if (Signature(repeat) != Signature(decision))
+                    {
+                        determinismMismatches++;
+                        Console.WriteLine($"DETERMINISM_MISMATCH turn={turn} first={Signature(decision)} repeat={Signature(repeat)}");
+                    }
+                }
+                route = decision == null ? [] : [decision.Action, .. decision.Route.BestNode.Actions.Skip(1).Take(decision.CommitCount - 1)];
+                if (forced && decision?.Action.Kind != PlanActionKind.EndTurn)
+                    throw new InvalidOperationException($"forced end turn solved to {decision?.Action.Kind}");
                 solves = decision?.Solves ?? settings.Samples;
                 candidates = decision?.Candidates.Count ?? 0;
                 meanUtility = decision?.Candidates.Max(score => score.MeanUtility);
-                commitOne = true;
+                scores = decision?.Candidates.Select(score =>
+                    $"{score.Action.Kind}:{score.Action.CardId}{score.Action.PotionId}>{score.Action.TargetCombatId} mean={score.MeanUtility:F2} "
+                    + $"death={score.DeathRate:F2} sd={score.StandardDeviation:F1} proposals={score.Proposals} valid={score.ValidSamples}").ToArray();
+                ownPhaseMs = decision?.OwnPhaseMilliseconds ?? 0;
+                slowestSolveMs = decision?.SlowestSolveMilliseconds ?? 0;
+                skipped = decision?.SkippedEvaluations ?? 0;
+                commitOne = false;
+                forcedDecision = forced;
             }
             else
             {
@@ -163,6 +253,8 @@ internal static class FairPlay
                 commitOne = false;
             }
             watch.Stop();
+            double allocatedMb = (GC.GetTotalAllocatedBytes(precise: false) - allocatedAtStart) / (1024d * 1024d);
+            double cpuMs = (Process.GetCurrentProcess().TotalProcessorTime - cpuAtStart).TotalMilliseconds;
 
             List<string> committed = [];
             Trace($"decision turn={turn} ms={watch.Elapsed.TotalMilliseconds:F0} route={string.Join(' ', route.Select(item => item.Kind + ":" + item.CardId))}");
@@ -195,7 +287,9 @@ internal static class FairPlay
                 stalls = 0;
             }
             decisions.Add(new DecisionRecord(turn, mode, watch.Elapsed.TotalMilliseconds, solves, candidates,
-                [.. committed], meanUtility));
+                [.. committed], meanUtility, allocatedMb, ownPhaseMs, slowestSolveMs, skipped, forcedDecision, cpuMs,
+                GC.CollectionCount(0) - collectionsAtStart[0], GC.CollectionCount(1) - collectionsAtStart[1],
+                GC.CollectionCount(2) - collectionsAtStart[2], scores, safetyStops));
         }
 
         int endHp = Math.Max(0, player.Creature.CurrentHp);
@@ -221,14 +315,97 @@ internal static class FairPlay
             meanDecisionMs = decisions.Count == 0 ? 0 : decisions.Average(item => item.Milliseconds),
             maxDecisionMs = decisions.Count == 0 ? 0 : decisions.Max(item => item.Milliseconds),
             totalSeconds = total.Elapsed.TotalSeconds,
+            gcServer = System.Runtime.GCSettings.IsServerGC,
+            gcLatency = System.Runtime.GCSettings.LatencyMode.ToString(),
+            noGcRegion = solverSettings.EnableNoGcRegion,
+            gcPausesByGeneration = PauseMonitor.PausesByGeneration(),
+            determinismChecked = determinismCheck,
+            determinismMismatches,
             decisions,
         };
         File.WriteAllText(Path.Combine(options.OutputDirectory, "fair-play.json.tmp"),
             JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
         File.Move(Path.Combine(options.OutputDirectory, "fair-play.json.tmp"),
             Path.Combine(options.OutputDirectory, "fair-play.json"), overwrite: true);
+        if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_EXPECT_FIRST") is { Length: > 0 } expectedFirst)
+        {
+            string first = decisions.FirstOrDefault()?.Committed.FirstOrDefault() ?? "-";
+            bool passed = first.StartsWith("PlayCard:" + expectedFirst + ">", StringComparison.Ordinal);
+            Console.WriteLine($"FAIR_ORDER_CHECK expected={expectedFirst} first={first} status={(passed ? "Passed" : "Failed")}");
+        }
+        foreach ((string type, long bytes) in PauseMonitor.TopAllocations(60))
+            Console.WriteLine($"ALLOC_TICK {bytes / (1024d * 1024d):F0} MB {type}");
         Console.WriteLine($"FAIR_PLAY mode={mode} outcome={outcome} hp_lost={startHp - endHp} decisions={decisions.Count} "
             + $"mean_decision_ms={(decisions.Count == 0 ? 0 : decisions.Average(item => item.Milliseconds)):F0}");
+    }
+
+    private static void PrepareState(CombatState combat, Player player, MainLoopContext loop)
+    {
+        string? Env(string name) => Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_" + name) is { Length: > 0 } value
+            ? value
+            : null;
+        async Task Fill(string cardList, PileType pile)
+        {
+            foreach (string entry in cardList.Split(','))
+            {
+                string[] parts = entry.Split('+');
+                CardModel canonical = ModelDb.AllCards.Single(card => card.Id.Entry == parts[0]);
+                CardModel card = combat.CreateCard(canonical, player);
+                for (int level = 0; level < (parts.Length > 1 ? int.Parse(parts[1]) : 0) && card.IsUpgradable; level++)
+                    CardCmd.Upgrade(card, CardPreviewStyle.None);
+                CardPileAddResult added = await CardPileCmd.AddGeneratedCardToCombat(card, pile, player);
+                if (!added.success)
+                    throw new InvalidOperationException($"could not add {entry} to {pile}");
+            }
+        }
+        async Task Prepare()
+        {
+            PlayerCombatState cards = player.PlayerCombatState!;
+            if (Env("HAND") is { } hand)
+            {
+                await CardPileCmd.RemoveFromCombat([.. cards.Hand.Cards], true);
+                await Fill(hand, PileType.Hand);
+            }
+            if (Env("DRAW") is { } draw)
+            {
+                await CardPileCmd.RemoveFromCombat([.. cards.DrawPile.Cards], true);
+                await Fill(draw, PileType.Draw);
+            }
+            if (Env("DISCARD") is { } discard)
+                await Fill(discard, PileType.Discard);
+            if (Env("ENEMY_HP") is { } enemyHp)
+            {
+                int[] values = [.. enemyHp.Split(',').Select(int.Parse)];
+                for (int index = 0; index < values.Length; index++)
+                    await CreatureCmd.SetCurrentHp(combat.Enemies[index], values[index]);
+            }
+            if (Env("POWERS") is { } powers)
+            {
+                foreach (string entry in powers.Split(','))
+                {
+                    string[] parts = entry.Split(':');
+                    PowerModel power = ModelDb.AllPowers.Single(model => model.Id.Entry == parts[0]).ToMutable();
+                    power.Target = player.Creature;
+                    await PowerCmd.Apply(new BlockingPlayerChoiceContext(), power, player.Creature, int.Parse(parts[1]),
+                        player.Creature, null);
+                }
+            }
+            if (Env("HP") is { } hp)
+                await CreatureCmd.SetCurrentHp(player.Creature, int.Parse(hp));
+            if (Env("BLOCK") is { } block)
+                await CreatureCmd.GainBlock(player.Creature, int.Parse(block), MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, null);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        loop.RunUntilCompleted(Prepare(), TimeSpan.FromSeconds(30), "prepare fair state");
+        if (Env("ENERGY") is { } energyText)
+        {
+            int energy = int.Parse(energyText);
+            PlayerCombatState state = player.PlayerCombatState!;
+            if (state.Energy > energy)
+                state.LoseEnergy(state.Energy - energy);
+            else if (state.Energy < energy)
+                state.GainEnergy(energy - state.Energy);
+        }
     }
 
     private static string? WaitForDecisionPoint(CombatState combat, Player player, MainLoopContext loop)
