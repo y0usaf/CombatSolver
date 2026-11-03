@@ -186,6 +186,7 @@ internal static partial class SolverController
     internal static bool HasActiveSearchSessionForTesting => _search != null;
     internal static SolverResult? LastTurnSetupResultForTesting { get; private set; }
     internal static Exception? LastSearchFailureForTesting { get; private set; }
+    internal static Exception? LastTurnSetupFailureForTesting { get; private set; }
     internal static bool LastFullAutoStoppedForWorseRecalculationForTesting { get; private set; }
     internal static bool LastFullAutoStoppedAtLiveRiskForTesting { get; private set; }
     internal static int? LastReusedTurnForTesting { get; private set; }
@@ -458,6 +459,7 @@ internal static partial class SolverController
         _combat.BugReportIssues.RecordFailure(
             CombatBugReportIssueKind.TurnSetupFailure,
             exception);
+        LastTurnSetupFailureForTesting = exception;
         Entry.Logger.Error(
             $"[CombatSolver/Test] TURN_SETUP_FAILURE exception={exception.GetBaseException()}");
         if (NGame.Instance is { } host)
@@ -768,7 +770,8 @@ internal static partial class SolverController
     {
         AssertMainThread();
         choices = null;
-        if (!ReferenceEquals(_combat.State, state)
+        if (FairObservation.Enabled
+            || !ReferenceEquals(_combat.State, state)
             || _combat.ContinuationSource is not { } source
             || !source.Continuations.Any(item => item.StartTurnNumber == turn))
         {
@@ -2280,6 +2283,7 @@ internal static partial class SolverController
         LastCompletedResultForTesting = null;
         LastTurnSetupResultForTesting = null;
         LastSearchFailureForTesting = null;
+        LastTurnSetupFailureForTesting = null;
     }
 
     public static void MonitorCombatPresence()

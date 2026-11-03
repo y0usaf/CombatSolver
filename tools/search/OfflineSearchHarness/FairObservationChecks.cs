@@ -162,6 +162,7 @@ internal static class FairObservationChecks
 
         Restore(combat, player, worldA);
         object knownPositions = CheckKnownPositions(combat, player, loop, Check);
+        object setupDraws = CheckRevealedSetupDraws(combat, player, loop, Check);
 
         File.WriteAllText(Path.Combine(options.OutputDirectory, "fair-observation-checks.json"), JsonSerializer.Serialize(new
         {
@@ -175,6 +176,7 @@ internal static class FairObservationChecks
             firstActionDistributionWorldB = firstActionsB,
             samples,
             knownPositions,
+            setupDraws,
             multiSampleDecisions,
             liveDrawA = Field(liveA, "D"),
             liveDrawB = Field(liveB, "D"),
@@ -243,6 +245,52 @@ internal static class FairObservationChecks
             "random insertion is reported as revealed information");
         return new { middleOrdersObserved = middleOrders.Count, drawReveal, randomInsertReveal = revealed };
     }
+
+    private static object CheckRevealedSetupDraws(
+        CombatState combat,
+        Player player,
+        MainLoopContext loop,
+        Action<bool, string> check)
+    {
+        PlayerCombatState state = player.PlayerCombatState!;
+        FairObservation.SetupPiles before = FairObservation.CaptureSetupPiles(state);
+        int drawn = Math.Min(3, before.DrawPile.Length - 1);
+        check(drawn >= 2, "setup draw fixture needs at least three draw pile cards");
+        CombatRootSnapshot root = CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(SamplerSeed));
+        Draw(loop, player, drawn);
+        CardModel[] live = before.DrawPile[..drawn];
+        check(live.All(state.Hand.Cards.Contains), "native setup draws take the top of the draw pile");
+        CardModel[]? revealed = FairObservation.RevealedSetupDraws(before, state);
+        check(revealed != null && revealed.SequenceEqual(live), "setup draws are revealed as the drawn top prefix in draw order");
+        CardModel[] sampled = SimulatedDraws(root, player, drawn);
+        root.PlaceRevealedDrawsOnTop(revealed!);
+        CardModel[] conditioned = SimulatedDraws(root, player, drawn);
+        check(conditioned.SequenceEqual(live), "a pre-draw root conditioned on the revealed draws draws the live hand");
+
+        foreach (CardModel card in state.Hand.Cards.ToArray())
+            loop.RunUntilCompleted(CardPileCmd.Add(card, PileType.Discard), TimeSpan.FromSeconds(30), "setup fixture discard");
+        FairObservation.SetupPiles beforeRefill = FairObservation.CaptureSetupPiles(state);
+        check(beforeRefill.DrawPile.Length < 9 && beforeRefill.OtherPiles.Count > 0,
+            "refill fixture needs a short draw pile and a non-empty discard pile");
+        Draw(loop, player, beforeRefill.DrawPile.Length + 1);
+        check(FairObservation.RevealedSetupDraws(beforeRefill, state) == null,
+            "a setup draw that reshuffled the discard pile is not treated as a revealed draw prefix");
+        return new
+        {
+            live = live.Select(card => card.Id.Entry).ToArray(),
+            unconditionedSample = sampled.Select(card => card.Id.Entry).ToArray(),
+            unconditionedMatchesLive = sampled.SequenceEqual(live),
+        };
+    }
+
+    private static void Draw(MainLoopContext loop, Player player, int count)
+        => loop.RunUntilCompleted(
+            CardPileCmd.Draw(new BlockingPlayerChoiceContext(), count, player, fromHandDraw: false),
+            TimeSpan.FromSeconds(30),
+            $"CardPileCmd.Draw {count}");
+
+    private static CardModel[] SimulatedDraws(CombatRootSnapshot root, Player player, int count)
+        => [.. root.ForkSimulator().Draw(player, count).Select(card => card.Original)];
 
     private static void Add(MainLoopContext loop, CardModel card, CardPilePosition position)
         => loop.RunUntilCompleted(

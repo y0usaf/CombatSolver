@@ -93,6 +93,34 @@ internal sealed class FairObservation
         return text.ToString();
     }
 
+    internal readonly record struct SetupPiles(CardModel[] DrawPile, HashSet<CardModel> OtherPiles);
+
+    internal static SetupPiles CaptureSetupPiles(PlayerCombatState state)
+        => new([.. state.DrawPile.Cards],
+            new(state.DiscardPile.Cards.Concat(state.ExhaustPile.Cards).Concat(state.PlayPile.Cards),
+                ReferenceEqualityComparer.Instance));
+
+    internal static CardModel[]? RevealedSetupDraws(SetupPiles before, PlayerCombatState live)
+    {
+        HashSet<CardModel> remaining = new(live.DrawPile.Cards, ReferenceEqualityComparer.Instance);
+        int drawn = before.DrawPile.TakeWhile(card => !remaining.Contains(card)).Count();
+        if (before.DrawPile.Skip(drawn).Any(card => !remaining.Contains(card))
+            || live.Hand.Cards.Any(before.OtherPiles.Contains))
+            return null;
+        return before.DrawPile[..drawn];
+    }
+
+    internal static void PlaceRevealedDrawsOnTop(
+        CombatPredictionSimulator simulator,
+        Player player,
+        IReadOnlyList<CardModel> revealed)
+    {
+        SimCardPile pile = simulator.State.GetPlayerCombatState(player).DrawPile;
+        PredictedCard[] top = [.. revealed.Select(card => pile.Cards.Single(candidate =>
+            ReferenceEquals(candidate.Original, card)))];
+        pile.Reorder([.. top, .. pile.Cards.Where(card => !top.Contains(card, ReferenceEqualityComparer.Instance))]);
+    }
+
     internal readonly record struct RevealCursor(PredictionRngState[] Streams, CardModel[] DrawPile);
 
     internal static RevealCursor CaptureReveal(CombatState state, Player player)

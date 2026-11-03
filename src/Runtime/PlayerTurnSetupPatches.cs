@@ -117,7 +117,8 @@ internal static class PlayerTurnSetupCoordinator
         BattleDamageSnapshot BattleDamage,
         SearchPolicySnapshot SearchPolicy,
         CombatRootSnapshot RootSnapshot,
-        SolvedRouteCache RouteCache);
+        SolvedRouteCache RouteCache,
+        FairObservation.SetupPiles SetupPiles);
 
     private sealed class ActivePlan(
         CombatState combat,
@@ -789,7 +790,8 @@ internal static class PlayerTurnSetupCoordinator
                 battleDamage,
                 searchPolicy,
                 rootSnapshot,
-                SolvedRouteCache.Capture(combat, rootSnapshot, searchPolicy, battleDamage));
+                SolvedRouteCache.Capture(combat, rootSnapshot, searchPolicy, battleDamage),
+                FairObservation.CaptureSetupPiles(player.PlayerCombatState!));
         }
         catch
         {
@@ -1118,7 +1120,7 @@ internal static class PlayerTurnSetupCoordinator
             BattleDamageTracker.Observe(active.Combat),
             SolverController.CaptureSearchPolicy(settings, active.Combat, includeTurnSetup: true,
                 theftPolicy: SolverController.ResolveTheftPolicy(active.Combat), interaction: active.Interaction),
-            original.RootSnapshot, original.RouteCache);
+            original.RootSnapshot, original.RouteCache, original.SetupPiles);
         await SearchPendingChoiceAsync(active, host, phaseTask, refreshed, manual: true);
     }
 
@@ -1137,10 +1139,38 @@ internal static class PlayerTurnSetupCoordinator
             await active.PlanReady.Task.WaitAsync(active.Token);
             return false;
         }
+        if (!TryApplyRevealedSetupDraws(active))
+        {
+            active.SearchState = 2;
+            active.PlanReady.TrySetResult();
+            return false;
+        }
         active.Choices.RecordSearchStarted();
         Entry.Logger.Info($"[CombatSolver/Test] TURN_SETUP_SEARCH_START turn={active.Player.PlayerCombatState!.TurnNumber} phase={phase} after_native_choice_visible=true");
         return await SearchPendingChoiceAsync(active, host, phaseTask,
             active.InitialSearch ?? throw new InvalidOperationException("回合准备搜索缺少根。"), manual: false);
+    }
+
+    private static bool TryApplyRevealedSetupDraws(ActivePlan active)
+    {
+        if (!FairObservation.Enabled)
+            return true;
+        InitialSearchContext context = active.InitialSearch
+            ?? throw new InvalidOperationException("回合准备搜索缺少根。");
+        PlayerCombatState state = active.Player.PlayerCombatState
+            ?? throw new InvalidOperationException("回合准备选牌时玩家没有战斗牌堆。");
+        CardModel[]? revealed = FairObservation.RevealedSetupDraws(context.SetupPiles, state);
+        if (revealed == null)
+        {
+            Entry.Logger.Info(
+                $"[CombatSolver/Fair] TURN_SETUP_DRAW_UNCONDITIONED turn={state.TurnNumber} " +
+                "reason=draw_not_top_prefix choice=player");
+            return false;
+        }
+        context.RootSnapshot.PlaceRevealedDrawsOnTop(revealed);
+        Entry.Logger.Info(
+            $"[CombatSolver/Fair] TURN_SETUP_DRAW_CONDITIONED turn={state.TurnNumber} revealed={revealed.Length}");
+        return true;
     }
 
     private static async Task<bool> SearchPendingChoiceAsync(

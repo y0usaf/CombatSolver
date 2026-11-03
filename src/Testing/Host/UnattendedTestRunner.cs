@@ -574,6 +574,12 @@ internal sealed partial class UnattendedTestRunner
         while (true)
         {
             EnsureWithinDeadline();
+            if (SolverController.LastTurnSetupFailureForTesting is { } setupFailure)
+            {
+                throw new InvalidOperationException(
+                    $"回合准备选牌失败：{setupFailure.GetType().Name}: {setupFailure.Message}",
+                    setupFailure);
+            }
             CombatState? state = CombatManager.Instance.DebugOnlyGetState();
             Player? player = state == null ? null : LocalContext.GetMe(state);
             if (_request.ScenarioId.StartsWith("TURN-SETUP-UI-", StringComparison.Ordinal))
