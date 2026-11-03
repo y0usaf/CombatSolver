@@ -39,11 +39,13 @@ internal static class LiveEndTurnRiskEvaluator
         PlanCardChoice[] cursorChoices = endTurnChoices
             .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
             .ToArray();
+        CombatPredictionSimulator simulator = new(combat);
+        FairObservation.FromEntropy().ApplyToRoot(simulator);
         combat.BeginActionChoices(cursorChoices);
         combat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnEnd);
         try
         {
-            LiveEndTurnRiskProjection projection = EvaluateCore(player, combat, endTurnChoices);
+            LiveEndTurnRiskProjection projection = EvaluateCore(player, combat, simulator, endTurnChoices);
             if (combat.HasPendingChoice)
                 throw new InvalidOperationException("结束回合复核产生了路线未提供的选牌。");
             return projection;
@@ -57,10 +59,9 @@ internal static class LiveEndTurnRiskEvaluator
     private static LiveEndTurnRiskProjection EvaluateCore(
         Player player,
         SimulatedCombatState combat,
+        CombatPredictionSimulator simulator,
         IReadOnlyList<PlanCardChoice> endTurnChoices)
     {
-        CombatPredictionSimulator simulator = new(combat);
-        FairObservation.FromEntropy().ApplyToRoot(simulator);
         SimCreatureState simulatedPlayer = simulator.State.GetCreature(player.Creature);
         int hpBefore = simulatedPlayer.CurrentHp;
         HashSet<uint> processedEnemyDeaths = [];
