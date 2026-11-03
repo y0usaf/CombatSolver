@@ -2528,7 +2528,8 @@ internal static partial class SolverController
             samples.Count,
             candidates,
             data.FairPlannerDeathPenalty,
-            data.FairPlannerUnfinishedEnemyHpWeight);
+            data.FairPlannerUnfinishedEnemyHpWeight,
+            data.FairPlannerEvaluationTimeFactor);
         Stopwatch stopwatch = Stopwatch.StartNew();
         FairDecision? decision = FairDecisionPlanner.Decide(
             samples,
@@ -2542,6 +2543,8 @@ internal static partial class SolverController
         Entry.Logger.Info(
             $"[CombatSolver/Fair] MULTI_SAMPLE_DECISION generation={generation} samples={samples.Count} " +
             $"solves={decision?.Solves ?? 1} elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F0} " +
+            $"own_phase_ms={decision?.OwnPhaseMilliseconds ?? 0} slowest_solve_ms={decision?.SlowestSolveMilliseconds ?? 0} " +
+            $"skipped_evaluations={decision?.SkippedEvaluations ?? 0} " +
             $"chosen={(decision == null ? "-" : FairDecisionPlanner.Key(decision.Action))} candidates=" +
             string.Join(' ', decision?.Candidates.Select(score =>
                 $"[{score.Key} mean={score.MeanUtility:F1} death={score.DeathRate:F2} sd={score.StandardDeviation:F1} " +

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace CombatSolver;
 
 internal enum FairPlannerMode
@@ -10,7 +12,8 @@ internal sealed record FairPlannerSettings(
     int Samples,
     int MaxCandidates,
     double DeathPenalty,
-    double UnfinishedEnemyHpWeight);
+    double UnfinishedEnemyHpWeight,
+    double EvaluationTimeFactor = 0);
 
 internal sealed record FairCandidateScore(
     string Key,
@@ -25,7 +28,12 @@ internal sealed record FairDecision(
     PlanAction Action,
     SolverResult Route,
     IReadOnlyList<FairCandidateScore> Candidates,
-    int Solves);
+    int Solves,
+    long OwnPhaseMilliseconds,
+    long SlowestSolveMilliseconds,
+    int SkippedEvaluations);
+
+internal sealed class FairSolveTimeoutException(string message) : InvalidOperationException(message);
 
 internal static class FairDecisionPlanner
 {
@@ -49,14 +57,26 @@ internal static class FairDecisionPlanner
         SearchPolicySnapshot isolatedPolicy,
         IReadOnlyList<PlanAction>? prefix,
         CancellationToken token)
-        => new CombatBeamSolver(
-            root,
-            names,
-            damage,
-            isolatedPolicy with { RequestWorkTotals = new SearchRequestWorkTotals() },
-            token,
-            searchProfile: isolatedPolicy.Profile,
-            fixedPrefixActions: prefix).Solve();
+    {
+        int hardLimit = Math.Max(8000, 4 * isolatedPolicy.Profile.SoftTimeBudgetMilliseconds);
+        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(token);
+        limit.CancelAfter(hardLimit);
+        try
+        {
+            return new CombatBeamSolver(
+                root,
+                names,
+                damage,
+                isolatedPolicy with { RequestWorkTotals = new SearchRequestWorkTotals() },
+                limit.Token,
+                searchProfile: isolatedPolicy.Profile,
+                fixedPrefixActions: prefix).Solve();
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            throw new FairSolveTimeoutException($"fair sample solve exceeded {hardLimit} ms");
+        }
+    }
 
     public static IReadOnlyList<PlanAction> RevealedVariants(
         CombatRootSnapshot root,
@@ -119,11 +139,40 @@ internal static class FairDecisionPlanner
         CancellationToken token)
     {
         int sampleCount = samples.Count;
-        SolverResult[] own = new SolverResult[sampleCount];
+        SolverResult?[] own = new SolverResult?[sampleCount];
         ParallelOptions parallel = new() { CancellationToken = token, MaxDegreeOfParallelism = sampleCount };
-        Parallel.For(0, sampleCount, parallel, sample => own[sample] = solve(samples[sample], null));
+        long slowestSolve = 0;
+        Stopwatch ownPhase = Stopwatch.StartNew();
+        Parallel.For(0, sampleCount, parallel, sample =>
+        {
+            try
+            {
+                own[sample] = TimedSolve(samples[sample], null);
+            }
+            catch (FairSolveTimeoutException ex) when (!token.IsCancellationRequested)
+            {
+                LogInvalid(sample, "-", ex);
+            }
+        });
+        ownPhase.Stop();
 
-        string?[] ownKeys = own.Select(result => result.BestNode.Actions.Count == 0
+        SolverResult TimedSolve(CombatRootSnapshot root, IReadOnlyList<PlanAction>? prefix)
+        {
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                return solve(root, prefix);
+            }
+            finally
+            {
+                long elapsed = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                long seen = Interlocked.Read(ref slowestSolve);
+                while (elapsed > seen && Interlocked.CompareExchange(ref slowestSolve, elapsed, seen) != seen)
+                    seen = Interlocked.Read(ref slowestSolve);
+            }
+        }
+
+        string?[] ownKeys = own.Select(result => result == null || result.BestNode.Actions.Count == 0
             ? null
             : CandidateKey(result.BestNode.Actions[0])).ToArray();
         var proposals = ownKeys
@@ -133,7 +182,7 @@ internal static class FairDecisionPlanner
             .OrderByDescending(group => group.Count())
             .ThenBy(group => group.Key, StringComparer.Ordinal)
             .Take(settings.MaxCandidates)
-            .Select(group => (Key: group.Key, Action: own[group.First().sample].BestNode.Actions[0], Count: group.Count()))
+            .Select(group => (Key: group.Key, Action: own[group.First().sample]!.BestNode.Actions[0], Count: group.Count()))
             .ToArray();
         if (proposals.Length == 0)
             return null;
@@ -141,8 +190,13 @@ internal static class FairDecisionPlanner
         double?[,] utilities = new double?[proposals.Length, sampleCount];
         SolverResult?[,] routes = new SolverResult?[proposals.Length, sampleCount];
         int solves = sampleCount;
+        int skipped = 0;
         if (proposals.Length > 1)
         {
+            long evaluationDeadline = settings.EvaluationTimeFactor > 0
+                ? Stopwatch.GetTimestamp() + (long)(Math.Max(ownPhase.Elapsed.TotalSeconds * settings.EvaluationTimeFactor, 3d)
+                    * Stopwatch.Frequency)
+                : long.MaxValue;
             int[] extra = new int[sampleCount];
             Parallel.For(0, sampleCount, parallel, sample =>
             {
@@ -173,10 +227,15 @@ internal static class FairDecisionPlanner
 
             bool TryEvaluate(int sample, int candidate, PlanAction action, bool revealedFallback)
             {
+                if (Stopwatch.GetTimestamp() > evaluationDeadline)
+                {
+                    Interlocked.Increment(ref skipped);
+                    return true;
+                }
                 extra[sample]++;
                 try
                 {
-                    SolverResult result = solve(samples[sample], [action]);
+                    SolverResult result = TimedSolve(samples[sample], [action]);
                     double utility = Utility(result, settings);
                     if (utilities[candidate, sample] is not { } known || utility > known)
                     {
@@ -203,7 +262,7 @@ internal static class FairDecisionPlanner
                 if (!string.Equals(ownKeys[sample], proposals[candidate].Key, StringComparison.Ordinal))
                     continue;
                 routes[candidate, sample] = own[sample];
-                utilities[candidate, sample] = Utility(own[sample], settings);
+                utilities[candidate, sample] = Utility(own[sample]!, settings);
             }
         }
 
@@ -240,6 +299,7 @@ internal static class FairDecisionPlanner
         int routeSample = Enumerable.Range(0, sampleCount)
             .Where(sample => routes[bestIndex, sample] != null)
             .MaxBy(sample => utilities[bestIndex, sample]!.Value);
-        return new FairDecision(best.Action, routes[bestIndex, routeSample]!, scores, solves);
+        return new FairDecision(best.Action, routes[bestIndex, routeSample]!, scores, solves,
+            ownPhase.ElapsedMilliseconds, Interlocked.Read(ref slowestSolve), skipped);
     }
 }
