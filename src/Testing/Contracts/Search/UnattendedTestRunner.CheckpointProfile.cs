@@ -50,10 +50,8 @@ internal sealed partial class UnattendedTestRunner
 
     private void AssertCheckpointPortfolioSettingsContract(CombatState combat)
     {
-        SolverSettingsData original = SolverSettings.Current;
         JsonObject? previousImport = _checkpointImport;
         SolverSettingsSnapshot before = SolverSettings.Capture();
-        SolverSearchProfile profile = before.Profile;
         try
         {
             foreach (var flags in new[]
@@ -62,7 +60,7 @@ internal sealed partial class UnattendedTestRunner
                 (Novelty: false, Beam: true, Early: true, Reward: true),
             })
             {
-                SolverSettingsData current = original with
+                SolverSettingsSnapshot current = before with
                 {
                     UseNoveltyPortfolio = !flags.Novelty,
                     UseBeamWidthPortfolio = !flags.Beam,
@@ -70,22 +68,18 @@ internal sealed partial class UnattendedTestRunner
                     PredictPotionReward = !flags.Reward,
                 };
                 JsonObject recorded = JsonSerializer.SerializeToNode(current, UnattendedTestFiles.JsonOptions)!.AsObject();
-                recorded["potionPolicy"] = JsonSerializer.SerializeToNode(current.PotionPolicy, UnattendedTestFiles.JsonOptions);
-                recorded["profile"] = JsonSerializer.SerializeToNode(profile, UnattendedTestFiles.JsonOptions);
-                recorded["searchMaxDegreeOfParallelism"] = before.SearchMaxDegreeOfParallelism;
                 recorded["useNoveltyPortfolio"] = flags.Novelty;
                 recorded["useBeamWidthPortfolio"] = flags.Beam;
                 recorded["useEarlyTurnExploration"] = flags.Early;
                 recorded["predictPotionReward"] = flags.Reward;
                 _checkpointImport = new JsonObject { ["resolvedPolicy"] = recorded };
-                SolverSettingsData restored = ApplyRecordedCheckpointPolicy(current);
+                SolverSettingsSnapshot restored = ApplyRecordedCheckpointPolicy(current);
                 if (restored.UseNoveltyPortfolio != flags.Novelty
                     || restored.UseBeamWidthPortfolio != flags.Beam
                     || restored.UseEarlyTurnExploration != flags.Early
                     || restored.PredictPotionReward != flags.Reward)
                     throw new InvalidOperationException("Recorded portfolio/reward switches were replaced by current settings.");
-                SolverSettings.ApplyForTesting(restored);
-                SearchPolicySnapshot frozen = SolverController.CaptureSearchPolicy(SolverSettings.Capture(), combat, false, null);
+                SearchPolicySnapshot frozen = SolverController.CaptureSearchPolicy(restored, combat, false, null);
                 if (frozen.UseNoveltyPortfolio != flags.Novelty
                     || frozen.UseBeamWidthPortfolio != flags.Beam
                     || frozen.EarlyTurnExplorationDepth != (flags.Early ? 2 : 0)
@@ -93,7 +87,7 @@ internal sealed partial class UnattendedTestRunner
                     throw new InvalidOperationException("Recorded portfolio/reward switches changed during policy capture.");
                 foreach (string key in new[] { "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward" })
                     recorded.Remove(key);
-                SolverSettingsData legacy = ApplyRecordedCheckpointPolicy(current);
+                SolverSettingsSnapshot legacy = ApplyRecordedCheckpointPolicy(current);
                 if (legacy.UseNoveltyPortfolio != current.UseNoveltyPortfolio
                     || legacy.UseBeamWidthPortfolio != current.UseBeamWidthPortfolio
                     || legacy.UseEarlyTurnExploration != current.UseEarlyTurnExploration
@@ -105,7 +99,7 @@ internal sealed partial class UnattendedTestRunner
         finally
         {
             _checkpointImport = previousImport;
-            SolverSettings.ApplyForTesting(original);
+            SolverController.ClearPotionDirectivesForTesting();
         }
     }
 }

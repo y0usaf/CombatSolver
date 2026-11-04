@@ -345,7 +345,6 @@ jq -n \
         clearPlayerPiles: false,
         verifyIncrementalSearch: false,
         verifyBaseLibCardModifierBoundary: $verify_baselib,
-        performancePresetForTest: "Medium",
         enableNoGcRegionForTest: true,
         noGcRegionBudgetGigabytesForTest: 16,
         deploymentFastModeForTest: "Instant",

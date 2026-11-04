@@ -221,7 +221,7 @@ internal static class FairObservationChecks
                 },
                 (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, isolated, action, CancellationToken.None),
                 (root, actions) => FairDecisionPlanner.RevealFreeLength(root, names, damage, isolated, actions, CancellationToken.None),
-                new FairPlannerSettings(roots.Length, 3, 200, 0.25),
+                FairPlannerSettings.For(SolverSpeed.Normal) with { Samples = roots.Length, MaxCandidates = 3 },
                 CancellationToken.None);
         });
         loop.RunUntilCompleted(task, TimeSpan.FromMinutes(5), "gc-isolated multi-sample decision");
@@ -396,7 +396,8 @@ internal static class FairObservationChecks
         SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
             SolverSettings.Capture(), combat, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(combat));
         SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(policy, policy.Profile);
-        FairPlannerSettings settings = new(roots.Length, 3, 200, 0.25, MaxParallelism: maxParallelism);
+        FairPlannerSettings settings = FairPlannerSettings.For(SolverSpeed.Normal) with
+            { Samples = roots.Length, MaxCandidates = 3, MaxParallelism = maxParallelism };
         Task<FairDecision?> task = Task.Run(() => FairDecisionPlanner.Decide(
             roots,
             (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, isolated, prefix, CancellationToken.None),

@@ -11,7 +11,6 @@
   "initialEnemyMoveIds": ["TOXIC_MOVE", "SUCK_MOVE"],
   "initialPlayerHp": 48,
   "initialPlayerMaxHp": 70,
-  "performancePresetForTest": "High",
   "potionPolicyForTest": "Smart",
   "expectedInitialPotionCount": 0,
   "expectedInitialProjectedBattleHpLostAtMost": 11,

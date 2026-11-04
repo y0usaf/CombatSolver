@@ -102,19 +102,13 @@ internal static class FairPlay
             throw new ArgumentException($"OFFLINE_HARNESS_FAIR_PLAY must be v2 or clairvoyant, not {mode}.");
         InstallPlayBypasses();
         Player player = combat.Players.Single();
-        FairPlannerSettings settings = new(
-            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_K") ?? "12"),
-            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_CANDIDATES") ?? "4"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DEATH_PENALTY") ?? "200"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_ENEMY_WEIGHT") ?? "0.25"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_COMMIT_AGREEMENT") ?? "1"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TIE_SE") ?? "1"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TIE_MARGIN") ?? "1"),
-            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DOP") ?? "0"));
+        FairPlannerSettings settings = FairPlannerSettings.For(
+            Enum.Parse<SolverSpeed>(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_SPEED") ?? nameof(SolverSpeed.Normal)))
+            with { MaxParallelism = int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DOP") ?? "0") };
         bool determinismCheck = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DETERMINISM") == "1";
         int determinismMismatches = 0;
         SolverSettingsSnapshot solverSettings = SolverSettings.Capture();
-        SolverSearchProfile profile = solverSettings.Profile with
+        SolverSearchProfile profile = settings.Profile(SolverSearchProfile.Default) with
         {
             SoftTimeBudgetMilliseconds = options.BudgetMilliseconds,
         };

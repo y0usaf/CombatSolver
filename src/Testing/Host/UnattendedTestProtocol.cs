@@ -258,7 +258,6 @@ internal sealed class UnattendedTestRequest
     public bool ExpectedPlayerDeath { get; init; }
     public SolverDeploymentFastMode? HeadlessFastModeForTest { get; init; }
     public SolverDeploymentFastMode? DeploymentFastModeForTest { get; init; }
-    public SolverPerformancePreset? PerformancePresetForTest { get; init; }
     public int? SearchBeamWidthForTest { get; init; }
     public int? SearchMaxExpandedNodesForTest { get; init; }
     public BeamWeightTerm? BeamWeightTermForTest { get; init; }

@@ -40,7 +40,6 @@
       "treatAsDeckCard": true
     }
   ],
-  "performancePresetForTest": "Low",
   "forceShortSearchOnly": true,
   "shortSearchBudgetOverrideMilliseconds": 10000,
   "searchMaxDegreeOfParallelismForTest": 1,

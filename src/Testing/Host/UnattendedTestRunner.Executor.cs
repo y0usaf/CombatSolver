@@ -22,12 +22,14 @@ internal sealed partial class UnattendedTestRunner
         {
             if (_settingsBeforeTest != null)
                 SolverSettings.ApplyForTesting(_settingsBeforeTest);
+            SolverSettings.OverrideSnapshotForTesting(null);
+            SolverController.ClearPotionDirectivesForTesting();
         }
         public void PrepareArchiveSettings()
         {
             if (runner._checkpointImport?["resolvedPolicy"] == null) return;
             _settingsBeforeTest ??= SolverSettings.Current;
-            SolverSettings.ApplyForTesting(runner.ApplyRecordedCheckpointPolicy(_settingsBeforeTest));
+            SolverSettings.OverrideSnapshotForTesting(runner.ApplyRecordedCheckpointPolicy);
         }
 
         public async Task<ExecutionOutcome> ExecuteAsync(ScenarioContext scenario)
@@ -1074,7 +1076,7 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "POTION-REWARD-FORECAST")
             {
                 _settingsBeforeTest ??= SolverSettings.Current;
-                SolverSettings.ApplyForTesting(_settingsBeforeTest with { PredictPotionReward = true });
+                SolverSettings.OverrideSnapshotForTesting(current => current with { PredictPotionReward = true });
                 await runner.AssertPotionRewardForecastAsync(combatState, player);
             }
             if (request.ScenarioId == "PR18-FOREIGN-ONPLAY-BOUNDARY")
@@ -1978,7 +1980,6 @@ internal sealed partial class UnattendedTestRunner
         {
             UnattendedTestRequest request = runner._request;
             if (runner._checkpointImport == null
-                && !request.PerformancePresetForTest.HasValue
                 && !request.SearchBeamWidthForTest.HasValue
                 && !request.SearchMaxExpandedNodesForTest.HasValue
                 && !request.ShortMaxCardBranchesPerNodeForTest.HasValue
@@ -1994,72 +1995,40 @@ internal sealed partial class UnattendedTestRunner
             }
 
             _settingsBeforeTest ??= SolverSettings.Current;
-            SolverSettingsData recordedSettings = runner.ApplyRecordedCheckpointPolicy(_settingsBeforeTest);
-            SolverSettingsData testSettings = request.PerformancePresetForTest is { } preset
-                ? SolverSettings.ApplyPerformancePreset(recordedSettings, preset)
-                : recordedSettings;
-            bool hasCustomPerformanceOverride = request.ShortMaxCardBranchesPerNodeForTest.HasValue
-                || request.DeepMaxCardBranchesPerNodeForTest.HasValue
-                || request.SearchBeamWidthForTest.HasValue
-                || request.SearchMaxExpandedNodesForTest.HasValue;
             if (request.SearchBeamWidthForTest is < 1 or > 512)
                 throw new ArgumentOutOfRangeException(nameof(request.SearchBeamWidthForTest));
             if (request.SearchMaxExpandedNodesForTest is < 100)
                 throw new ArgumentOutOfRangeException(nameof(request.SearchMaxExpandedNodesForTest));
-            if (request.SearchBeamWidthForTest.HasValue || request.SearchMaxExpandedNodesForTest.HasValue)
+            SolverSettings.ApplyForTesting(_settingsBeforeTest with
             {
-                testSettings = SolverSettings.ApplyPerformancePreset(testSettings, SolverPerformancePreset.Custom);
-                testSettings = testSettings with
-                {
-                    PerformancePreset = SolverPerformancePreset.Custom,
-                    SearchBeamWidth = request.SearchBeamWidthForTest ?? testSettings.SearchBeamWidth,
-                    SearchMaxExpandedNodes = request.SearchMaxExpandedNodesForTest ?? testSettings.SearchMaxExpandedNodes,
-                };
-            }
-            if (request.NoGcRegionBudgetGigabytesForTest is { } noGcBudget)
-            {
-                testSettings = testSettings with
-                {
-                    NoGcRegionBudgetGigabytes = noGcBudget,
-                };
-            }
-            if (request.ShortMaxCardBranchesPerNodeForTest is { } shortMaxCardBranches)
-            {
-                testSettings = testSettings with
-                {
-                    PerformancePreset = SolverPerformancePreset.Custom,
-                    SearchMaxCardBranchesPerNode = shortMaxCardBranches,
-                };
-            }
-            if (request.DeepMaxCardBranchesPerNodeForTest is { } deepMaxCardBranches)
-            {
-                testSettings = testSettings with
-                {
-                    PerformancePreset = SolverPerformancePreset.Custom,
-                    SearchMaxCardBranchesPerNode = deepMaxCardBranches,
-                };
-            }
-            SolverSettings.ApplyForTesting(testSettings with
-            {
-                EnableNoGcRegion = request.EnableNoGcRegionForTest
-                    ?? testSettings.EnableNoGcRegion,
                 DeploymentFastMode = request.DeploymentFastModeForTest
                     ?? _settingsBeforeTest.DeploymentFastMode,
                 DeploymentInterActionDelaySeconds = request.DeploymentInterActionDelaySecondsForTest
                     ?? _settingsBeforeTest.DeploymentInterActionDelaySeconds,
                 EnableDetailedDiagnosticLogs = request.EnableDetailedDiagnosticLogsForTest
                     ?? _settingsBeforeTest.EnableDetailedDiagnosticLogs,
-                PotionPolicy = request.PotionPolicyForTest
-                    ?? testSettings.PotionPolicy,
+            });
+            SolverSettings.OverrideSnapshotForTesting(current =>
+            {
+                SolverSettingsSnapshot recorded = runner.ApplyRecordedCheckpointPolicy(current);
+                return recorded with
+                {
+                    Profile = recorded.Profile with
+                    {
+                        BeamWidth = request.SearchBeamWidthForTest ?? recorded.Profile.BeamWidth,
+                        MaxExpandedNodes = request.SearchMaxExpandedNodesForTest ?? recorded.Profile.MaxExpandedNodes,
+                        MaxCardBranchesPerNode = request.DeepMaxCardBranchesPerNodeForTest
+                            ?? request.ShortMaxCardBranchesPerNodeForTest
+                            ?? recorded.Profile.MaxCardBranchesPerNode,
+                    },
+                    EnableNoGcRegion = request.EnableNoGcRegionForTest ?? recorded.EnableNoGcRegion,
+                    NoGcRegionBudgetBytes = request.NoGcRegionBudgetGigabytesForTest is { } noGcBudget
+                        ? checked((long)Math.Round(noGcBudget * 1_000_000_000d, MidpointRounding.AwayFromZero))
+                        : recorded.NoGcRegionBudgetBytes,
+                    PotionPolicy = request.PotionPolicyForTest ?? recorded.PotionPolicy,
+                };
             });
             FastModeType fastModeBeforeDeployment = SaveManager.Instance.PrefsSave.FastMode;
-            if (request.PerformancePresetForTest is { } expectedPreset)
-            {
-                runner.AssertPerformancePreset(
-                    hasCustomPerformanceOverride
-                        ? SolverPerformancePreset.Custom
-                        : expectedPreset);
-            }
             SolverSettingsSnapshot snapshot = SolverSettings.Capture();
             if (request.SearchBeamWidthForTest is { } expectedBeam
                 && snapshot.Profile.BeamWidth != expectedBeam)
@@ -2069,7 +2038,7 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidOperationException($"测试节点额度为 {snapshot.Profile.MaxExpandedNodes}，预期 {expectedNodes}。");
             if (runner._writer.ReplayVerification != null)
                 runner._writer.ReplayVerification["executedPolicy"] = System.Text.Json.JsonSerializer.SerializeToNode(
-                    new { snapshot.PotionPolicy, SolverSettings.Current.PotionDirectives,
+                    new { snapshot.PotionPolicy,
                         snapshot.ActTransitionBossHpStrategy, snapshot.FinalBossHpStrategy,
                         snapshot.Profile, snapshot.SearchMaxDegreeOfParallelism },
                     UnattendedTestFiles.JsonOptions);

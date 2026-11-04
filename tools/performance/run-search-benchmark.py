@@ -87,7 +87,6 @@ def main():
         "--timeout-seconds", str(args.timeout),
         "--headless-memory-reservation-mib", str(args.memory_mib),
         "--headless-cpu-reservation", str(args.dop),
-        "--performance-preset-for-test", settings["performancePreset"],
         "--search-budget-override-milliseconds", str(round(settings["searchTimeLimitSeconds"] * 1000)),
         "--search-max-degree-of-parallelism-for-test", str(args.dop),
         "--enable-no-gc-region-for-test", "1" if enabled else "0",

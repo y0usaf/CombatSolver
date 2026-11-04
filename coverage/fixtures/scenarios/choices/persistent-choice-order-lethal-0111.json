@@ -23,7 +23,6 @@
     { "cardId": "PARSE", "pile": "Hand", "count": 2, "upgradeLevels": 1 },
     { "cardId": "ERADICATE", "pile": "Hand", "upgradeLevels": 1 }
   ],
-  "performancePresetForTest": "VeryHigh",
   "potionPolicyForTest": "Disabled",
   "searchMaxDegreeOfParallelismForTest": 1,
   "shortSearchBudgetOverrideMilliseconds": 20000,

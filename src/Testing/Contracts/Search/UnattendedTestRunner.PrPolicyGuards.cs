@@ -148,9 +148,8 @@ internal sealed partial class UnattendedTestRunner
 
         CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
         if (root.PotionRewardOutlook != PotionRewardOutlook.None
-            || new SolverSettingsData().PredictPotionReward
-            || !SolverSettings.RoundTripForTesting(new SolverSettingsData { PredictPotionReward = true }).PredictPotionReward)
-            throw new InvalidOperationException("战后药水预知开关默认值或设置持久化错误。");
+            || SolverSettings.Capture().PredictPotionReward)
+            throw new InvalidOperationException("战后药水预知必须固定关闭。");
         if (!root.SearchablePotions.Any(potion => potion.PotionId == "SWIFT_POTION" && potion.StrategicHpCost == 18))
             throw new InvalidOperationException("搜索根没有捕获 Swift 药水的 18 HP 成本。");
         AssertPotionRewardOutlook(combat, CombatRootSnapshot.Capture(combat, predictPotionReward: true));

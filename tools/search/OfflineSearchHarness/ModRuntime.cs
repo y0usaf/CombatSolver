@@ -87,10 +87,7 @@ internal static class ModRuntime
     {
         SolverSearchProfile baseline = options.Profile switch
         {
-            "Low" => Preset(SolverPerformancePreset.Low),
-            "Medium" => Preset(SolverPerformancePreset.Medium),
-            "High" => Preset(SolverPerformancePreset.High),
-            "VeryHigh" => Preset(SolverPerformancePreset.VeryHigh),
+            "Medium" => SolverSearchProfile.Default,
             // Custom 沿用模组自己写进 combat_solver_settings.json 的默认分支上限 32/18/24。
             "Custom" => new SolverSearchProfile(24, 2000, 32, 18, 24, 600_000),
             _ => throw new ArgumentException($"未知预设 {options.Profile}。"),
@@ -108,10 +105,6 @@ internal static class ModRuntime
         return profile;
     }
 
-    /// <summary>预设值一律问模组自己要，不在宿主里抄常量。</summary>
-    private static SolverSearchProfile Preset(SolverPerformancePreset preset)
-        => SolverSettings.ResolvePerformanceValues(
-            new SolverSettingsData { PerformancePreset = preset }).Profile;
 
     /// <summary>
     /// 与 <c>run_mac.py</c> 写进 combat_solver_settings.json 的同一套口径（预设换成解析后的 profile）。
@@ -119,37 +112,46 @@ internal static class ModRuntime
     private static void ApplyFixedBudgetSettings(HarnessOptions options)
     {
         SolverSearchProfile profile = ResolveProfile(options);
-        SolverSettingsData? resourceSettings = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_RESOURCE_SETTINGS")
+        ResourceSettings? resourceSettings = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_RESOURCE_SETTINGS")
             is { Length: > 0 } resourcePath
-                ? System.Text.Json.JsonSerializer.Deserialize<SolverSettingsData>(File.ReadAllText(resourcePath),
+                ? System.Text.Json.JsonSerializer.Deserialize<ResourceSettings>(File.ReadAllText(resourcePath),
                     new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true,
                         Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } })
                     ?? throw new InvalidDataException("Empty resource policy settings.")
                 : null;
         SolverSettings.ApplyForTesting(new SolverSettingsData
         {
-            PerformanceMigrationVersion = SolverSettings.CurrentPerformanceMigrationVersion,
-            PerformancePreset = SolverPerformancePreset.Custom,
-            SearchMaxExpandedNodes = profile.MaxExpandedNodes,
-            SearchBeamWidth = profile.BeamWidth,
-            SearchTimeLimitSeconds = 600,
+            OnlineStatisticsEnabled = false,
+            SearchCompletionNotificationsEnabled = false,
+        });
+        SolverSettings.OverrideSnapshotForTesting(current => current with
+        {
+            Profile = SolverSearchProfile.Default with
+            {
+                BeamWidth = profile.BeamWidth,
+                MaxExpandedNodes = profile.MaxExpandedNodes,
+                MaxCardBranchesPerNode = profile.MaxCardBranchesPerNode,
+                MaxPileChoiceBranchesPerAction = profile.MaxPileChoiceBranchesPerAction,
+                MaxHandChoiceBranchesPerAction = profile.MaxHandChoiceBranchesPerAction,
+                SoftTimeBudgetMilliseconds = 600_000,
+            },
             SearchMaxDegreeOfParallelism = options.MaxDegreeOfParallelism,
-            SearchMaxCardBranchesPerNode = profile.MaxCardBranchesPerNode,
-            SearchMaxPileChoiceBranchesPerAction = profile.MaxPileChoiceBranchesPerAction,
-            SearchMaxHandChoiceBranchesPerAction = profile.MaxHandChoiceBranchesPerAction,
             EnableNoGcRegion = options.EnableNoGcRegion,
-            NoGcRegionBudgetGigabytes = options.NoGcRegionBudgetGigabytes,
+            NoGcRegionBudgetBytes = checked((long)Math.Round(options.NoGcRegionBudgetGigabytes * 1_000_000_000d)),
             UseBeamWidthPortfolio = options.UsePortfolio,
             UseNoveltyPortfolio = options.AdaptiveNoveltyRefinement,
             StopAtAcceptableBattleHpLoss = options.StopAtZeroLoss,
-            OnlineStatisticsEnabled = false,
-            SearchCompletionNotificationsEnabled = false,
             PotionPolicy = Enum.Parse<SolverPotionPolicy>(options.PotionPolicy, ignoreCase: true),
             GrowthBudgets = resourceSettings?.GrowthBudgets ?? default,
             RelicStrategyEnabled = resourceSettings?.RelicStrategyEnabled ?? true,
             RelicCounterRules = resourceSettings?.RelicCounterRules ?? [],
         });
     }
+
+    private sealed record ResourceSettings(
+        GrowthValues GrowthBudgets,
+        bool RelicStrategyEnabled = true,
+        RelicCounterRule[]? RelicCounterRules = null);
 
     /// <summary>
     /// 无人测试请求里 <c>fixedSearchBudget</c> / <c>searchBudgetOverrideMilliseconds</c> /

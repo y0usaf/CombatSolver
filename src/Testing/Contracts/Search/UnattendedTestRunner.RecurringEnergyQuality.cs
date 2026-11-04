@@ -29,13 +29,13 @@ internal sealed partial class UnattendedTestRunner
             SetStage("full_auto");
             SolverSettings.ApplyForTesting(SolverSettings.Current with
             {
-                PerformancePreset = SolverPerformancePreset.Custom,
-                SearchTimeLimitSeconds = 60,
-                SearchBeamWidth = 24,
-                SearchMaxExpandedNodes = 6000,
-                SearchMaxDegreeOfParallelism = 1,
                 DeploymentFastMode = SolverDeploymentFastMode.Instant,
                 DeploymentInterActionDelaySeconds = 0,
+            });
+            SolverSettings.OverrideSnapshotForTesting(current => current with
+            {
+                Profile = current.Profile with { SoftTimeBudgetMilliseconds = 60_000, BeamWidth = 24, MaxExpandedNodes = 6000 },
+                SearchMaxDegreeOfParallelism = 1,
             });
             SolverController.BeginCombat(combat);
             SolverController.SetStopFullAutoOnCombatEnd(false, persist: false);

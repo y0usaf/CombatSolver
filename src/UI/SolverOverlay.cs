@@ -27,8 +27,6 @@ internal static class SolverOverlay
     private const double ActiveSearchProgressMaximum = 0.95d;
     private const double MaxElapsedClockLeadSeconds = 1d;
     private const int SignificantBattleHpLossThreshold = 8;
-    private const string NoveltyPortfolioHintText =
-        "本场战斗预计出现大战损。若对结果不满意，可前往 设置 > 性能 开启“多策略路线搜索（实验）”后重试；它会在现有预算内探索不同打法，结果可能因战斗而异。点击本消息后不再提示";
     private const string SpeedXWarningText =
         "检测到皮皮极速（SpeedX）：其悬浮显示可能持续产生大量临时内存，触发频繁回收，加重长时间游玩时的卡顿。\n需要战斗加速时，建议使用求解器自带的“瞬间”：设置 > 常规 > 自动执行，将“自动出牌速度”设为“瞬间”，“牌间额外停顿（秒）”设为 0。玩家和怪物回合均加速，局外保持原速。点击本消息后不再提示";
     private static Color Background => SolverUiTokens.Palette.Background;
@@ -84,33 +82,19 @@ internal static class SolverOverlay
     private static CheckButton? _autoEnableFullAutoSwitch;
     private static Button? _collapseButton;
     private static Button? _settingsButton;
-    private static Button? _potionStrategyButton;
-    private static Button? _growthStrategyButton;
-    private static SolverGrowthStrategyPanel? _growthStrategyPanel;
-    private static bool _growthStrategyVisible;
-    private static Button? _relicStrategyButton;
-    private static SolverRelicStrategyPanel? _relicStrategyPanel;
-    private static bool _relicStrategyVisible;
     private static PanelContainer? _searchLimitHint;
     private static Label? _searchLimitHintLabel;
     private static Button? _performanceHintButton;
-    private static Button? _bossHpStrategyHintButton;
-    private static Button? _noveltyPortfolioHintButton;
     private static Button? _speedXWarningButton;
     private static SolverMemoryUsageBar? _memoryUsageBar;
     private static Button? _systemMemoryReleaseButton;
-    private static SolverPotionStrategyPanel? _potionStrategyPanel;
     private static Control? _rightResizeHandle;
     private static Control? _bottomResizeHandle;
     private static Control? _cornerResizeHandle;
     private static PanelContainer? _feedbackBanner;
     private static Label? _feedbackBannerLabel;
-    private static HBoxContainer? _theftPolicyControls;
-    private static Button? _preserveResourcesButton;
-    private static Button? _letEscapeButton;
     private static bool _collapsed;
     private static bool _settingsVisible;
-    private static bool _potionStrategyVisible;
     private static bool _deployQueued;
     private static bool _detailsVisible;
     private static bool _dragging;
@@ -118,7 +102,6 @@ internal static class SolverOverlay
     private static bool _layoutQueued;
     private static SolverButtonStyle? _renderedExecuteButtonStyle;
     private static SolverButtonStyle? _renderedAdoptRouteButtonStyle;
-    private static SolverTheftPolicy? _renderedTheftPolicy;
     private static SolverOverlaySnapshot? _lastSnapshot;
     private static SolverOverlaySnapshot? _searchBestSnapshot;
     private static PotionRewardOutlook _searchPotionRewardOutlook;
@@ -148,7 +131,6 @@ internal static class SolverOverlay
     private static bool _themeRefreshQueued;
     private static int _remainingLayoutPasses;
     private static long _lastResizeLayoutAt;
-    private static BossHpRelief _activeBossHpRelief;
     private static Vector2 _dragOffset;
     private static ResizeEdge _activeResizeEdge = ResizeEdge.BottomRight;
     private static Vector2 _resizeStartMousePosition;
@@ -176,10 +158,6 @@ internal static class SolverOverlay
         _initializationPending = true;
     }
 
-    internal static bool TheftPolicyVisibleForTesting
-        => _theftPolicyControls != null
-            && GodotObject.IsInstanceValid(_theftPolicyControls)
-            && _theftPolicyControls.Visible;
     internal static bool UnexpectedReplanWarningVisibleForTesting
         => _feedbackBanner?.Visible == true
             && _feedbackBannerLabel?.Text.Contains("计划外重算", StringComparison.Ordinal) == true
@@ -220,10 +198,6 @@ internal static class SolverOverlay
             && _systemMemoryReleaseButton is { } button
             && button.GetParent() == bar.GetParent()
             && button.GetIndex() > bar.GetIndex();
-    internal static bool NoGcControlsConfiguredForTesting
-        => _settingsPanel?.NoGcControlsConfiguredForTesting == true;
-    internal static bool BeamWidthPortfolioControlConfiguredForTesting
-        => _settingsPanel?.BeamWidthPortfolioControlConfiguredForTesting == true;
     internal static bool MemoryUsageBarConfiguredForTesting
         => _memoryUsageBar != null
             && GodotObject.IsInstanceValid(_memoryUsageBar)
@@ -233,34 +207,15 @@ internal static class SolverOverlay
         => SolverMemoryUsageBar.ExerciseFormattingForTesting();
     internal static bool VisualSettingsConfiguredForTesting
         => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
-    internal static bool BossHpStrategySettingsConfiguredForTesting
-        => _settingsPanel?.BossHpStrategySettingsConfiguredForTesting == true;
-    internal static bool AcceptableBattleHpLossSettingsConfiguredForTesting
-        => _settingsPanel?.AcceptableBattleHpLossSettingsConfiguredForTesting == true;
     internal static bool ResizeUiConfiguredForTesting
         => _rightResizeHandle != null
             && _bottomResizeHandle != null
             && _cornerResizeHandle is TextureRect { Texture: not null }
             && _body?.SizeFlagsVertical == Control.SizeFlags.ExpandFill
             && _routeScroll?.SizeFlagsVertical == Control.SizeFlags.ExpandFill;
-    internal static bool PotionStrategyUiConfiguredForTesting
-        => _potionStrategyButton != null
-            && _potionStrategyPanel is
-            {
-                RowCountForTesting: > 0,
-                RowsUseIconAndTextForTesting: true,
-                UsesGridCardsForTesting: true,
-                IsSlimForTesting: true,
-                HasPresetControlsForTesting: true,
-            };
     internal static bool PerformanceHintVisibleForTesting => _performanceHintButton?.Visible == true;
-    internal static bool NoveltyPortfolioHintVisibleForTesting
-        => _noveltyPortfolioHintButton?.Visible == true;
     internal static bool SpeedXWarningVisibleForTesting => _speedXWarningButton?.Visible == true;
     internal static bool SearchLimitHintVisibleForTesting => _searchLimitHint?.Visible == true;
-    internal static bool BossHpStrategyHintVisibleForTesting
-        => _bossHpStrategyHintButton?.Visible == true;
-    internal static string? BossHpStrategyHintTextForTesting => _bossHpStrategyHintButton?.Text;
     internal static string? ReviewSummaryTextForTesting => _reviewText?.Text;
     internal static string? SearchSummaryTextForTesting => _summaryText?.Text;
     internal static double SearchProgressRatioForTesting => _lastSearchProgressRatio;
@@ -288,7 +243,7 @@ internal static class SolverOverlay
                 && _performanceHintButton.Text.Contains("本场战斗出现大战损", StringComparison.Ordinal)
                 && _performanceHintButton.Text.Contains("若对结果不满意", StringComparison.Ordinal)
                 && _performanceHintButton.Text.Contains("设置 > 性能", StringComparison.Ordinal)
-                && _performanceHintButton.Text.Contains("高或极高", StringComparison.Ordinal)
+                && _performanceHintButton.Text.Contains("深入", StringComparison.Ordinal)
                 && _performanceHintButton.Text.Contains("点击本消息之后不再提示", StringComparison.Ordinal)
                 && !_performanceHintButton.Text.Contains("跳转", StringComparison.Ordinal);
             SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(
@@ -306,55 +261,23 @@ internal static class SolverOverlay
 
     internal static bool ExerciseGuidanceHintsForTesting()
     {
-        if (_noveltyPortfolioHintButton == null || _speedXWarningButton == null)
+        if (_speedXWarningButton == null)
             return false;
         SolverSettingsData originalSettings = SolverSettings.Current;
         try
         {
             SolverSettings.Update(SolverSettings.RoundTripForTesting(originalSettings with
             {
-                UseNoveltyPortfolio = false,
-                ShowNoveltyPortfolioHint = true,
                 ShowSpeedXWarning = true,
             }));
-            RefreshGuidanceHints(
-                speedXPresentForTesting: true,
-                projectedBattleHpLostForTesting: 7);
-            bool hiddenBelowThreshold = !NoveltyPortfolioHintVisibleForTesting;
-            RefreshGuidanceHints(
-                speedXPresentForTesting: true,
-                projectedBattleHpLostForTesting: 8);
-            bool visibleAtThreshold = NoveltyPortfolioHintVisibleForTesting
-                && SpeedXWarningVisibleForTesting
-                && _noveltyPortfolioHintButton.Text == SolverText.Get(NoveltyPortfolioHintText)
+            RefreshGuidanceHints(speedXPresentForTesting: true);
+            bool visible = SpeedXWarningVisibleForTesting
                 && _speedXWarningButton.Text == SolverText.Get(SpeedXWarningText);
-
-            SolverSettings.Update(SolverSettings.Current with { UseNoveltyPortfolio = true });
-            RefreshGuidanceHints(
-                speedXPresentForTesting: true,
-                projectedBattleHpLostForTesting: 8);
-            bool hiddenWhenEnabled = !NoveltyPortfolioHintVisibleForTesting;
-            SolverSettings.Update(SolverSettings.Current with
-            {
-                UseNoveltyPortfolio = false,
-                ShowNoveltyPortfolioHint = true,
-            });
-            RefreshGuidanceHints(
-                speedXPresentForTesting: true,
-                projectedBattleHpLostForTesting: 8);
-            _noveltyPortfolioHintButton.EmitSignal(Button.SignalName.Pressed);
-            bool noveltyDismissed = !SolverSettings.Current.UseNoveltyPortfolio
-                && !SolverSettings.Current.ShowNoveltyPortfolioHint
-                && !NoveltyPortfolioHintVisibleForTesting;
             _speedXWarningButton.EmitSignal(Button.SignalName.Pressed);
             bool speedXDismissed = !SolverSettings.Current.ShowSpeedXWarning
                 && !SpeedXWarningVisibleForTesting;
             SolverSettingsData roundTripped = SolverSettings.RoundTripForTesting(SolverSettings.Current);
-            return hiddenBelowThreshold && visibleAtThreshold && hiddenWhenEnabled
-                && noveltyDismissed && speedXDismissed
-                && !roundTripped.UseNoveltyPortfolio
-                && !roundTripped.ShowNoveltyPortfolioHint
-                && !roundTripped.ShowSpeedXWarning;
+            return visible && speedXDismissed && !roundTripped.ShowSpeedXWarning;
         }
         finally
         {
@@ -387,63 +310,6 @@ internal static class SolverOverlay
         }
     }
 
-    internal static bool ExerciseBossHpStrategyHintForTesting()
-    {
-        if (_bossHpStrategyHintButton == null)
-            return false;
-        SolverSettingsData originalSettings = SolverSettings.Current;
-        BossHpRelief originalRelief = _activeBossHpRelief;
-        try
-        {
-            SolverSettings.ApplyForTesting(originalSettings with
-            {
-                ActTransitionBossHpStrategy = BossHpStrategy.ProgressionFirst,
-                FinalBossHpStrategy = BossHpStrategy.MinimizeHpLoss,
-                ShowActTransitionBossHpStrategyHint = true,
-                ShowFinalBossHpStrategyHint = true,
-            });
-            _activeBossHpRelief = BossHpRelief.ActClearHeal;
-            RefreshBossHpStrategyHint();
-            bool actTransitionText = BossHpStrategyHintVisibleForTesting
-                && _bossHpStrategyHintButton.Text.Contains("第一、二幕", StringComparison.Ordinal)
-                && _bossHpStrategyHintButton.Text.Contains("通关优先", StringComparison.Ordinal)
-                && _bossHpStrategyHintButton.Text.Contains("80%", StringComparison.Ordinal);
-
-            SolverSettings.ApplyForTesting(SolverSettings.Current with
-            {
-                ShowActTransitionBossHpStrategyHint = false,
-            });
-            RefreshBossHpStrategyHint();
-            bool actTransitionDismissed = !BossHpStrategyHintVisibleForTesting;
-
-            _activeBossHpRelief = BossHpRelief.RunEnding;
-            RefreshBossHpStrategyHint();
-            bool finalIndependent = BossHpStrategyHintVisibleForTesting
-                && _bossHpStrategyHintButton.Text.Contains("最终 Boss", StringComparison.Ordinal)
-                && _bossHpStrategyHintButton.Text.Contains("最低战损", StringComparison.Ordinal);
-            return actTransitionText && actTransitionDismissed && finalIndependent;
-        }
-        finally
-        {
-            SolverSettings.ApplyForTesting(originalSettings);
-            _activeBossHpRelief = originalRelief;
-            RefreshBossHpStrategyHint();
-        }
-    }
-    internal static bool ExercisePotionStrategyUiForTesting()
-    {
-        if (_potionStrategyButton == null || _potionStrategyPanel == null)
-            return false;
-        bool original = _potionStrategyVisible;
-        if (!original)
-            TogglePotionStrategy();
-        bool opened = _potionStrategyVisible
-            && _potionStrategyPanel.Visible
-            && ReferenceEquals(_potionStrategyPanel.GetParent(), _layer);
-        if (!original)
-            TogglePotionStrategy();
-        return opened && _potionStrategyVisible == original;
-    }
     internal static bool ExerciseVisibilityShortcutForTesting()
     {
         if (_inputBridge == null || _layer == null)
@@ -508,35 +374,12 @@ internal static class SolverOverlay
         : SolverOverlayTheme.Dark;
     internal static bool ExerciseUploadCompletionTransitionForTesting()
         => _settingsPanel?.ExerciseUploadCompletionTransitionForTesting() == true;
-    internal static bool ExercisePerformancePresetPersistenceForTesting()
-        => _settingsPanel?.ExercisePerformancePresetPersistenceForTesting() == true;
     internal static bool ExerciseSettingsTabSwitchingForTesting()
         => _settingsPanel?.ExerciseSettingsTabSwitchingForTesting() == true;
     internal static bool ExerciseSearchCompletionNotificationPolicyForTesting()
         => _settingsPanel?.ExerciseSearchCompletionNotificationPolicyForTesting() == true;
     internal static bool ExerciseVisualSettingsForTesting()
         => _settingsPanel?.ExerciseVisualSettingsForTesting() == true;
-    internal static bool ExerciseBossHpStrategySettingsForTesting()
-        => _settingsPanel?.ExerciseBossHpStrategySettingsForTesting() == true;
-    internal static bool ExerciseAcceptableBattleHpLossSettingsForTesting()
-    {
-        SolverSettingsData original = SolverSettings.Current;
-        try
-        {
-            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(original with
-            {
-                AcceptableBattleHpLoss = 17,
-                GrowthBudgets = new GrowthValues(Feed: 3, GeneticAlgorithm: 2),
-            }));
-            _settingsPanel?.Reload();
-            return AcceptableBattleHpLossSettingsConfiguredForTesting;
-        }
-        finally
-        {
-            SolverSettings.ApplyForTesting(original);
-            _settingsPanel?.Reload();
-        }
-    }
 
     internal static async Task<bool> ExerciseOverlayResizePersistenceForTestingAsync()
     {
@@ -548,7 +391,6 @@ internal static class SolverOverlay
         Vector2? originalCustomSize = _customPanelSize;
         bool originalCollapsed = _collapsed;
         bool originalSettingsVisible = _settingsVisible;
-        bool originalPotionStrategyVisible = _potionStrategyVisible;
         try
         {
             await WaitForResponsiveLayoutForTestingAsync();
@@ -594,7 +436,6 @@ internal static class SolverOverlay
             _customPanelSize = SolverSettings.OverlaySize
                 ?? throw new InvalidOperationException("Round-tripped overlay size was not restored.");
             _settingsVisible = false;
-            _potionStrategyVisible = false;
             SetCollapsed(false);
             await WaitForResponsiveLayoutForTestingAsync();
             bool expanded = IsNear(_panel.Size, testSize) && _cornerResizeHandle?.Visible == true;
@@ -655,18 +496,8 @@ internal static class SolverOverlay
                         contentMinimum,
                         calculationLimit),
                     testSize + new Vector2(40f, 30f));
-            _potionStrategyVisible = true;
-            ApplyContentVisibility();
-            ApplyResponsiveLayout();
-            await WaitForResponsiveLayoutForTestingAsync();
-            bool floatingPotionKeptPrimaryWidth = IsNear(_panel.Size, testSize)
-                && _potionStrategyPanel?.Visible == true
-                && ReferenceEquals(_potionStrategyPanel.GetParent(), _layer)
-                && _customPanelSize == testSize
-                && SolverSettings.OverlaySize == testSize;
             bool passed = savedPositionRestored && releasedPositionSaved && expanded && positionRestored
-                && positionSurvivedClamp && collapsed && restored && directionsCorrect
-                && floatingPotionKeptPrimaryWidth;
+                && positionSurvivedClamp && collapsed && restored && directionsCorrect;
             if (!passed)
             {
                 Entry.Logger.Info(
@@ -674,7 +505,6 @@ internal static class SolverOverlay
                     $"release_position={releasedPositionSaved} " +
                     $"expanded={expanded} position={positionRestored} clamp={positionSurvivedClamp} collapsed={collapsed} " +
                     $"restored={restored} directions={directionsCorrect} " +
-                    $"floating_potion={floatingPotionKeptPrimaryWidth} " +
                     $"panel_size={_panel.Size.X:F1}x{_panel.Size.Y:F1} " +
                     $"panel_min={_panel.GetCombinedMinimumSize().X:F1}x{_panel.GetCombinedMinimumSize().Y:F1} " +
                     $"body_min={_body?.GetCombinedMinimumSize().X:F1}x{_body?.GetCombinedMinimumSize().Y:F1} " +
@@ -690,7 +520,6 @@ internal static class SolverOverlay
             _requestedPanelPosition = originalRequestedPosition;
             _customPanelSize = originalCustomSize;
             _settingsVisible = originalSettingsVisible;
-            _potionStrategyVisible = originalPotionStrategyVisible;
             SetCollapsed(originalCollapsed);
             ApplyContentVisibility();
             ApplyResponsiveLayout();
@@ -720,7 +549,6 @@ internal static class SolverOverlay
         SetStatus(SolverText.Get("求解器消息"), TextMuted);
         SetSearchLimitHint(null);
         SetPerformanceHintVisible(false);
-        SetCurrentBossHpStrategyHint();
         SetReviewText(null);
         const string legacyTitle = "[b]战斗路线求解器[/b]\n";
         const string englishTitle = "[b]CombatSolver[/b]\n";
@@ -739,7 +567,6 @@ internal static class SolverOverlay
         SetStatus(SolverText.Get("求解器已禁用"), TextMuted);
         SetSearchLimitHint(null);
         SetPerformanceHintVisible(false);
-        SetBossHpStrategyHint(BossHpRelief.None);
         SetReviewText(null);
         SetMessageContent(SolverText.Format($"[color={SolverUiTokens.Palette.TextSecondaryHex}]自动搜索和路线执行已暂停。[/color]"));
         ShowLayer();
@@ -754,7 +581,6 @@ internal static class SolverOverlay
         SetStatus(SolverText.Get("计算已停止"), Danger);
         SetSearchLimitHint(null);
         SetPerformanceHintVisible(false);
-        SetCurrentBossHpStrategyHint();
         SetReviewText(null);
         if (_searchBestSnapshot == null && _lastSnapshot == null)
         {
@@ -781,7 +607,6 @@ internal static class SolverOverlay
         SetStatus(SolverText.Get("等待手动计算"), TextMuted);
         SetSearchLimitHint(null);
         SetPerformanceHintVisible(false);
-        SetCurrentBossHpStrategyHint();
         SetReviewText(null);
         SetMessageContent(
             SolverText.Format($"[color={SolverUiTokens.Palette.TextSecondaryHex}]自动计算已关闭。点击“{(hasPreviousCalculation ? SolverText.Get("重新计算") : SolverText.Get("开始计算"))}”生成当前回合路线。[/color]"));
@@ -805,9 +630,6 @@ internal static class SolverOverlay
         ShowLayer();
         RefreshControls();
     }
-
-    public static void ShowPotionRewardSettingChanged(Node host)
-        => Show(host, SolverText.Get("药水奖励预测设置已更改，请重新计算路线。"));
 
     public static void ShowProgress(
         SolverProgress progress,
@@ -1050,7 +872,6 @@ internal static class SolverOverlay
         _reviewedWorldlinesSummaryPrefix = null;
         EnsureCreated(host);
         SetSearchLimitHint(null);
-        SetCurrentBossHpStrategyHint();
         _deployQueued = deployWhenReady;
         SetStatus(
             SolverText.Get("后台计算中"),
@@ -1154,7 +975,6 @@ internal static class SolverOverlay
             && IsSignificantBattleHpLoss(
                 snapshot.ProjectedBattleHpLossKnown,
                 snapshot.ProjectedBattleHpLost));
-        SetCurrentBossHpStrategyHint();
         if (_searchProgressBar != null)
             _searchProgressBar.Visible = false;
 
@@ -1552,61 +1372,6 @@ internal static class SolverOverlay
             : _executeButton.Disabled ? "当前没有可执行的回合，请等待计算或完成当前选牌。"
             : "执行当前回合的动作。");
 
-        CombatState? combat = CombatManager.Instance.DebugOnlyGetState();
-        bool combatActive = combat != null && CombatManager.Instance.IsInProgress;
-        if (_growthStrategyButton != null)
-        {
-            _growthStrategyButton.Disabled = !combatActive;
-            _growthStrategyButton.AddThemeColorOverride("font_color", _growthStrategyVisible ? Accent : SolverUiTokens.Palette.TextSecondary);
-        }
-        _growthStrategyPanel?.Refresh(SolverController.IsDeploying);
-        if (_relicStrategyButton != null)
-        {
-            _relicStrategyButton.Disabled = !combatActive;
-            _relicStrategyButton.AddThemeColorOverride("font_color", _relicStrategyVisible ? Accent : SolverUiTokens.Palette.TextSecondary);
-        }
-        if (_relicStrategyVisible) _relicStrategyPanel?.Refresh(SolverController.IsDeploying);
-        if (_potionStrategyButton != null)
-        {
-            _potionStrategyButton.Disabled = !combatActive;
-            _potionStrategyButton.AddThemeColorOverride(
-                "font_color",
-                _potionStrategyVisible || SolverUiTokens.IsLightTheme
-                    ? Accent
-                    : SolverUiTokens.Palette.TextSecondary);
-        }
-        _potionStrategyPanel?.Refresh(
-            combatActive ? combat : null,
-            SolverController.IsDeploying);
-        bool showTheftPolicy = combat != null
-            && combatActive
-            && TheftEncounterStrategy.IsApplicable(combat);
-        if (_theftPolicyControls != null)
-            _theftPolicyControls.Visible = showTheftPolicy;
-        if (!showTheftPolicy || _preserveResourcesButton == null || _letEscapeButton == null)
-        {
-            _renderedTheftPolicy = null;
-            return;
-        }
-
-        SolverTheftPolicy activePolicy = SolverController.TheftPolicy
-            ?? SolverTheftPolicy.PreserveResources;
-        _preserveResourcesButton.Disabled = solverDisabled || SolverController.IsDeploying;
-        _letEscapeButton.Disabled = solverDisabled || SolverController.IsDeploying;
-        if (_renderedTheftPolicy != activePolicy)
-        {
-            SolverUiTokens.ApplyButtonStyle(
-                _preserveResourcesButton,
-                activePolicy == SolverTheftPolicy.PreserveResources
-                    ? SolverButtonStyle.Positive
-                    : SolverButtonStyle.Secondary);
-            SolverUiTokens.ApplyButtonStyle(
-                _letEscapeButton,
-                activePolicy == SolverTheftPolicy.LetEscape
-                    ? SolverButtonStyle.Primary
-                    : SolverButtonStyle.Secondary);
-            _renderedTheftPolicy = activePolicy;
-        }
     }
 
     public static void Hide()
@@ -1628,11 +1393,6 @@ internal static class SolverOverlay
             _bottomResizeHandle.Modulate = modulate;
         if (_cornerResizeHandle != null)
             _cornerResizeHandle.Modulate = modulate;
-        if (_potionStrategyPanel != null)
-            _potionStrategyPanel.Modulate = Colors.White;
-        if (_growthStrategyPanel != null)
-            _growthStrategyPanel.Modulate = Colors.White;
-        if (_relicStrategyPanel != null) _relicStrategyPanel.Modulate = Colors.White;
     }
 
     public static void ApplyConfiguredTheme()
@@ -1653,9 +1413,6 @@ internal static class SolverOverlay
             ?? throw new InvalidOperationException("CombatSolver overlay has no host node.");
         bool wasVisible = _layer.Visible;
         bool wasSettingsVisible = _settingsVisible;
-        bool wasPotionStrategyVisible = _potionStrategyVisible;
-        bool wasGrowthStrategyVisible = _growthStrategyVisible;
-        bool wasRelicStrategyVisible = _relicStrategyVisible;
         bool wasCollapsed = _collapsed;
         bool wereDetailsVisible = _detailsVisible;
         SolverOverlayPresentation presentation = _presentation;
@@ -1676,7 +1433,6 @@ internal static class SolverOverlay
         _remainingLayoutPasses = 0;
         _renderedExecuteButtonStyle = null;
         _renderedAdoptRouteButtonStyle = null;
-        _renderedTheftPolicy = null;
 
         if (_lastSnapshot is { } snapshot)
         {
@@ -1723,9 +1479,6 @@ internal static class SolverOverlay
         }
 
         _settingsVisible = wasSettingsVisible;
-        _potionStrategyVisible = wasPotionStrategyVisible;
-        _growthStrategyVisible = wasGrowthStrategyVisible;
-        _relicStrategyVisible = wasRelicStrategyVisible;
         if (wasSettingsVisible)
             _settingsPanel?.Reload();
         SetCollapsed(wasSettingsVisible ? false : wasCollapsed);
@@ -1783,10 +1536,8 @@ internal static class SolverOverlay
 
         root.AddChild(CreateHeader());
         root.AddChild(CreateSpeedXWarning());
-        root.AddChild(CreateNoveltyPortfolioHint());
         root.AddChild(CreateSearchLimitHint());
         root.AddChild(CreatePerformanceHint());
-        root.AddChild(CreateBossHpStrategyHint());
 
         HBoxContainer contentColumns = new()
         {
@@ -1826,21 +1577,7 @@ internal static class SolverOverlay
             SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
         _settingsPanel.ResetPositionRequested += ResetOverlayPosition;
-        _settingsPanel.PotionRewardPredictionChanged += OnPotionRewardPredictionChanged;
         primaryColumn.AddChild(_settingsPanel);
-
-        _potionStrategyPanel = new SolverPotionStrategyPanel();
-        _growthStrategyPanel = new SolverGrowthStrategyPanel();
-        _relicStrategyPanel = new SolverRelicStrategyPanel();
-        _potionStrategyPanel.CloseRequested += TogglePotionStrategy;
-        _growthStrategyPanel.CloseRequested += ToggleGrowthStrategy;
-        _relicStrategyPanel.CloseRequested += ToggleRelicStrategy;
-        _relicStrategyPanel.PolicyChanged += OnRelicPolicyChanged;
-        _growthStrategyPanel.PolicyChanged += OnGrowthPolicyChanged;
-        _growthStrategyPanel.BrightestFlameLimitChanged += OnBrightestFlameLimitChanged;
-        _growthStrategyPanel.IgnoreLongTermRewardsChanged += OnIgnoreLongTermRewardsChanged;
-        _potionStrategyPanel.DirectiveChanged += OnPotionDirectiveChanged;
-        _potionStrategyPanel.PresetRequested += OnPotionPresetRequested;
 
         _body = new VBoxContainer
         {
@@ -1963,9 +1700,6 @@ internal static class SolverOverlay
         lowerStack.AddChild(footerArea);
 
         layer.AddChild(panel);
-        layer.AddChild(_potionStrategyPanel);
-        layer.AddChild(_growthStrategyPanel);
-        layer.AddChild(_relicStrategyPanel);
         _rightResizeHandle = CreateResizeHandle("RightResizeHandle", ResizeEdge.Right);
         _bottomResizeHandle = CreateResizeHandle("BottomResizeHandle", ResizeEdge.Bottom);
         _cornerResizeHandle = CreateResizeHandle("CornerResizeHandle", ResizeEdge.BottomRight);
@@ -1995,10 +1729,7 @@ internal static class SolverOverlay
         _dragging = false;
         _resizing = false;
         _settingsVisible = false;
-        _potionStrategyVisible = false;
-        _growthStrategyVisible = false;
         SetCollapsed(false);
-        _relicStrategyVisible = false;
         Entry.Logger.Info("[CombatSolver/Test] UI_CREATE responsive=true content_fit_height=true minimum_size_reflow=true draggable=true drag_coordinates=viewport drag_relayout=release_only resizable=right+bottom+corner resize_grip=three_diagonal_lines size_persisted=true route_scroll_expand=true max_width=viewport max_height=viewport route_row_height=44 route_viewport_height=148 visible_unwrapped_route_rows=3 cached_route_rows=16 all_searched_turns=true route_scroll=true persistent_status_card=true compact_title=true compact_footer=true collapsed_action_buttons=true footer_pause_toggles=false settings_pause_toggles=true footer_top_margin=8 details_in_status_row=true battle_hp_in_route_heading=true sold_hp_summary=false three_column_routes=true semantic_action_pills=true full_target_names=true whole_pill_kill_highlight=true text_outline_px=2 wrapped_summary=true summary_bold_metric=true flat_collapse=true plain_details_button=true full_auto_positive_toggle=true no_middle_dot=true status_badge=true plain_action_buttons=true always_show_energy=true plain_route_heading=true settings_button=true settings_persisted=true settings_tabs=general+performance+feedback performance_advanced=collapsed notification_policy=three_state performance_presets=low+medium+high+very_high+custom kill_pill=green_with_target_names status_badge=content_width deployment_speed_settings=true search_status=fixed_columns_seconds only_death_marker=true relic_action_labels=true position_persisted=true theft_policy_buttons=contextual stop_search_button=true");
         Entry.Logger.Info("[CombatSolver/Test] UI_FEEDBACK_BANNER position=full_width manual_improvement=green unexpected_replan=red export_prompt=full_bug_report");
     }
@@ -2029,16 +1760,6 @@ internal static class SolverOverlay
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         header.AddChild(spacer);
-
-        _potionStrategyButton = CreateHeaderButton(SolverText.Get("药水"), 48);
-        _potionStrategyButton.Pressed += TogglePotionStrategy;
-        header.AddChild(_potionStrategyButton);
-        _growthStrategyButton = CreateHeaderButton(SolverText.Get("成长"), 48);
-        _growthStrategyButton.Pressed += ToggleGrowthStrategy;
-        header.AddChild(_growthStrategyButton);
-        _relicStrategyButton = CreateHeaderButton(SolverText.Get("遗物"), 48);
-        _relicStrategyButton.Pressed += ToggleRelicStrategy;
-        header.AddChild(_relicStrategyButton);
 
         _settingsButton = CreateHeaderButton(SolverText.Get("设置"), 54);
         _settingsButton.Pressed += ToggleSettings;
@@ -2103,14 +1824,6 @@ internal static class SolverOverlay
         return button;
     }
 
-    private static Control CreateNoveltyPortfolioHint()
-    {
-        _noveltyPortfolioHintButton = CreateDismissibleGuidanceHint(
-            "NoveltyPortfolioHint",
-            DismissNoveltyPortfolioHint);
-        return _noveltyPortfolioHintButton;
-    }
-
     private static Control CreateSpeedXWarning()
     {
         _speedXWarningButton = CreateDismissibleGuidanceHint(
@@ -2146,7 +1859,7 @@ internal static class SolverOverlay
     private static Control CreatePerformanceHint()
     {
         _performanceHintButton = SolverUiTokens.CreateButton(
-            SolverText.Get("本场战斗出现大战损，若对结果不满意可以前往 设置 > 性能，将性能预设调为高或极高后重试。点击本消息之后不再提示"),
+            SolverText.Get("本场战斗出现大战损，若对结果不满意可以前往 设置 > 性能，将计算速度调为深入后重试。点击本消息之后不再提示"),
             SolverButtonStyle.Secondary);
         _performanceHintButton.Name = "PerformanceHint";
         _performanceHintButton.Visible = false;
@@ -2179,22 +1892,6 @@ internal static class SolverOverlay
         _searchLimitHintLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         _searchLimitHint.AddChild(_searchLimitHintLabel);
         return _searchLimitHint;
-    }
-
-    private static Control CreateBossHpStrategyHint()
-    {
-        _bossHpStrategyHintButton = SolverUiTokens.CreateButton(
-            string.Empty,
-            SolverButtonStyle.Secondary);
-        _bossHpStrategyHintButton.Name = "BossHpStrategyHint";
-        _bossHpStrategyHintButton.Visible = false;
-        _bossHpStrategyHintButton.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        _bossHpStrategyHintButton.CustomMinimumSize = new Vector2(0, 44);
-        _bossHpStrategyHintButton.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        _bossHpStrategyHintButton.AddThemeStyleboxOverride("normal", CreateNoticeBox());
-        _bossHpStrategyHintButton.AddThemeStyleboxOverride("hover", CreateNoticeBox(hover: true));
-        _bossHpStrategyHintButton.Pressed += DismissBossHpStrategyHint;
-        return _bossHpStrategyHintButton;
     }
 
     private static Control CreateSummarySection()
@@ -2317,24 +2014,6 @@ internal static class SolverOverlay
 
     private static Control CreateFooter()
     {
-        _theftPolicyControls = new HBoxContainer
-        {
-            Name = "TheftPolicy",
-            Visible = false,
-            MouseFilter = Control.MouseFilterEnum.Pass,
-        };
-        _theftPolicyControls.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Xs);
-        _preserveResourcesButton = CreateButton(SolverText.Get("保牌/保钱"), false);
-        _preserveResourcesButton.CustomMinimumSize = new Vector2(112, SolverUiTokens.Size.ButtonHeight);
-        _preserveResourcesButton.Pressed += () => OnTheftPolicyPressed(SolverTheftPolicy.PreserveResources);
-        _theftPolicyControls.AddChild(_preserveResourcesButton);
-        _letEscapeButton = CreateButton(SolverText.Get("放走"), false);
-        _letEscapeButton.CustomMinimumSize = new Vector2(72, SolverUiTokens.Size.ButtonHeight);
-        _letEscapeButton.Pressed += () => OnTheftPolicyPressed(SolverTheftPolicy.LetEscape);
-        _theftPolicyControls.AddChild(_letEscapeButton);
-        _body!.AddChild(_theftPolicyControls);
-        _body.MoveChild(_theftPolicyControls, 2);
-
         _recalculateButton = CreateButton(SolverText.Get("重新计算"), false);
         _recalculateButton.CustomMinimumSize = new Vector2(112, SolverUiTokens.Size.ButtonHeight);
         _recalculateButton.Pressed += OnRecalculatePressed;
@@ -2575,19 +2254,9 @@ internal static class SolverOverlay
     }
 
     internal static void RefreshGuidanceHints(
-        bool? speedXPresentForTesting = null,
-        int? projectedBattleHpLostForTesting = null)
+        bool? speedXPresentForTesting = null)
     {
         SolverSettingsData settings = SolverSettings.Current;
-        bool projectedBattleDamage = projectedBattleHpLostForTesting is { } projectedBattleHpLost
-            ? IsSignificantBattleHpLoss(true, projectedBattleHpLost)
-            : HasSignificantBattleHpLoss(_lastSnapshot);
-        SetGuidanceHint(
-            _noveltyPortfolioHintButton,
-            settings.ShowNoveltyPortfolioHint
-                && !settings.UseNoveltyPortfolio
-                && projectedBattleDamage,
-            NoveltyPortfolioHintText);
         SetGuidanceHint(
             _speedXWarningButton,
             settings.ShowSpeedXWarning
@@ -2659,17 +2328,14 @@ internal static class SolverOverlay
 
     private static void ToggleSettings()
     {
-        _relicStrategyVisible = false;
         if (_settingsVisible && _settingsPanel?.CommitPending() == false)
             return;
         if (_collapsed)
             SetCollapsed(false);
         _settingsVisible = !_settingsVisible;
         if (_settingsVisible)
-            _potionStrategyVisible = false;
         if (_settingsVisible)
-            _growthStrategyVisible = false;
-        if (_settingsVisible)
+            if (_settingsVisible)
             _settingsPanel?.Reload();
         ApplyContentVisibility();
         SetPerformanceHintVisible(
@@ -2677,26 +2343,6 @@ internal static class SolverOverlay
             && HasSignificantBattleHpLoss(_lastSnapshot));
         QueueResponsiveLayout();
         Entry.Logger.Info($"[CombatSolver/Test] UI_ACTION action=settings visible={_settingsVisible}");
-    }
-
-    private static void TogglePotionStrategy()
-    {
-        _relicStrategyVisible = false;
-        if (_settingsVisible && _settingsPanel?.CommitPending() == false)
-            return;
-        if (_collapsed)
-            SetCollapsed(false);
-        _settingsVisible = false;
-        _potionStrategyVisible = !_potionStrategyVisible;
-        _growthStrategyVisible = false;
-        _potionStrategyPanel?.Invalidate();
-        RefreshControls();
-        ApplyContentVisibility();
-        SetPerformanceHintVisible(
-            HasSignificantBattleHpLoss(_lastSnapshot));
-        QueueResponsiveLayout();
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] UI_ACTION action=potion_strategy visible={_potionStrategyVisible}");
     }
 
     private static void DismissPerformanceHint()
@@ -2709,16 +2355,6 @@ internal static class SolverOverlay
         Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=performance_hint_dismissed");
     }
 
-    private static void DismissNoveltyPortfolioHint()
-    {
-        SolverSettings.Update(SolverSettings.Current with
-        {
-            ShowNoveltyPortfolioHint = false,
-        });
-        RefreshGuidanceHints();
-        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=novelty_portfolio_hint_dismissed");
-    }
-
     private static void DismissSpeedXWarning()
     {
         SolverSettings.Update(SolverSettings.Current with
@@ -2727,78 +2363,6 @@ internal static class SolverOverlay
         });
         RefreshGuidanceHints();
         Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=speedx_warning_dismissed");
-    }
-
-    private static void DismissBossHpStrategyHint()
-    {
-        SolverSettingsData data = SolverSettings.Current;
-        SolverSettingsData updated = _activeBossHpRelief switch
-        {
-            BossHpRelief.ActClearHeal => data with
-            {
-                ShowActTransitionBossHpStrategyHint = false,
-            },
-            BossHpRelief.RunEnding => data with
-            {
-                ShowFinalBossHpStrategyHint = false,
-            },
-            _ => data,
-        };
-        if (!ReferenceEquals(updated, data))
-            SolverSettings.Update(updated);
-        RefreshBossHpStrategyHint();
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] UI_ACTION action=boss_hp_strategy_hint_dismissed " +
-            $"relief={_activeBossHpRelief}");
-    }
-
-    private static void SetCurrentBossHpStrategyHint()
-    {
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        SetBossHpStrategyHint(
-            state != null && CombatManager.Instance.IsInProgress
-                ? ActEndingBossPolicy.ResolveHpRelief(state)
-                : BossHpRelief.None);
-    }
-
-    private static void SetBossHpStrategyHint(BossHpRelief relief)
-    {
-        _activeBossHpRelief = relief;
-        RefreshBossHpStrategyHint();
-    }
-
-    public static void RefreshBossHpStrategyHint()
-    {
-        if (_bossHpStrategyHintButton == null)
-            return;
-        SolverSettingsData settings = SolverSettings.Current;
-        bool enabled = _activeBossHpRelief switch
-        {
-            BossHpRelief.ActClearHeal => settings.ShowActTransitionBossHpStrategyHint,
-            BossHpRelief.RunEnding => settings.ShowFinalBossHpStrategyHint,
-            _ => false,
-        };
-        bool visible = enabled && !_collapsed && !_settingsVisible;
-        string text = _activeBossHpRelief switch
-        {
-            BossHpRelief.ActClearHeal when settings.ActTransitionBossHpStrategy
-                == BossHpStrategy.MinimizeHpLoss
-                => SolverText.Get("本场为第一、二幕的幕末 Boss 战。当前选择最低战损，不折算战后回复；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示"),
-            BossHpRelief.ActClearHeal
-                => SolverText.Get("本场为第一、二幕的幕末 Boss 战。当前选择通关优先，按战后回复 80% 折算血量并优先保留药水；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示"),
-            BossHpRelief.RunEnding when settings.FinalBossHpStrategy
-                == BossHpStrategy.MinimizeHpLoss
-                => SolverText.Get("本场为最终 Boss 战。当前选择最低战损，会继续比较路线剩余血量；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示"),
-            BossHpRelief.RunEnding
-                => SolverText.Get("本场为最终 Boss 战。当前选择通关优先，路线存活后优先保留资源；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示"),
-            _ => string.Empty,
-        };
-        bool changed = _bossHpStrategyHintButton.Visible != visible
-            || !string.Equals(_bossHpStrategyHintButton.Text, text, StringComparison.Ordinal);
-        _bossHpStrategyHintButton.Text = text;
-        _bossHpStrategyHintButton.Visible = visible;
-        if (changed)
-            QueueResponsiveLayout();
     }
 
     private static void SetReviewText(string? text)
@@ -2901,11 +2465,6 @@ internal static class SolverOverlay
         _actionBar?.Refresh(new SolverActionBarState(_collapsed, SolverController.IsSearching,
             SolverController.CanAdoptCurrentRoute || SolverController.IsAdoptingCurrentRoute,
             SolverController.HasRetainedRoute || SolverController.RouteFrozen));
-        if (_potionStrategyButton != null)
-            _potionStrategyButton.Visible = !_collapsed;
-        if (_growthStrategyButton != null)
-            _growthStrategyButton.Visible = !_collapsed;
-        if (_relicStrategyButton != null) _relicStrategyButton.Visible = !_collapsed;
         if (_settingsButton != null)
             _settingsButton.Visible = !_collapsed;
         // Keep the same outcome controls and presentation state in both layouts.
@@ -2932,27 +2491,12 @@ internal static class SolverOverlay
             _footerDivider.Visible = !_collapsed && !_settingsVisible;
         if (_settingsPanel != null)
             _settingsPanel.Visible = !_collapsed && _settingsVisible;
-        if (_potionStrategyPanel != null)
-            _potionStrategyPanel.Visible = !_collapsed && !_settingsVisible && _potionStrategyVisible;
-        if (_growthStrategyPanel != null)
-            _growthStrategyPanel.Visible = !_collapsed && !_settingsVisible && _growthStrategyVisible;
-        if (_relicStrategyPanel != null)
-            _relicStrategyPanel.Visible = !_collapsed && !_settingsVisible && _relicStrategyVisible;
-        RefreshBossHpStrategyHint();
         if (_settingsButton != null)
         {
             _settingsButton.Text = _settingsVisible ? SolverText.Get("返回") : SolverText.Get("设置");
             _settingsButton.AddThemeColorOverride(
                 "font_color",
                 _settingsVisible || SolverUiTokens.IsLightTheme
-                    ? Accent
-                    : SolverUiTokens.Palette.TextSecondary);
-        }
-        if (_potionStrategyButton != null)
-        {
-            _potionStrategyButton.AddThemeColorOverride(
-                "font_color",
-                _potionStrategyVisible || SolverUiTokens.IsLightTheme
                     ? Accent
                     : SolverUiTokens.Palette.TextSecondary);
         }
@@ -3030,9 +2574,6 @@ internal static class SolverOverlay
         _panel.OffsetRight = _panelPosition.X + width;
         _panel.OffsetBottom = _panelPosition.Y + height;
         ApplyResizeHandleBounds(width, height);
-        ApplyPotionStrategyBounds(viewportSize, width, height);
-        ApplyStrategyBounds(_growthStrategyPanel, SolverGrowthStrategyPanel.PreferredWidth, viewportSize, width, height);
-        ApplyStrategyBounds(_relicStrategyPanel, SolverRelicStrategyPanel.PreferredWidth, viewportSize, width, height);
     }
 
     private static void ApplyResizeHandleBounds(float panelWidth, float panelHeight)
@@ -3079,57 +2620,6 @@ internal static class SolverOverlay
         handle.OffsetTop = y;
         handle.OffsetRight = x + width;
         handle.OffsetBottom = y + height;
-    }
-
-    private static void ApplyPotionStrategyBounds(Vector2 viewportSize, float panelWidth, float panelHeight)
-        => ApplyStrategyBounds(_potionStrategyPanel, SolverPotionStrategyPanel.PreferredWidth, viewportSize, panelWidth, panelHeight);
-
-    private static void ApplyStrategyBounds(Control? sidebar, float preferredWidth, Vector2 viewportSize, float panelWidth, float panelHeight)
-    {
-        if (sidebar == null || !GodotObject.IsInstanceValid(sidebar))
-            return;
-        const float edge = 8f;
-        float width = Math.Min(
-            preferredWidth,
-            Math.Max(0f, viewportSize.X - edge * 2f));
-        float height = Math.Min(panelHeight, Math.Max(0f, viewportSize.Y - edge * 2f));
-        float x = StrategySidebarX(
-            _panelPosition.X,
-            panelWidth,
-            width,
-            viewportSize.X,
-            edge,
-            SolverUiTokens.Spacing.Md);
-        float y = Math.Clamp(
-            _panelPosition.Y,
-            edge,
-            Math.Max(edge, viewportSize.Y - height - edge));
-        sidebar.OffsetLeft = x;
-        sidebar.OffsetTop = y;
-        sidebar.OffsetRight = x + width;
-        sidebar.OffsetBottom = y + height;
-    }
-
-    // Prefer the right side, then the left side, so a panel docked near the right screen edge opens
-    // its sidebar outward instead of over its own route list. When neither side fits, the sidebar
-    // sits against the screen edge of the roomier side, which minimizes how much it covers.
-    internal static float StrategySidebarX(
-        float panelX,
-        float panelWidth,
-        float sidebarWidth,
-        float viewportWidth,
-        float edge,
-        float gap)
-    {
-        float maximumX = Math.Max(edge, viewportWidth - sidebarWidth - edge);
-        float rightOfPanelX = panelX + panelWidth + gap;
-        if (rightOfPanelX <= maximumX)
-            return rightOfPanelX;
-        float leftOfPanelX = panelX - gap - sidebarWidth;
-        if (leftOfPanelX >= edge)
-            return leftOfPanelX;
-        float roomRight = viewportWidth - (panelX + panelWidth);
-        return roomRight >= panelX ? maximumX : edge;
     }
 
     private static void OnHeaderGuiInput(InputEvent inputEvent)
@@ -3337,17 +2827,6 @@ internal static class SolverOverlay
         SolverController.SetFullAuto(host, state, !SolverController.FullAutoEnabled);
     }
 
-    private static void OnTheftPolicyPressed(SolverTheftPolicy policy)
-    {
-        Entry.Logger.Info($"[CombatSolver/Test] UI_ACTION action=theft_policy policy={policy}");
-        NGame? host = NGame.Instance;
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (host == null || state == null || !CombatManager.Instance.IsInProgress)
-            return;
-        SolverController.SetTheftPolicy(host, state, policy);
-        RefreshControls();
-    }
-
     internal static async Task ExerciseCompactQolForTesting(CombatState combat)
     {
         static void Check(bool value, string message)
@@ -3441,18 +2920,6 @@ internal static class SolverOverlay
             Check(outcome.IsVisibleInTree() && outcome.Text == "? HP"
                 && outcome.GetThemeColor("font_color") == TextMuted, "unknown loss stays unknown");
             SetCollapsed(false);
-            TogglePotionStrategy();
-            Check(_potionStrategyPanel!.Visible, "potion panel opens");
-            ((Button)_potionStrategyPanel.FindChild("CloseStrategyPanel", true, false)!).EmitSignal(BaseButton.SignalName.Pressed);
-            Check(!_potionStrategyPanel.Visible, "potion panel closes from its own corner");
-            ToggleGrowthStrategy();
-            Check(_growthStrategyPanel!.Visible, "growth panel opens");
-            ((Button)_growthStrategyPanel.FindChild("CloseStrategyPanel", true, false)!).EmitSignal(BaseButton.SignalName.Pressed);
-            Check(!_growthStrategyPanel.Visible, "growth panel closes from its own corner");
-            ToggleRelicStrategy();
-            Check(_relicStrategyPanel!.Visible, "relic panel opens");
-            ((Button)_relicStrategyPanel.FindChild("CloseStrategyPanel", true, false)!).EmitSignal(BaseButton.SignalName.Pressed);
-            Check(!_relicStrategyPanel.Visible, "relic panel closes from its own corner");
         }
         finally
         {
@@ -3475,8 +2942,7 @@ internal static class SolverOverlay
             _actionBar!.AssertLayoutForTesting();
             RefreshControls();
             if (_solverEnabledButton!.GetParent().Name != "Header"
-                || !ManualSystemMemoryReleaseButtonConfiguredForTesting
-                || _theftPolicyControls!.GetParent() != _body)
+                || !ManualSystemMemoryReleaseButtonConfiguredForTesting)
                 throw new InvalidOperationException("Action controls were not separated from header, strategy and maintenance controls.");
             _solverEnabledButton!.EmitSignal(BaseButton.SignalName.Pressed);
             if (!SolverController.SolverDisabled || _solverEnabledButton.Text != SolverText.Get("求解器：关"))
@@ -3509,8 +2975,6 @@ internal static class SolverOverlay
             try
             {
                 await settings.AssertResponsiveHeightForTesting();
-                if (!settings.ExerciseThresholdOutsideClickForTesting())
-                    throw new InvalidOperationException("Moved performance threshold failed to save on focus loss.");
             }
             finally { host.RemoveChild(settings); settings.QueueFree(); }
         }
@@ -3520,173 +2984,6 @@ internal static class SolverOverlay
             SolverController.SetSolverDisabled(original.SolverDisabled, persist: false);
             SetCollapsed(wasCollapsed);
         }
-    }
-
-    internal static async Task<bool> ExerciseGrowthPolicyUiForTesting()
-    {
-        EnsureCreated(NGame.Instance ?? throw new InvalidOperationException("Growth UI test requires an active game."));
-        SolverSettingsData originalPolicy = SolverSettings.Current;
-        bool originalGrowth = _growthStrategyVisible;
-        bool originalPotion = _potionStrategyVisible;
-        bool originalSettings = _settingsVisible;
-        bool originalCollapsed = _collapsed;
-        try
-        {
-            SolverSettings.ApplyForTesting(originalPolicy with { AutomaticCalculationEnabled = false });
-            if (!_growthStrategyVisible)
-                ToggleGrowthStrategy();
-            ApplyResponsiveLayout();
-            await _growthStrategyPanel!.ToSignal(_growthStrategyPanel.GetTree(), SceneTree.SignalName.ProcessFrame);
-            await _growthStrategyPanel.ToSignal(_growthStrategyPanel.GetTree(), SceneTree.SignalName.ProcessFrame);
-            Rect2 bounds = _growthStrategyPanel.GetGlobalRect();
-            Vector2 viewport = _viewport!.GetVisibleRect().Size;
-            bool growthValid = _growthStrategyButton != null && _growthStrategyPanel.Visible
-                && ReferenceEquals(_growthStrategyPanel.GetParent(), _layer)
-                && !_potionStrategyVisible && !_settingsVisible
-                && bounds.Position.X >= 0 && bounds.Position.Y >= 0
-                && bounds.End.X <= viewport.X && bounds.End.Y <= viewport.Y
-                && _growthStrategyPanel.SettingsConfiguredForTesting
-                && ExerciseAcceptableBattleHpLossSettingsForTesting()
-                && _growthStrategyPanel.ExerciseOutsideClickForTesting();
-            ToggleSettings();
-            await _settingsPanel!.ToSignal(_settingsPanel.GetTree(), SceneTree.SignalName.ProcessFrame);
-            return growthValid && _settingsPanel.ExerciseThresholdOutsideClickForTesting();
-        }
-        finally
-        {
-            SolverSettings.ApplyForTesting(originalPolicy);
-            _settingsPanel?.Reload();
-            _growthStrategyPanel?.Refresh(false);
-            _growthStrategyVisible = originalGrowth;
-            _potionStrategyVisible = originalPotion;
-            _settingsVisible = originalSettings;
-            SetCollapsed(originalCollapsed);
-            ApplyContentVisibility();
-            QueueResponsiveLayout();
-        }
-    }
-
-    private static void ToggleGrowthStrategy()
-    {
-        _relicStrategyVisible = false;
-        if (_settingsVisible && _settingsPanel?.CommitPending() == false)
-            return;
-        if (_collapsed)
-            SetCollapsed(false);
-        _settingsVisible = false;
-        _potionStrategyVisible = false;
-        _growthStrategyVisible = !_growthStrategyVisible;
-        RefreshControls();
-        ApplyContentVisibility();
-        QueueResponsiveLayout();
-    }
-
-    private static void OnBrightestFlameLimitChanged(int? limit)
-    {
-        NGame? host = NGame.Instance;
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (host != null && state != null && CombatManager.Instance.IsInProgress)
-            SolverController.SetBrightestFlameLimit(host, state, limit);
-    }
-
-    private static void OnGrowthPolicyChanged(GrowthValues budgets)
-    {
-        NGame? host = NGame.Instance;
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (host != null && state != null && CombatManager.Instance.IsInProgress)
-            SolverController.SetGrowthPolicy(host, state, budgets);
-    }
-
-    private static void ToggleRelicStrategy()
-    {
-        if (_settingsVisible && _settingsPanel?.CommitPending() == false) return;
-        if (_collapsed) SetCollapsed(false);
-        _settingsVisible = false;
-        _potionStrategyVisible = false;
-        _growthStrategyVisible = false;
-        _relicStrategyVisible = !_relicStrategyVisible;
-        RefreshControls();
-        ApplyContentVisibility();
-        QueueResponsiveLayout();
-    }
-
-    internal static async Task<bool> ExerciseRelicPanelForTesting()
-    {
-        EnsureCreated(NGame.Instance ?? throw new InvalidOperationException("Relic UI needs a game."));
-        ToggleRelicStrategy();
-        ApplyResponsiveLayout();
-        await _relicStrategyPanel!.ToSignal(_relicStrategyPanel.GetTree(), SceneTree.SignalName.ProcessFrame);
-        await _relicStrategyPanel.ToSignal(_relicStrategyPanel.GetTree(), SceneTree.SignalName.ProcessFrame);
-        Rect2 bounds = _relicStrategyPanel.GetGlobalRect();
-        Vector2 viewport = _viewport!.GetVisibleRect().Size;
-        bool valid = _relicStrategyPanel.Visible && !_growthStrategyVisible && !_potionStrategyVisible
-            && _relicStrategyButton!.GetIndex() == _growthStrategyButton!.GetIndex() + 1
-            && bounds.Position.X >= 0 && bounds.Position.Y >= 0 && bounds.End.X <= viewport.X && bounds.End.Y <= viewport.Y;
-        ToggleGrowthStrategy();
-        valid &= !_relicStrategyPanel.Visible && _growthStrategyPanel!.Visible;
-        ApplyOverlayOpacity();
-        foreach (PanelContainer strategy in new PanelContainer[] { _relicStrategyPanel, _growthStrategyPanel!, _potionStrategyPanel! })
-        {
-            valid &= strategy.Modulate.A == 1f && ((StyleBoxFlat)strategy.GetThemeStylebox("panel")).BgColor.A == 1f;
-            IEnumerable<Node> Descendants(Node node) => node.GetChildren().SelectMany(child => new[] { child }.Concat(Descendants(child)));
-            valid &= Descendants(strategy).OfType<LineEdit>().All(edit => edit.GetThemeFontSize("font_size") == 16);
-        }
-        ToggleGrowthStrategy();
-        return valid;
-    }
-
-    private static void OnRelicPolicyChanged(bool enabled, RelicCounterRule[] rules)
-    {
-        var host = NGame.Instance;
-        var state = CombatManager.Instance.DebugOnlyGetState();
-        if (host != null && state != null && CombatManager.Instance.IsInProgress)
-            SolverController.SetRelicCounterPolicy(host, state, enabled, rules);
-    }
-
-    private static void OnIgnoreLongTermRewardsChanged(bool ignore)
-    {
-        NGame? host = NGame.Instance;
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (host != null && state != null && CombatManager.Instance.IsInProgress)
-            SolverController.SetIgnoreLongTermRewards(host, state, ignore);
-    }
-
-    private static void OnPotionDirectiveChanged(
-        int slot,
-        string potionId,
-        SolverPotionDirective directive)
-    {
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] UI_ACTION action=potion_directive slot={slot} " +
-            $"potion={potionId} directive={directive}");
-        NGame? host = NGame.Instance;
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (host == null || state == null || !CombatManager.Instance.IsInProgress)
-            return;
-        SolverController.SetPotionDirective(host, state, slot, potionId, directive);
-        _potionStrategyPanel?.Invalidate();
-        RefreshControls();
-    }
-
-    private static void OnPotionRewardPredictionChanged(bool enabled)
-    {
-        NGame? host = NGame.Instance;
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (host != null && state != null && CombatManager.Instance.IsInProgress)
-            SolverController.SetPotionRewardPrediction(host, state, enabled);
-        else
-            SolverSettings.Update(SolverSettings.Current with { PredictPotionReward = enabled });
-    }
-
-    private static void OnPotionPresetRequested(PotionStrategyPreset preset)
-    {
-        NGame? host = NGame.Instance;
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (host == null || state == null || !CombatManager.Instance.IsInProgress)
-            return;
-        SolverController.SetPotionPreset(host, state, preset);
-        _potionStrategyPanel?.Invalidate();
-        RefreshControls();
     }
 
 }

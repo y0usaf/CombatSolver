@@ -80,28 +80,24 @@ internal sealed partial class UnattendedTestRunner
 
     private void AssertSearchPortfolioSettings(CombatState combat)
     {
-        if (!new SolverSettingsData().UseBeamWidthPortfolio)
-            throw new InvalidOperationException("多宽度路线精炼必须默认开启。");
-        if (new SolverSettingsData().UseNoveltyPortfolio)
-            throw new InvalidOperationException("多策略搜索必须默认关闭。");
-        if (new SolverSettingsData().UseEarlyTurnExploration)
-            throw new InvalidOperationException("前两回合深入探索必须默认关闭。");
-        if (!new SolverSettingsData().ShowNoveltyPortfolioHint
-            || !new SolverSettingsData().ShowSpeedXWarning)
-        {
-            throw new InvalidOperationException("多策略与皮皮极速引导横幅必须默认允许显示。");
-        }
+        SolverSettingsSnapshot defaults = SolverSettings.Capture();
+        if (!defaults.UseBeamWidthPortfolio || defaults.UseNoveltyPortfolio || defaults.UseEarlyTurnExploration)
+            throw new InvalidOperationException("固定搜索组合必须为多宽度开启、多策略与前两回合探索关闭。");
+        if (!new SolverSettingsData().ShowSpeedXWarning)
+            throw new InvalidOperationException("皮皮极速引导横幅必须默认允许显示。");
         SolverSettingsData dismissedHints = SolverSettings.RoundTripForTesting(
             new SolverSettingsData()
             {
-                ShowNoveltyPortfolioHint = false,
                 ShowSpeedXWarning = false,
+                Speed = SolverSpeed.Thorough,
             });
-        if (dismissedHints.ShowNoveltyPortfolioHint || dismissedHints.ShowSpeedXWarning)
-            throw new InvalidOperationException("引导横幅的不再提示选择没有持久化。");
+        if (dismissedHints.ShowSpeedXWarning || dismissedHints.Speed != SolverSpeed.Thorough)
+            throw new InvalidOperationException("引导横幅或计算速度没有持久化。");
+        if (SolverSettings.DeserializeForTesting(
+                "{\"performancePreset\":\"VeryHigh\",\"enableNoGcRegion\":false,\"fairPlannerSamples\":3,\"potionDirectives\":[]}")
+            != new SolverSettingsData())
+            throw new InvalidOperationException("旧设置键没有在读取时被忽略。");
         SolverOverlay.ShowManualCalculationReady(NGame.Instance!, false);
-        if (!SolverOverlay.ExercisePerformancePresetPersistenceForTesting())
-            throw new InvalidOperationException("0.24.3 性能迁移或预设/内存独立持久化失败。");
         if (!SolverOverlay.ExercisePerformanceHintForTesting())
             throw new InvalidOperationException("大战损性能提示没有遵守 8 HP 触发阈值。");
         SolverSettingsSnapshot portfolioSettings = SolverSettings.Capture();
@@ -131,13 +127,12 @@ internal sealed partial class UnattendedTestRunner
             || portfolioEnabled.EarlyTurnExplorationBudgetMilliseconds != 2_400_000
             || portfolioDisabled.EarlyTurnExplorationDepth != 0)
             throw new InvalidOperationException("组合搜索设置没有按搜索请求冻结。");
-        _completedChecks.Add("SearchPortfolios:RefinementDefaultOn:NoveltyDefaultOff:DamageGuidanceThreshold8:SettingsRoundTrip:UiControl:PolicySnapshot");
+        _completedChecks.Add("SearchPortfolios:FixedRefinementOn:NoveltyOff:DamageGuidanceThreshold8:SettingsRoundTrip:LegacyKeysIgnored:PolicySnapshot");
     }
 
     private async Task AssertControllerSessionLifecycleAsync(CombatState combat)
     {
         CombatBeamSolver.VerifyCycleTranspositionLeasePolicyForTesting();
-        AssertPotionPresetPolicy();
         if (!NativeChoiceSurface.VerifyCoveredSurfaceWaitPolicyForTesting())
             throw new InvalidOperationException("原生选牌页面被其他覆盖层遮挡时仍消耗了缺失超时。");
         NGame host = NGame.Instance
@@ -157,28 +152,6 @@ internal sealed partial class UnattendedTestRunner
             .FirstOrDefault();
         if (strategyPotion is { } forcedPotion)
         {
-            SolverSettingsData settingsBeforeStaleDirectiveCheck = SolverSettings.Current;
-            try
-            {
-                PersistedPotionDirective staleDirective = new(
-                    player.PotionSlots.Count,
-                    forcedPotion.Potion.Id.Entry,
-                    SolverPotionDirective.Disabled);
-                SolverSettings.ApplyForTesting(settingsBeforeStaleDirectiveCheck with
-                {
-                    PotionDirectives = [staleDirective],
-                });
-                PotionStrategySnapshot staleStrategy = SolverController.CapturePotionStrategy(
-                    combat,
-                    SolverPotionPolicy.Smart);
-                if (staleStrategy.Directives.Count != 0)
-                    throw new InvalidOperationException("超出当前药水栏的持久化策略没有被忽略。");
-            }
-            finally
-            {
-                SolverSettings.ApplyForTesting(settingsBeforeStaleDirectiveCheck);
-            }
-
             SolverController.SetPotionDirectiveForTesting(
                 combat,
                 forcedPotion.Slot,
@@ -378,18 +351,6 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("界面主题或覆盖层透明度没有按持久化设置加载。");
         }
-        if (!SolverOverlay.BossHpStrategySettingsConfiguredForTesting
-            || !SolverOverlay.ExerciseBossHpStrategySettingsForTesting())
-        {
-            throw new InvalidOperationException("第一、二幕与最终 Boss 的血量策略没有独立持久化。");
-        }
-        if (!SolverOverlay.AcceptableBattleHpLossSettingsConfiguredForTesting
-            || !SolverOverlay.ExerciseAcceptableBattleHpLossSettingsForTesting())
-        {
-            throw new InvalidOperationException("可接受战损上限没有按持久化设置加载。");
-        }
-        if (!SolverOverlay.ExerciseBossHpStrategyHintForTesting())
-            throw new InvalidOperationException("幕末 Boss 血量策略提示没有按战斗类型独立显示和关闭。");
         bool resizeUiConfigured = SolverOverlay.ResizeUiConfiguredForTesting;
         bool resizePersistencePassed = await SolverOverlay.ExerciseOverlayResizePersistenceForTestingAsync();
         if (!resizeUiConfigured || !resizePersistencePassed)
@@ -405,10 +366,6 @@ internal sealed partial class UnattendedTestRunner
         }
         if (!SolverOverlay.ManualSystemMemoryReleaseButtonConfiguredForTesting)
             throw new InvalidOperationException("强制释放内存按钮没有位于主界面内存条右侧。");
-        if (!SolverOverlay.NoGcControlsConfiguredForTesting)
-            throw new InvalidOperationException("NoGC 开关或预算输入没有归属性能设置页。");
-        if (!SolverOverlay.BeamWidthPortfolioControlConfiguredForTesting)
-            throw new InvalidOperationException("多宽度路线精炼开关没有归属性能设置页或状态未同步。");
         bool memoryUsageBarConfigured = SolverOverlay.MemoryUsageBarConfiguredForTesting;
         // 进入战斗时模型注册表早已初始化，生命周期信号必须已送达；模组类型在此之前不得进缓存。
         if (!ModelDbGetIdCachePatch.ModelRegistryInitializedForTesting
@@ -423,26 +380,12 @@ internal sealed partial class UnattendedTestRunner
                 $"主界面内存占用条没有按搜索 GC 回收边界建立：" +
                 $"configured={memoryUsageBarConfigured} formatting={memoryUsageBarFormatting}。");
         }
-        // 1920 宽视口、360 宽侧栏：右侧放得下放右侧；主面板贴右缘时改放左侧且不压住主面板；
-        // 两侧都放不下时贴到空间较大一侧的屏幕边缘。
-        if (SolverOverlay.StrategySidebarX(100f, 600f, 360f, 1920f, 8f, 12f) != 712f
-            || SolverOverlay.StrategySidebarX(1300f, 600f, 360f, 1920f, 8f, 12f) != 928f
-            || SolverOverlay.StrategySidebarX(50f, 1800f, 360f, 1920f, 8f, 12f) != 1552f
-            || SolverOverlay.StrategySidebarX(100f, 1800f, 360f, 1920f, 8f, 12f) != 8f)
-        {
-            throw new InvalidOperationException("策略侧栏没有优先展开到主面板外侧。");
-        }
         if (!SolverOverlay.ExercisePerformanceHintForTesting())
-            throw new InvalidOperationException("战损结果没有可用的性能预设重试胶囊提示。");
+            throw new InvalidOperationException("战损结果没有可用的计算速度重试胶囊提示。");
         if (!SolverOverlay.ExerciseSearchLimitHintForTesting())
             throw new InvalidOperationException("时间或节点上限停止后没有显示不可关闭的顶部提示。");
         if (strategyPotion is { } potionEntry)
         {
-            if (!SolverOverlay.PotionStrategyUiConfiguredForTesting
-                || !SolverOverlay.ExercisePotionStrategyUiForTesting())
-            {
-                throw new InvalidOperationException("主界面药水策略没有按右侧图标卡片网格建立。");
-            }
             PotionStrategySnapshot initialStrategy = SolverController.CapturePotionStrategy(
                 combat,
                 SolverPotionPolicy.Smart);
@@ -456,7 +399,6 @@ internal sealed partial class UnattendedTestRunner
                 potionEntry.Slot,
                 potionEntry.Potion.Id.Entry,
                 SolverPotionDirective.Force);
-            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(SolverSettings.Current));
             PotionStrategySnapshot forcedStrategy = SolverController.CapturePotionStrategy(
                 combat,
                 SolverPotionPolicy.Smart);
@@ -472,12 +414,6 @@ internal sealed partial class UnattendedTestRunner
                     .AllForcedUsesSatisfied)
             {
                 throw new InvalidOperationException("指定药水没有形成精确槽位和药水身份约束。");
-            }
-            if (SolverSettings.ResolvePotionDirective(
-                    potionEntry.Slot,
-                    potionEntry.Potion.Id.Entry + "_REPLACEMENT") != SolverPotionDirective.Smart)
-            {
-                throw new InvalidOperationException("同槽位的新药错误继承了旧药的持久化策略。");
             }
             SolverController.SetPotionDirectiveForTesting(
                 combat,
@@ -500,7 +436,8 @@ internal sealed partial class UnattendedTestRunner
                 potionEntry.Slot,
                 potionEntry.Potion.Id.Entry,
                 SolverPotionDirective.Smart);
-            if (SolverSettings.Current.PotionDirectives.Any(item => item.Slot == potionEntry.Slot))
+            if (SolverController.ResolvePotionDirectiveForTesting(potionEntry.Slot, potionEntry.Potion.Id.Entry)
+                != SolverPotionDirective.Smart)
                 throw new InvalidOperationException("恢复智能后仍保留了逐瓶策略覆盖项。");
         }
         if (!SolverOverlay.ExerciseSearchCompletionNotificationPolicyForTesting())
@@ -536,17 +473,8 @@ internal sealed partial class UnattendedTestRunner
             await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
         }
         SolverSettingsData notificationDefaults = new();
-        if (SolverSettings.ResolvePerformancePreset(notificationDefaults)
-                != SolverPerformancePreset.Medium
-            || !notificationDefaults.UseBeamWidthPortfolio
-            || notificationDefaults.UseNoveltyPortfolio
-            || notificationDefaults.UseEarlyTurnExploration
-            || !notificationDefaults.EnableNoGcRegion
-            || notificationDefaults.NoGcRegionBudgetGigabytes
-                != SolverSettings.DefaultNoGcRegionBudgetGigabytes)
-        {
-            throw new InvalidOperationException("新安装和恢复默认没有使用中性能档与启用的 16 GB 独立内存预算。");
-        }
+        if (notificationDefaults.Speed != SolverSpeed.Normal)
+            throw new InvalidOperationException("新安装和恢复默认没有使用标准速度。");
         if (!notificationDefaults.SearchCompletionNotificationsEnabled
             || notificationDefaults.SearchCompletionNotificationMode
             != SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground
@@ -846,16 +774,12 @@ internal sealed partial class UnattendedTestRunner
         await SearchGcPolicy.CaptureRootSnapshotBarrier().WaitAsync(TimeSpan.FromSeconds(30));
         SearchGcPolicy.DetachCombatLifecyclePressure(
             "unattended_disabled_gc_reference_barrier_setup");
-        SolverSettingsData settingsBeforeDisabledGcReset = SolverSettings.Current;
         TaskCompletionSource disabledReferenceReleaseGate = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
         Task disabledDeferredOperation = Task.CompletedTask;
         try
         {
-            SolverSettings.ApplyForTesting(settingsBeforeDisabledGcReset with
-            {
-                EnableNoGcRegion = false,
-            });
+            SolverSettings.OverrideSnapshotForTesting(current => current with { EnableNoGcRegion = false });
             disabledDeferredOperation = SolverController.StartCombatDeferredOperation(async token =>
             {
                 await disabledReferenceReleaseGate.Task;
@@ -882,7 +806,7 @@ internal sealed partial class UnattendedTestRunner
         {
             disabledReferenceReleaseGate.TrySetResult();
             await disabledDeferredOperation.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-            SolverSettings.ApplyForTesting(settingsBeforeDisabledGcReset);
+            SolverSettings.OverrideSnapshotForTesting(null);
         }
 
         var deploymentLifecycle =
@@ -900,48 +824,6 @@ internal sealed partial class UnattendedTestRunner
                 $"scheduled={deploymentLifecycle.ReleasesScheduled} " +
                 $"completed={deploymentLifecycle.ReleasesCompleted} " +
                 $"cts_disposed={deploymentLifecycle.CancellationsDisposed}。");
-        }
-    }
-
-    private static void AssertPotionPresetPolicy()
-    {
-        PotionSlotDirective[] potions =
-        [
-            new(0, "SMART", SolverPotionDirective.Smart),
-            new(1, "FORCED", SolverPotionDirective.Force),
-            new(2, "PROTECTED", SolverPotionDirective.Disabled),
-        ];
-
-        static SolverPotionDirective Resolve(SolverSettingsData data, int slot, string id)
-        {
-            foreach (PersistedPotionDirective directive in data.PotionDirectives)
-            {
-                if (directive.Slot == slot && directive.PotionId == id)
-                    return directive.Directive;
-            }
-            return SolverPotionDirective.Smart;
-        }
-
-        SolverSettingsData allSmart = SolverSettings.ApplyPotionPreset(new SolverSettingsData(), potions,
-            PotionStrategyPreset.AllSmart);
-        SolverSettingsData allProtected = SolverSettings.ApplyPotionPreset(new SolverSettingsData(), potions,
-            PotionStrategyPreset.AllProtected);
-        SolverSettingsData allForced = SolverSettings.ApplyPotionPreset(new SolverSettingsData(), potions,
-            PotionStrategyPreset.AllForced);
-        SolverSettingsData onlyForced = SolverSettings.ApplyPotionPreset(new SolverSettingsData(), potions,
-            PotionStrategyPreset.OnlyForced);
-        SolverSettingsData roundTrippedOnlyForced = SolverSettings.RoundTripForTesting(onlyForced);
-        if (allSmart.PotionDirectives.Length != 0
-            || potions.Any(potion => Resolve(allProtected, potion.Slot, potion.PotionId) != SolverPotionDirective.Disabled)
-            || potions.Any(potion => Resolve(allForced, potion.Slot, potion.PotionId) != SolverPotionDirective.Force)
-            || Resolve(onlyForced, 0, "SMART") != SolverPotionDirective.Disabled
-            || Resolve(onlyForced, 1, "FORCED") != SolverPotionDirective.Force
-            || Resolve(onlyForced, 2, "PROTECTED") != SolverPotionDirective.Disabled
-            || Resolve(roundTrippedOnlyForced, 0, "SMART") != SolverPotionDirective.Disabled
-            || Resolve(roundTrippedOnlyForced, 1, "FORCED") != SolverPotionDirective.Force
-            || Resolve(roundTrippedOnlyForced, 2, "PROTECTED") != SolverPotionDirective.Disabled)
-        {
-            throw new InvalidOperationException("药水批量预设没有保持智能、保护、强制和仅强制语义。");
         }
     }
 
@@ -968,7 +850,7 @@ internal sealed partial class UnattendedTestRunner
         SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
         SearchPolicySnapshot thresholdPolicy = policy with
         {
-            AcceptableBattleHpLoss = SolverSettings.MaximumAcceptableBattleHpLoss,
+            AcceptableBattleHpLoss = 100_000,
             Profile = policy.Profile with
             {
                 BeamWidth = 1,
@@ -1792,20 +1674,8 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("默认搜索并行度没有按逻辑处理器数量解析为 1/2/4/8。");
         }
-        SolverSettingsData original = SolverSettings.Current;
-        try
-        {
-            SolverSettings.ApplyForTesting(original with { SearchMaxDegreeOfParallelism = null });
-            if (SolverSettings.Capture().SearchMaxDegreeOfParallelism
-                != SolverWeights.DefaultSearchMaxDegreeOfParallelism)
-                throw new InvalidOperationException("Automatic search parallelism did not use the CPU default.");
-            SolverSettings.ApplyForTesting(original with { SearchMaxDegreeOfParallelism = 2 });
-            if (SolverSettings.Capture().SearchMaxDegreeOfParallelism != 2)
-                throw new InvalidOperationException("Explicit search parallelism was replaced by the CPU default.");
-        }
-        finally
-        {
-            SolverSettings.ApplyForTesting(original);
-        }
+        if (SolverSettings.Capture().SearchMaxDegreeOfParallelism
+            != SolverWeights.DefaultSearchMaxDegreeOfParallelism)
+            throw new InvalidOperationException("Search parallelism did not use the CPU default.");
     }
 }

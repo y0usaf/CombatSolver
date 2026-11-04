@@ -1929,7 +1929,6 @@ foreach ($check in @(
     @{ Path = $solverSettingsPanelPath; Text = "CommitPending()" },
     @{ Path = $solverSettingsGeneralPath; Text = "CreateGeneralPage()" },
     @{ Path = $solverSettingsPerformancePath; Text = "CreatePerformancePage()" },
-    @{ Path = $solverSettingsPerformancePath; Text = "SetAdvancedParametersExpanded" },
     @{ Path = $solverSettingsBugReportsPath; Text = "CreateBugReportsPage()" },
     @{ Path = $solverSettingsControlsPath; Text = "CreatePageScroll(Control content)" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
@@ -1943,8 +1942,7 @@ foreach ($check in @(
     @{ File = 'src/Search/CombatBeamSolver.Phases.cs'; Text = 'policy.RelicTargetsSatisfied(node.Snapshot.RelicCounters)' },
     @{ File = 'src/Search/CombatSearchCoordinator.cs'; Text = 'policy.RelicTargetsSatisfied(result.Snapshot.RelicCounters)' },
     @{ File = 'src/Runtime/SolvedRouteCache.cs'; Text = 'policy.RelicTargets' },
-    @{ File = 'src/Search/CombatBeamSolver.Expansion.Opening.cs'; Text = 'ApplyFixedPrefix(seed, prefix)' },
-    @{ File = 'src/UI/SolverRelicStrategyPanel.cs'; Text = 'row.Enabled.ButtonPressed' })) {
+    @{ File = 'src/Search/CombatBeamSolver.Expansion.Opening.cs'; Text = 'ApplyFixedPrefix(seed, prefix)' })) {
     if (-not (Select-String -LiteralPath (Join-Path $repositoryRoot $check.File) -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.File): missing relic policy ownership '$($check.Text)'")
     }

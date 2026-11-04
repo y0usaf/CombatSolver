@@ -244,7 +244,6 @@ internal static class BatchRunner
             Arg("TimeoutSeconds", "timeout-seconds", timeout.ToString());
             if (options.ContainsKey("--instance"))
             {
-                Arg("PerformancePresetForTest", "performance-preset-for-test", "VeryHigh");
                 Arg("SearchMaxDegreeOfParallelismForTest", "search-max-degree-of-parallelism-for-test", "8");
                 Arg("SearchBudgetOverrideMilliseconds", "search-budget-override-milliseconds", "180000");
                 if (earlyTurnExplorationDepth > 0)

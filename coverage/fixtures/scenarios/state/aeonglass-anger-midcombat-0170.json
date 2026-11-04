@@ -47,7 +47,6 @@
     { "powerId": "STRENGTH_POWER", "target": "Enemy", "targetIndex": 0, "amount": 9 },
     { "powerId": "VULNERABLE_POWER", "target": "Enemy", "targetIndex": 0, "amount": 36 }
   ],
-  "performancePresetForTest": "High",
   "expectedInitialAbsentActionCardId": "ANGER",
   "expectedInitialSearchedTurnsAtLeast": 1,
   "stopAfterInitialSolverResultAssertion": true,

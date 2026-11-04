@@ -10,47 +10,9 @@ namespace CombatSolver;
 
 internal sealed partial class UnattendedTestRunner
 {
-    private void AssertPerformancePreset(SolverPerformancePreset preset)
-    {
-        SolverSettingsSnapshot snapshot = SolverSettings.Capture();
-        if (SolverSettings.ResolvePerformancePreset(SolverSettings.Current) != preset)
-            throw new InvalidOperationException($"性能预设没有保持为 {preset}。");
-        if (preset == SolverPerformancePreset.Custom)
-        {
-            _completedChecks.Add(
-                $"PerformancePreset:Custom:{snapshot.Profile.SoftTimeBudgetMilliseconds}ms:" +
-                $"Beam={snapshot.Profile.BeamWidth}:Nodes={snapshot.Profile.MaxExpandedNodes}:" +
-                $"Branches={snapshot.Profile.MaxCardBranchesPerNode}:" +
-                $"NoGC={snapshot.EnableNoGcRegion}/{snapshot.NoGcRegionBudgetBytes}");
-            return;
-        }
-        (int SoftTimeBudgetMilliseconds, int BeamWidth, int MaxExpandedNodes,
-            int MaxCardBranchesPerNode) expected = preset switch
-        {
-            SolverPerformancePreset.Low => (60_000, 45, 60_000, 24),
-            SolverPerformancePreset.Medium => (120_000, 60, 120_000, 32),
-            SolverPerformancePreset.High => (180_000, 90, 250_000, 48),
-            SolverPerformancePreset.VeryHigh => (300_000, 135, 500_000, 72),
-            _ => throw new ArgumentOutOfRangeException(nameof(preset)),
-        };
-        if (snapshot.Profile.SoftTimeBudgetMilliseconds != expected.SoftTimeBudgetMilliseconds
-            || snapshot.Profile.BeamWidth != expected.BeamWidth
-            || snapshot.Profile.MaxExpandedNodes != expected.MaxExpandedNodes
-            || snapshot.Profile.MaxCardBranchesPerNode != expected.MaxCardBranchesPerNode)
-        {
-            throw new InvalidOperationException($"性能预设 {preset} 解析结果与固定规格不一致。");
-        }
-        _completedChecks.Add(
-            $"PerformancePreset:{preset}:{expected.SoftTimeBudgetMilliseconds}ms:" +
-            $"Beam={expected.BeamWidth}:Nodes={expected.MaxExpandedNodes}:" +
-            $"Branches={expected.MaxCardBranchesPerNode}:" +
-            $"NoGC={snapshot.EnableNoGcRegion}/{snapshot.NoGcRegionBudgetBytes}");
-    }
-
     private void AssertAppliedNoGcConfiguration()
     {
-        if (!_request.PerformancePresetForTest.HasValue
-            && !_request.EnableNoGcRegionForTest.HasValue
+        if (!_request.EnableNoGcRegionForTest.HasValue
             && !_request.NoGcRegionBudgetGigabytesForTest.HasValue
             && !_request.ExpectNoGcFallbackForTest
             && !_request.AllowNoGcFallbackForTest)
@@ -360,8 +322,6 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException(
                 $"首轮偷窃策略为 {result.TheftPolicy?.ToString() ?? "-"}，预期为 {expectedTheftPolicy}。");
         }
-        if (_request.ExpectedInitialTheftPolicy.HasValue && !SolverOverlay.TheftPolicyVisibleForTesting)
-            throw new InvalidOperationException("偷窃战斗中没有显示保资源/放走策略按钮。");
         if (_request.ExpectedInitialOutstandingStolenResource is { } expectedOutstanding
             && result.OutstandingStolenResource != expectedOutstanding)
         {

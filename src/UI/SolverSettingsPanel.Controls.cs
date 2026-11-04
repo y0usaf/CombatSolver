@@ -313,17 +313,6 @@ internal sealed partial class SolverSettingsPanel
         return row;
     }
 
-    private static void AddGridHeader(GridContainer grid, string text)
-    {
-        Label label = SolverUiTokens.CreateLabel(
-            text,
-            SolverUiTokens.Type.Caption,
-            SolverUiTokens.Palette.TextMuted,
-            FontType.Bold);
-        label.HorizontalAlignment = HorizontalAlignment.Center;
-        grid.AddChild(label);
-    }
-
     private bool SaveSetting(LineEdit input, SolverSettingsData data, string message)
     {
         if (_loading)

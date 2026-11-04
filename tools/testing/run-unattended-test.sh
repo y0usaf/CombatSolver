@@ -237,7 +237,6 @@ add_option expected-player-death 0 switch bool
 # Headless tests intentionally default to the fastest game-speed override.
 add_option headless-fast-mode-for-test "Instant" string optional_string "FollowGame|Normal|Fast|Instant"
 add_option deployment-fast-mode-for-test "" string optional_string "FollowGame|Normal|Fast|Instant"
-add_option performance-preset-for-test "" string optional_string "Low|Medium|High|VeryHigh|Custom"
 add_option search-beam-width-for-test -1 int positive_int
 add_option search-max-expanded-nodes-for-test -1 int positive_int
 add_option beam-weight-term-for-test "" string optional_string "CurrentEnergy|PersistentBuffDelta|EnemyHp"

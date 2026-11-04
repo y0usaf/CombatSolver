@@ -48,7 +48,7 @@ try {
     $arguments=@('-NoProfile','-File',$launcher,'-Sts2GameRoot',$GameRoot,'-RitsuWorkshopRoot',$RitsuWorkshopRoot,
         '-CombatSolverBuildDir',[IO.Path]::GetFullPath($Build),'-HeadlessInstance',$instance,
         '-RuntimeProfile',$RuntimeProfile,'-GeneratedScenarioPath',(Join-Path $Output 'input.json'),
-        '-EvidenceDirectory',$Output,'-ScenarioId','RUNTIME-GC-PERFORMANCE','-PerformancePresetForTest','VeryHigh',
+        '-EvidenceDirectory',$Output,'-ScenarioId','RUNTIME-GC-PERFORMANCE',
         '-SearchBudgetOverrideMilliseconds','300000','-SearchMaxExpandedNodesForTest','500000',
         '-SearchMaxDegreeOfParallelismForTest',[string]$Dop,'-EnableDetailedDiagnosticLogsForTest','0',
         '-HeadlessCpuReservation',[string]$Dop,'-HeadlessMemoryReservationMiB',[string]$MemoryReservationMiB,

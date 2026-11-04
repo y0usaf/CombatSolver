@@ -34,6 +34,5 @@
   "timeoutSeconds": 120,
   "initialEnemyBlocks": [
     17
-  ],
-  "performancePresetForTest": "Low"
+  ]
 }

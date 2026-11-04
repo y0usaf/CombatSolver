@@ -30,7 +30,6 @@
   "measureSearchPhases": true,
   "stopAfterInitialSolverResultAssertion": false,
   "timeoutSeconds": 120,
-  "performancePresetForTest": "Low",
   "expectedInitialProjectedBattleHpLost": 0,
   "expectedInitialCombatEndedTurn": 1,
   "expectedInitialFinalEnemyHpAtMost": 0,

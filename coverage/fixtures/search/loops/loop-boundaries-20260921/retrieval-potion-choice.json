@@ -42,6 +42,5 @@
   "searchMaxDegreeOfParallelismForTest": 1,
   "measureSearchPhases": true,
   "stopAfterInitialSolverResultAssertion": true,
-  "timeoutSeconds": 120,
-  "performancePresetForTest": "Low"
+  "timeoutSeconds": 120
 }

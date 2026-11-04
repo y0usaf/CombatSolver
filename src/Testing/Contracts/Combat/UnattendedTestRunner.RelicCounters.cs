@@ -36,13 +36,8 @@ internal sealed partial class UnattendedTestRunner
                 SetRelicStateMember(relic, member, entry.Period - 1);
             }
             var rules = RelicCounterCatalog.All.Where(entry => entry.Id != RelicCounterId.MeatOnTheBone).Select(entry => new RelicCounterRule(entry.Id, true, entry.Period - 1, entry.Period - 1, 2)).ToArray();
-            var settings = original with { AutomaticCalculationEnabled = false, RelicStrategyEnabled = true, RelicCounterRules = rules, GrowthBudgets = default, IgnoreLongTermRewards = false };
-            var roundtrip = SolverSettings.RoundTripForTesting(settings);
-            Check(roundtrip.RelicStrategyEnabled && roundtrip.RelicCounterRules.SequenceEqual(rules), "switches, ranges and allowances persist");
-            SolverSettings.ApplyForTesting(settings);
-            using (var panel = new SolverRelicStrategyPanel())
-                Check(panel.ExerciseControlsForTesting(), "independent UI switches preserve other entries and saved values");
-            Check(await SolverOverlay.ExerciseRelicPanelForTesting(), "header order, sidebar bounds and mutual exclusion");
+            SolverSettings.ApplyForTesting(original with { AutomaticCalculationEnabled = false });
+            SolverSettings.OverrideSnapshotForTesting(current => current with { RelicStrategyEnabled = true, RelicCounterRules = rules });
             var targets = RelicCounterCatalog.Capture(combat, true, rules);
             Check(targets.Count == 10 && RelicCounterCatalog.Capture(combat, false, rules).Count == 0, "master switch");
             Check(RelicCounterCatalog.Capture(combat, true, rules.Select(rule => rule with { Enabled = false })).Count == 0, "per-relic switches");
@@ -109,8 +104,12 @@ internal sealed partial class UnattendedTestRunner
             await CardCmd.AutoPlay(new ThrowingPlayerChoiceContext(), nativeCards.Single(card => card.Id.Entry == "BLOODLETTING"), null);
             await CardCmd.AutoPlay(new ThrowingPlayerChoiceContext(), nativeCards.Single(card => card.Id.Entry == "STRIKE_IRONCLAD"), combat.Enemies[0]);
             Check(club.CardsPlayed % 4 == 2, "native killing-card hook leaves the same final counter");
-            _completedChecks.Add($"RelicCounters:10RootReaders:FrozenLive:Fork:Persistence:MasterAndIndividual:AlignedZeroLoss:EarlyStop:Nodes={aligned.TotalExpandedNodes}/{continued.TotalExpandedNodes}");
+            _completedChecks.Add($"RelicCounters:10RootReaders:FrozenLive:Fork:MasterAndIndividual:AlignedZeroLoss:EarlyStop:Nodes={aligned.TotalExpandedNodes}/{continued.TotalExpandedNodes}");
         }
-        finally { SolverSettings.ApplyForTesting(original); }
+        finally
+        {
+            SolverSettings.OverrideSnapshotForTesting(null);
+            SolverSettings.ApplyForTesting(original);
+        }
     }
 }

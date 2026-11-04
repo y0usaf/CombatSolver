@@ -25,13 +25,11 @@ internal enum SolverOverlayTheme
     Light,
 }
 
-internal enum SolverPerformancePreset
+internal enum SolverSpeed
 {
-    Low,
-    Medium,
-    High,
-    VeryHigh,
-    Custom,
+    Fast,
+    Normal,
+    Thorough,
 }
 
 internal enum SolverPotionPolicy
@@ -47,46 +45,12 @@ internal enum BossHpStrategy
     MinimizeHpLoss,
 }
 
-internal readonly record struct PersistedPotionDirective(
-    int Slot,
-    string PotionId,
-    SolverPotionDirective Directive);
-
-internal sealed record SolverPerformanceValues(
-    SolverSearchProfile Profile);
-
 internal sealed record SolverSettingsData
 {
-    // Read pre-unified settings once; new files contain only Search* budget values.
-    [JsonPropertyName("deepTimeLimitSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public double? LegacyDeepTimeLimitSeconds { get => null; init { if (!SearchTimeLimitSeconds.HasValue) SearchTimeLimitSeconds = value; } }
-    [JsonPropertyName("deepBeamWidth"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? LegacyDeepBeamWidth { get => null; init { if (!SearchBeamWidth.HasValue) SearchBeamWidth = value; } }
-    [JsonPropertyName("deepPotionFreeBeamWidth"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? LegacyDeepPotionFreeBeamWidth { get => null; init { if (!SearchPotionFreeBeamWidth.HasValue) SearchPotionFreeBeamWidth = value; } }
-    [JsonPropertyName("deepPotionBeamWidth"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? LegacyDeepPotionBeamWidth { get => null; init { if (!SearchPotionBeamWidth.HasValue) SearchPotionBeamWidth = value; } }
-    [JsonPropertyName("deepMaxExpandedNodes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? LegacyDeepMaxExpandedNodes { get => null; init { if (!SearchMaxExpandedNodes.HasValue) SearchMaxExpandedNodes = value; } }
-    [JsonPropertyName("deepMaxCardBranchesPerNode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? LegacyDeepMaxCardBranchesPerNode { get => null; init { if (!SearchMaxCardBranchesPerNode.HasValue) SearchMaxCardBranchesPerNode = value; } }
-    [JsonPropertyName("deepMaxPileChoiceBranchesPerAction"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? LegacyDeepMaxPileChoiceBranchesPerAction { get => null; init { if (!SearchMaxPileChoiceBranchesPerAction.HasValue) SearchMaxPileChoiceBranchesPerAction = value; } }
-    [JsonPropertyName("deepMaxHandChoiceBranchesPerAction"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? LegacyDeepMaxHandChoiceBranchesPerAction { get => null; init { if (!SearchMaxHandChoiceBranchesPerAction.HasValue) SearchMaxHandChoiceBranchesPerAction = value; } }
     public bool SolverDisabled { get; init; }
     public bool AutomaticCalculationEnabled { get; init; } = true;
     public bool AutoEnableFullAuto { get; init; }
-    public int FairPlannerSamples { get; init; } = 12;
-    public int FairPlannerCandidates { get; init; } = 4;
-    public double FairPlannerDeathPenalty { get; init; } = 200;
-    public double FairPlannerUnfinishedEnemyHpWeight { get; init; } = 0.25;
-    public int FairPlannerBeamWidth { get; init; } = 20;
-    public int FairPlannerMaxExpandedNodes { get; init; } = 1500;
-    public int FairPlannerSolveBudgetMilliseconds { get; init; } = 5000;
-    public double FairPlannerCommitAgreement { get; init; } = 1;
-    public double FairPlannerTieStandardErrors { get; init; } = 1;
-    public double FairPlannerTieMarginHp { get; init; } = 1;
+    public SolverSpeed Speed { get; init; } = SolverSpeed.Normal;
     [JsonPropertyName("fairForkOnlineStatisticsEnabled")]
     public bool OnlineStatisticsEnabled { get; init; }
     public bool StopFullAutoOnCombatEnd { get; init; }
@@ -95,48 +59,10 @@ internal sealed record SolverSettingsData
     public bool EnableDetailedDiagnosticLogs { get; init; }
     public bool RetainAllCombatLogs { get; init; }
     public bool ShowBattleDamagePerformanceHint { get; init; } = true;
-    public bool ShowActTransitionBossHpStrategyHint { get; init; } = true;
-    public bool ShowFinalBossHpStrategyHint { get; init; } = true;
-    public bool ShowNoveltyPortfolioHint { get; init; } = true;
     public bool ShowSpeedXWarning { get; init; } = true;
     public bool SearchCompletionNotificationsEnabled { get; init; } = true;
     public SolverSearchCompletionNotificationMode SearchCompletionNotificationMode { get; init; }
         = SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground;
-    [JsonIgnore]
-    public SolverPotionPolicy PotionPolicy { get; init; } = SolverPotionPolicy.Smart;
-    public PersistedPotionDirective[] PotionDirectives { get; init; } = [];
-    public bool PredictPotionReward { get; init; }
-    public bool RelicStrategyEnabled { get; init; } = true;
-    public RelicCounterRule[] RelicCounterRules { get; init; } = [];
-    public GrowthValues GrowthBudgets { get; init; }
-    public int? BrightestFlameMaxHpLossLimit { get; init; }
-    /// <summary>
-    /// 不考虑局外收益。打开后搜索既不为金币、永久升级这类战斗外收益付出任何血量，也不再用它们
-    /// 在 Beam 里保留路线；最终选择里的字典序位置不变，所以白拿的收益照样拿。
-    /// </summary>
-    public bool IgnoreLongTermRewards { get; init; }
-    public BossHpStrategy ActTransitionBossHpStrategy { get; init; } = BossHpStrategy.ProgressionFirst;
-    public BossHpStrategy FinalBossHpStrategy { get; init; } = BossHpStrategy.ProgressionFirst;
-    public int AcceptableBattleHpLoss { get; init; }
-    public bool StopAtAcceptableBattleHpLoss { get; init; } = true;
-    public int PerformanceMigrationVersion { get; init; }
-    public SolverPerformancePreset? PerformancePreset { get; init; } = SolverPerformancePreset.Medium;
-    public int? SearchMaxDegreeOfParallelism { get; init; }
-    public bool UseBeamWidthPortfolio { get; init; } = true;
-    public bool UseNoveltyPortfolio { get; init; }
-    public bool UseEarlyTurnExploration { get; init; }
-    public double? SearchTimeLimitSeconds { get; init; }
-    public bool AutoConfigureServerGc { get; init; } = true;
-    public bool EnableNoGcRegion { get; init; } = true;
-    public double? NoGcRegionBudgetGigabytes { get; init; } = 16d;
-    public int? SearchBeamWidth { get; init; }
-    // Legacy split fields are read for migration; new writes use Short/SearchBeamWidth.
-    public int? SearchPotionFreeBeamWidth { get; init; }
-    public int? SearchPotionBeamWidth { get; init; }
-    public int? SearchMaxExpandedNodes { get; init; }
-    public int? SearchMaxCardBranchesPerNode { get; init; }
-    public int? SearchMaxPileChoiceBranchesPerAction { get; init; }
-    public int? SearchMaxHandChoiceBranchesPerAction { get; init; }
     public SolverDeploymentFastMode DeploymentFastMode { get; init; } = SolverDeploymentFastMode.FollowGame;
     public double? DeploymentInterActionDelaySeconds { get; init; }
     public float? OverlayPositionX { get; init; }
@@ -175,45 +101,15 @@ internal sealed record SolverSettingsSnapshot(
     public bool UseNoveltyPortfolio { get; init; }
     public bool UseEarlyTurnExploration { get; init; }
     public bool PredictPotionReward { get; init; }
+    public SolverSpeed Speed { get; init; } = SolverSpeed.Normal;
 }
 
 internal static class SolverSettings
 {
-    public const double DefaultNoGcRegionBudgetGigabytes = 16d;
-    public const double MaximumNoGcRegionBudgetGigabytes = 256d;
-    public const int MaximumAcceptableBattleHpLoss = 100_000;
+    public const long NoGcRegionBudgetBytes = 16_000_000_000;
     public const float MinimumOverlayWidth = 400f;
     public const float MinimumOverlayHeight = 300f;
     public const float MaximumOverlaySize = 100_000f;
-    private const int UnifiedPerformanceMigrationVersion = 243;
-    private const int BeamWidthPortfolioDefaultMigrationVersion = 244;
-    internal const int CurrentPerformanceMigrationVersion = 246;
-    private static readonly SolverPerformanceValues LowPerformance = new(
-        new SolverSearchProfile(
-            BeamWidth: 45,
-            MaxExpandedNodes: 60_000,
-            MaxCardBranchesPerNode: 24,
-            MaxPileChoiceBranchesPerAction: 12,
-            MaxHandChoiceBranchesPerAction: 16,
-            SoftTimeBudgetMilliseconds: 60_000));
-    private static readonly SolverPerformanceValues MediumPerformance = new(
-        SolverSearchProfile.Default);
-    private static readonly SolverPerformanceValues HighPerformance = new(
-        new SolverSearchProfile(
-            BeamWidth: 90,
-            MaxExpandedNodes: 250_000,
-            MaxCardBranchesPerNode: 48,
-            MaxPileChoiceBranchesPerAction: 28,
-            MaxHandChoiceBranchesPerAction: 36,
-            SoftTimeBudgetMilliseconds: 180_000));
-    private static readonly SolverPerformanceValues VeryHighPerformance = new(
-        new SolverSearchProfile(
-            BeamWidth: 135,
-            MaxExpandedNodes: 500_000,
-            MaxCardBranchesPerNode: 72,
-            MaxPileChoiceBranchesPerAction: 42,
-            MaxHandChoiceBranchesPerAction: 54,
-            SoftTimeBudgetMilliseconds: 300_000));
     private const string SettingsUri = "user://combat_solver_settings.json";
     private static readonly object Sync = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -223,6 +119,7 @@ internal static class SolverSettings
         Converters = { new JsonStringEnumConverter() },
     };
     private static SolverSettingsData _current = new();
+    private static Func<SolverSettingsSnapshot, SolverSettingsSnapshot>? _snapshotOverrideForTesting;
 
     public static SolverSettingsData Current
     {
@@ -243,17 +140,17 @@ internal static class SolverSettings
     {
         string path = ProjectSettings.GlobalizePath(SettingsUri);
         bool persisted = File.Exists(path);
-        SolverSettingsData loaded = persisted
-            ? JsonSerializer.Deserialize<SolverSettingsData>(File.ReadAllText(path), JsonOptions)
+        string? persistedJson = persisted ? File.ReadAllText(path) : null;
+        SolverSettingsData loaded = persistedJson != null
+            ? JsonSerializer.Deserialize<SolverSettingsData>(persistedJson, JsonOptions)
                 ?? throw new InvalidDataException("CombatSolver settings file contained null.")
             : new SolverSettingsData();
-        SolverSettingsData migrated = ApplyCurrentPerformanceMigration(loaded);
-        Validate(migrated);
+        Validate(loaded);
         lock (Sync)
         {
-            _current = migrated;
-            if (!persisted || migrated != loaded)
-                SaveLocked(migrated);
+            _current = loaded;
+            if (!string.Equals(persistedJson, JsonSerializer.Serialize(loaded, JsonOptions), StringComparison.Ordinal))
+                SaveLocked(loaded);
         }
         RuntimeGcProfileSelection runtimeProfile = RuntimeGcProfile.Current;
         SolverSettingsSnapshot effectiveSettings = Capture();
@@ -262,7 +159,6 @@ internal static class SolverSettings
             $"server_gc={runtimeProfile.IsServerGc.ToString().ToLowerInvariant()} " +
             $"requested={JsonSerializer.Serialize(runtimeProfile.RequestedProfile)} " +
             $"status={runtimeProfile.Status} " +
-            $"saved_no_gc_enabled={migrated.EnableNoGcRegion.ToString().ToLowerInvariant()} " +
             $"effective_no_gc_enabled={effectiveSettings.EnableNoGcRegion.ToString().ToLowerInvariant()} " +
             "profile_settings_persisted=false";
         if (runtimeProfile.Status is RuntimeGcProfileStatus.ServerGcUnavailable
@@ -272,134 +168,56 @@ internal static class SolverSettings
             Entry.Logger.Info(runtimeProfileDescription);
         Entry.Logger.Info(
             $"[CombatSolver/Test] SETTINGS_LOADED persisted={persisted} " +
-            $"automatic_calculation={migrated.AutomaticCalculationEnabled.ToString().ToLowerInvariant()} " +
-            $"performance_migration={loaded.PerformanceMigrationVersion}->{migrated.PerformanceMigrationVersion} " +
-            $"solver_disabled={migrated.SolverDisabled} " +
-            $"stop_on_combat_end={migrated.StopFullAutoOnCombatEnd} " +
-            $"stop_on_death_turn={migrated.StopFullAutoOnDeathTurn} " +
-            $"stop_on_worse_recalculation={migrated.StopFullAutoOnWorseRecalculation} " +
-            $"detailed_diagnostic_logs={migrated.EnableDetailedDiagnosticLogs} " +
-            $"retain_all_combat_logs={migrated.RetainAllCombatLogs} " +
-            $"show_battle_damage_performance_hint={migrated.ShowBattleDamagePerformanceHint} " +
-            $"show_novelty_portfolio_hint={migrated.ShowNoveltyPortfolioHint} " +
-            $"show_speedx_warning={migrated.ShowSpeedXWarning} " +
-            $"act_transition_boss_hp_strategy={migrated.ActTransitionBossHpStrategy} " +
-            $"final_boss_hp_strategy={migrated.FinalBossHpStrategy} " +
-            $"acceptable_battle_hp_loss={migrated.AcceptableBattleHpLoss} " +
-            $"search_notifications_enabled={migrated.SearchCompletionNotificationsEnabled} " +
-            $"search_notification_mode={migrated.SearchCompletionNotificationMode} " +
-            $"potion_policy={migrated.PotionPolicy} " +
-            $"potion_directives={migrated.PotionDirectives.Length} " +
-            $"performance_preset={ResolvePerformancePreset(migrated)} " +
-            $"beam_width_portfolio={migrated.UseBeamWidthPortfolio.ToString().ToLowerInvariant()} " +
-            $"early_turn_exploration={migrated.UseEarlyTurnExploration.ToString().ToLowerInvariant()} " +
-            $"max_dop={Capture().SearchMaxDegreeOfParallelism} " +
-            $"search_budget_ms={Capture().Profile.SoftTimeBudgetMilliseconds} " +
-            $"no_gc_enabled={Capture().EnableNoGcRegion.ToString().ToLowerInvariant()} " +
-            $"no_gc_budget_bytes={Capture().NoGcRegionBudgetBytes} " +
-            $"deployment_fast_mode={migrated.DeploymentFastMode} " +
-            $"deployment_delay_seconds={migrated.DeploymentInterActionDelaySeconds ?? 0d:0.###} " +
-            $"overlay_theme={migrated.OverlayTheme} " +
-            $"overlay_opacity={migrated.OverlayOpacity:0.##}");
+            $"automatic_calculation={loaded.AutomaticCalculationEnabled.ToString().ToLowerInvariant()} " +
+            $"speed={loaded.Speed} " +
+            $"solver_disabled={loaded.SolverDisabled} " +
+            $"stop_on_combat_end={loaded.StopFullAutoOnCombatEnd} " +
+            $"stop_on_death_turn={loaded.StopFullAutoOnDeathTurn} " +
+            $"stop_on_worse_recalculation={loaded.StopFullAutoOnWorseRecalculation} " +
+            $"detailed_diagnostic_logs={loaded.EnableDetailedDiagnosticLogs} " +
+            $"retain_all_combat_logs={loaded.RetainAllCombatLogs} " +
+            $"show_battle_damage_performance_hint={loaded.ShowBattleDamagePerformanceHint} " +
+            $"show_speedx_warning={loaded.ShowSpeedXWarning} " +
+            $"search_notifications_enabled={loaded.SearchCompletionNotificationsEnabled} " +
+            $"search_notification_mode={loaded.SearchCompletionNotificationMode} " +
+            $"max_dop={effectiveSettings.SearchMaxDegreeOfParallelism} " +
+            $"search_budget_ms={effectiveSettings.Profile.SoftTimeBudgetMilliseconds} " +
+            $"no_gc_enabled={effectiveSettings.EnableNoGcRegion.ToString().ToLowerInvariant()} " +
+            $"no_gc_budget_bytes={effectiveSettings.NoGcRegionBudgetBytes} " +
+            $"deployment_fast_mode={loaded.DeploymentFastMode} " +
+            $"deployment_delay_seconds={loaded.DeploymentInterActionDelaySeconds ?? 0d:0.###} " +
+            $"overlay_theme={loaded.OverlayTheme} " +
+            $"overlay_opacity={loaded.OverlayOpacity:0.##}");
     }
 
     public static SolverSettingsSnapshot Capture()
     {
         SolverSettingsData data = Current;
-        SolverPerformanceValues performance = ResolvePerformanceValues(data);
-        SolverSearchProfile profile = performance.Profile;
-        double noGcGigabytes = data.NoGcRegionBudgetGigabytes
-            ?? DefaultNoGcRegionBudgetGigabytes;
-        long noGcBytes = checked((long)Math.Round(
-            noGcGigabytes * 1_000_000_000d,
-            MidpointRounding.AwayFromZero));
-        return new SolverSettingsSnapshot(
+        SolverSettingsSnapshot snapshot = new(
             data.SolverDisabled,
             data.StopFullAutoOnCombatEnd,
             data.StopFullAutoOnDeathTurn,
             data.StopFullAutoOnWorseRecalculation,
             data.EnableDetailedDiagnosticLogs,
-            data.PotionPolicy,
-            data.ActTransitionBossHpStrategy,
-            data.FinalBossHpStrategy,
-            data.AcceptableBattleHpLoss,
-            data.SearchMaxDegreeOfParallelism
-                ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism,
-            profile,
-            RuntimeGcProfile.Current.ResolveEnableNoGcRegion(data.EnableNoGcRegion),
-            noGcBytes,
+            SolverPotionPolicy.Smart,
+            BossHpStrategy.ProgressionFirst,
+            BossHpStrategy.ProgressionFirst,
+            0,
+            SolverWeights.DefaultSearchMaxDegreeOfParallelism,
+            SolverSearchProfile.Default,
+            RuntimeGcProfile.Current.EnableNoGcRegion,
+            NoGcRegionBudgetBytes,
             data.DeploymentFastMode,
             data.DeploymentInterActionDelaySeconds ?? 0d)
         {
-            GrowthBudgets = data.GrowthBudgets,
-            RelicStrategyEnabled = data.RelicStrategyEnabled,
-            RelicCounterRules = RelicCounterPolicy.ValidateAndCopy(data.RelicCounterRules),
-            StopAtAcceptableBattleHpLoss = data.StopAtAcceptableBattleHpLoss,
-            BrightestFlameMaxHpLossLimit = data.BrightestFlameMaxHpLossLimit,
-            IgnoreLongTermRewards = data.IgnoreLongTermRewards,
-            UseBeamWidthPortfolio = data.UseBeamWidthPortfolio,
-            UseNoveltyPortfolio = data.UseNoveltyPortfolio,
-            UseEarlyTurnExploration = data.UseEarlyTurnExploration,
-            PredictPotionReward = data.PredictPotionReward,
+            Speed = data.Speed,
+            RelicStrategyEnabled = true,
+            UseBeamWidthPortfolio = true,
         };
-    }
-
-    public static SolverPerformancePreset ResolvePerformancePreset(SolverSettingsData data)
-    {
-        if (data.PerformancePreset is { } configured)
-            return configured;
-        if (!HasExplicitPerformanceValues(data))
-            return SolverPerformancePreset.Medium;
-
-        SolverPerformanceValues legacy = BuildCustomPerformance(data);
-        if (legacy == LowPerformance)
-            return SolverPerformancePreset.Low;
-        if (legacy == MediumPerformance)
-            return SolverPerformancePreset.Medium;
-        if (legacy == HighPerformance)
-            return SolverPerformancePreset.High;
-        if (legacy == VeryHighPerformance)
-            return SolverPerformancePreset.VeryHigh;
-        return SolverPerformancePreset.Custom;
-    }
-
-    public static SolverPerformanceValues ResolvePerformanceValues(SolverSettingsData data)
-        => ResolvePerformancePreset(data) switch
-        {
-            SolverPerformancePreset.Low => LowPerformance,
-            SolverPerformancePreset.Medium => MediumPerformance,
-            SolverPerformancePreset.High => HighPerformance,
-            SolverPerformancePreset.VeryHigh => VeryHighPerformance,
-            SolverPerformancePreset.Custom => BuildCustomPerformance(data),
-            _ => throw new ArgumentOutOfRangeException(nameof(data.PerformancePreset)),
-        };
-
-    public static SolverSettingsData ApplyPerformancePreset(
-        SolverSettingsData data,
-        SolverPerformancePreset preset)
-    {
-        SolverPerformanceValues values = preset == SolverPerformancePreset.Custom
-            ? ResolvePerformanceValues(data)
-            : preset switch
-            {
-                SolverPerformancePreset.Low => LowPerformance,
-                SolverPerformancePreset.Medium => MediumPerformance,
-                SolverPerformancePreset.High => HighPerformance,
-                SolverPerformancePreset.VeryHigh => VeryHighPerformance,
-                _ => throw new ArgumentOutOfRangeException(nameof(preset)),
-            };
-        return data with
-        {
-            PerformancePreset = preset,
-            SearchTimeLimitSeconds = values.Profile.SoftTimeBudgetMilliseconds / 1000d,
-            SearchBeamWidth = values.Profile.BeamWidth,
-            SearchPotionFreeBeamWidth = null,
-            SearchPotionBeamWidth = null,
-            SearchMaxExpandedNodes = values.Profile.MaxExpandedNodes,
-            SearchMaxCardBranchesPerNode = values.Profile.MaxCardBranchesPerNode,
-            SearchMaxPileChoiceBranchesPerAction = values.Profile.MaxPileChoiceBranchesPerAction,
-            SearchMaxHandChoiceBranchesPerAction = values.Profile.MaxHandChoiceBranchesPerAction,
-        };
+        Func<SolverSettingsSnapshot, SolverSettingsSnapshot>? testOverride;
+        lock (Sync)
+            testOverride = _snapshotOverrideForTesting;
+        return testOverride == null ? snapshot : testOverride(snapshot);
     }
 
     public static void Update(SolverSettingsData data)
@@ -412,76 +230,17 @@ internal static class SolverSettings
         }
     }
 
-    public static SolverPotionDirective ResolvePotionDirective(int slot, string potionId)
-    {
-        foreach (PersistedPotionDirective directive in Current.PotionDirectives)
-        {
-            if (directive.Slot == slot
-                && string.Equals(directive.PotionId, potionId, StringComparison.Ordinal))
-            {
-                return directive.Directive;
-            }
-        }
-        return SolverPotionDirective.Smart;
-    }
-
-    public static SolverSettingsData ApplyPotionDirective(
-        SolverSettingsData data,
-        int slot,
-        string potionId,
-        SolverPotionDirective directive)
-    {
-        if (slot < 0)
-            throw new ArgumentOutOfRangeException(nameof(slot));
-        if (string.IsNullOrWhiteSpace(potionId))
-            throw new ArgumentException("Potion ID must not be empty.", nameof(potionId));
-        if (!Enum.IsDefined(directive))
-            throw new ArgumentOutOfRangeException(nameof(directive));
-
-        List<PersistedPotionDirective> directives = data.PotionDirectives
-            .Where(item => item.Slot != slot)
-            .ToList();
-        if (directive != SolverPotionDirective.Smart)
-            directives.Add(new PersistedPotionDirective(slot, potionId, directive));
-        return data with
-        {
-            PotionDirectives = directives
-                .OrderBy(item => item.Slot)
-                .ThenBy(item => item.PotionId, StringComparer.Ordinal)
-                .ToArray(),
-        };
-    }
-
-    internal static SolverSettingsData ApplyPotionPreset(
-        SolverSettingsData data,
-        IReadOnlyList<PotionSlotDirective> potions,
-        PotionStrategyPreset preset)
-    {
-        if (!Enum.IsDefined(preset))
-            throw new ArgumentOutOfRangeException(nameof(preset));
-        SolverSettingsData updated = data;
-        foreach (PotionSlotDirective potion in potions)
-        {
-            SolverPotionDirective directive = preset switch
-            {
-                PotionStrategyPreset.AllSmart => SolverPotionDirective.Smart,
-                PotionStrategyPreset.AllProtected => SolverPotionDirective.Disabled,
-                PotionStrategyPreset.AllForced => SolverPotionDirective.Force,
-                PotionStrategyPreset.OnlyForced when potion.Directive == SolverPotionDirective.Force
-                    => SolverPotionDirective.Force,
-                PotionStrategyPreset.OnlyForced => SolverPotionDirective.Disabled,
-                _ => throw new ArgumentOutOfRangeException(nameof(preset)),
-            };
-            updated = ApplyPotionDirective(updated, potion.Slot, potion.PotionId, directive);
-        }
-        return updated;
-    }
-
     internal static void ApplyForTesting(SolverSettingsData data)
     {
         Validate(data);
         lock (Sync)
             _current = data;
+    }
+
+    internal static void OverrideSnapshotForTesting(Func<SolverSettingsSnapshot, SolverSettingsSnapshot>? snapshotOverride)
+    {
+        lock (Sync)
+            _snapshotOverrideForTesting = snapshotOverride;
     }
 
     internal static SolverSettingsData RoundTripForTesting(SolverSettingsData data)
@@ -494,11 +253,7 @@ internal static class SolverSettings
         => JsonSerializer.Deserialize<SolverSettingsData>(json, JsonOptions)
            ?? throw new InvalidDataException("CombatSolver settings test JSON returned null.");
 
-    public static void ResetToDefaults() => Update(CreateCurrentDefaults());
-
-    internal static SolverSettingsData ApplyCurrentPerformanceMigrationForTesting(
-        SolverSettingsData data)
-        => ApplyCurrentPerformanceMigration(data);
+    public static void ResetToDefaults() => Update(new SolverSettingsData());
 
     public static Vector2? OverlayPosition
     {
@@ -555,29 +310,8 @@ internal static class SolverSettings
 
     private static void Validate(SolverSettingsData data)
     {
-        _ = RelicCounterPolicy.ValidateAndCopy(data.RelicCounterRules);
-        if (data.PerformanceMigrationVersion < 0)
-            throw new InvalidDataException("PerformanceMigrationVersion must be non-negative.");
-        ValidateRange(data.SearchTimeLimitSeconds, 0.1d, 600d, nameof(data.SearchTimeLimitSeconds));
-        ValidateRange(
-            data.NoGcRegionBudgetGigabytes,
-            1d,
-            MaximumNoGcRegionBudgetGigabytes,
-            nameof(data.NoGcRegionBudgetGigabytes));
-        ValidateRange(
-            data.SearchMaxDegreeOfParallelism,
-            1,
-            SolverWeights.MaximumSearchMaxDegreeOfParallelism,
-            nameof(data.SearchMaxDegreeOfParallelism));
-        ValidateRange(data.SearchBeamWidth, 1, 512, nameof(data.SearchBeamWidth));
-        ValidateRange(data.SearchPotionFreeBeamWidth, 1, 256, nameof(data.SearchPotionFreeBeamWidth));
-        ValidateRange(data.SearchPotionBeamWidth, 1, 256, nameof(data.SearchPotionBeamWidth));
-        ValidateMinimum(data.SearchMaxExpandedNodes, 100, nameof(data.SearchMaxExpandedNodes));
-        ValidateRange(data.SearchMaxCardBranchesPerNode, 1, 100, nameof(data.SearchMaxCardBranchesPerNode));
-        ValidateRange(data.SearchMaxPileChoiceBranchesPerAction, 1, 100,
-            nameof(data.SearchMaxPileChoiceBranchesPerAction));
-        ValidateRange(data.SearchMaxHandChoiceBranchesPerAction, 1, 100,
-            nameof(data.SearchMaxHandChoiceBranchesPerAction));
+        if (!Enum.IsDefined(data.Speed))
+            throw new InvalidDataException($"Unknown solver speed {data.Speed}.");
         if (!Enum.IsDefined(data.DeploymentFastMode))
             throw new InvalidDataException($"Unknown deployment fast mode {data.DeploymentFastMode}.");
         if (!Enum.IsDefined(data.SearchCompletionNotificationMode))
@@ -585,43 +319,8 @@ internal static class SolverSettings
             throw new InvalidDataException(
                 $"Unknown search completion notification mode {data.SearchCompletionNotificationMode}.");
         }
-        if (!Enum.IsDefined(data.PotionPolicy))
-            throw new InvalidDataException($"Unknown potion policy {data.PotionPolicy}.");
-        if (!Enum.IsDefined(data.ActTransitionBossHpStrategy))
-        {
-            throw new InvalidDataException(
-                $"Unknown act transition boss HP strategy {data.ActTransitionBossHpStrategy}.");
-        }
-        if (!Enum.IsDefined(data.FinalBossHpStrategy))
-            throw new InvalidDataException($"Unknown final boss HP strategy {data.FinalBossHpStrategy}.");
-        if (data.AcceptableBattleHpLoss < 0
-            || data.AcceptableBattleHpLoss > MaximumAcceptableBattleHpLoss)
-        {
-            throw new InvalidDataException(
-                $"{nameof(data.AcceptableBattleHpLoss)} must be between 0 and {MaximumAcceptableBattleHpLoss}.");
-        }
-        data.GrowthBudgets.ValidateBudgets();
-        if (data.BrightestFlameMaxHpLossLimit is < 0 or > 1000)
-            throw new InvalidDataException("BrightestFlame maximum HP loss limit must be in 0..1000.");
-        HashSet<(int Slot, string PotionId)> potionDirectiveKeys = [];
-        foreach (PersistedPotionDirective directive in data.PotionDirectives)
-        {
-            if (directive.Slot < 0)
-                throw new InvalidDataException("Potion directive slot must be non-negative.");
-            if (string.IsNullOrWhiteSpace(directive.PotionId))
-                throw new InvalidDataException("Potion directive ID must not be empty.");
-            if (!Enum.IsDefined(directive.Directive))
-                throw new InvalidDataException($"Unknown potion directive {directive.Directive}.");
-            if (!potionDirectiveKeys.Add((directive.Slot, directive.PotionId)))
-            {
-                throw new InvalidDataException(
-                    $"Duplicate potion directive {directive.PotionId}@{directive.Slot}.");
-            }
-        }
         ValidateRange(data.DeploymentInterActionDelaySeconds, 0d, 3d,
             nameof(data.DeploymentInterActionDelaySeconds));
-        if (data.PerformancePreset is { } performancePreset && !Enum.IsDefined(performancePreset))
-            throw new InvalidDataException($"Unknown performance preset {performancePreset}.");
         if (data.OverlayPositionX.HasValue != data.OverlayPositionY.HasValue)
             throw new InvalidDataException("OverlayPositionX and OverlayPositionY must both be set or both be null.");
         ValidateRange(data.OverlayPositionX, -100_000f, 100_000f, nameof(data.OverlayPositionX));
@@ -651,110 +350,9 @@ internal static class SolverSettings
             throw new InvalidDataException($"{name} must be between {minimum} and {maximum}.");
     }
 
-    private static void ValidateRange(int? value, int minimum, int maximum, string name)
-    {
-        if (value is { } actual && (actual < minimum || actual > maximum))
-            throw new InvalidDataException($"{name} must be between {minimum} and {maximum}.");
-    }
-
-    private static void ValidateMinimum(int? value, int minimum, string name)
-    {
-        if (value is { } actual && actual < minimum)
-            throw new InvalidDataException($"{name} must be at least {minimum}.");
-    }
-
     private static void ValidateRange(float? value, float minimum, float maximum, string name)
     {
         if (value is { } actual && (actual < minimum || actual > maximum || float.IsNaN(actual)))
             throw new InvalidDataException($"{name} must be between {minimum} and {maximum}.");
     }
-
-    private static int ResolveBeamWidth(
-        int? unified,
-        int? legacyPotionFree,
-        int? legacyPotion,
-        int currentDefault,
-        int legacyPotionFreeDefault,
-        int legacyPotionDefault)
-    {
-        if (unified is { } configured)
-            return configured;
-        if (!legacyPotionFree.HasValue && !legacyPotion.HasValue)
-            return currentDefault;
-        return checked(
-            (legacyPotionFree ?? legacyPotionFreeDefault)
-            + (legacyPotion ?? legacyPotionDefault));
-    }
-
-    private static SolverSettingsData CreateCurrentDefaults()
-        => ApplyCurrentPerformanceMigration(new SolverSettingsData());
-
-    private static SolverSettingsData ApplyCurrentPerformanceMigration(SolverSettingsData data)
-    {
-        if (data.PerformanceMigrationVersion >= CurrentPerformanceMigrationVersion)
-            return data;
-
-        SolverSettingsData migrated = data;
-        if (migrated.PerformanceMigrationVersion < UnifiedPerformanceMigrationVersion)
-        {
-            migrated = ApplyPerformancePreset(
-                migrated with
-                {
-                    PerformanceMigrationVersion = UnifiedPerformanceMigrationVersion,
-                    NoGcRegionBudgetGigabytes = DefaultNoGcRegionBudgetGigabytes,
-                },
-                SolverPerformancePreset.Medium);
-        }
-        if (migrated.PerformanceMigrationVersion < BeamWidthPortfolioDefaultMigrationVersion)
-        {
-            migrated = migrated with
-            {
-                PerformanceMigrationVersion = BeamWidthPortfolioDefaultMigrationVersion,
-                UseBeamWidthPortfolio = true,
-            };
-        }
-        if (migrated.PerformanceMigrationVersion < CurrentPerformanceMigrationVersion)
-        {
-            migrated = migrated with
-            {
-                PerformanceMigrationVersion = CurrentPerformanceMigrationVersion,
-            };
-        }
-        return migrated;
-    }
-
-    private static SolverPerformanceValues BuildCustomPerformance(SolverSettingsData data)
-    {
-        SolverSearchProfile profile = MediumPerformance.Profile with
-        {
-            BeamWidth = ResolveBeamWidth(
-                data.SearchBeamWidth,
-                data.SearchPotionFreeBeamWidth,
-                data.SearchPotionBeamWidth,
-                MediumPerformance.Profile.BeamWidth,
-                legacyPotionFreeDefault: 22,
-                legacyPotionDefault: 7),
-            MaxExpandedNodes = data.SearchMaxExpandedNodes ?? MediumPerformance.Profile.MaxExpandedNodes,
-            MaxCardBranchesPerNode = data.SearchMaxCardBranchesPerNode
-                ?? MediumPerformance.Profile.MaxCardBranchesPerNode,
-            MaxPileChoiceBranchesPerAction = data.SearchMaxPileChoiceBranchesPerAction
-                ?? MediumPerformance.Profile.MaxPileChoiceBranchesPerAction,
-            MaxHandChoiceBranchesPerAction = data.SearchMaxHandChoiceBranchesPerAction
-                ?? MediumPerformance.Profile.MaxHandChoiceBranchesPerAction,
-            SoftTimeBudgetMilliseconds = data.SearchTimeLimitSeconds is { } deepSeconds
-                ? checked((int)Math.Round(deepSeconds * 1000d, MidpointRounding.AwayFromZero))
-                : MediumPerformance.Profile.SoftTimeBudgetMilliseconds,
-        };
-        return new SolverPerformanceValues(profile);
-    }
-
-    private static bool HasExplicitPerformanceValues(SolverSettingsData data)
-        => data.SearchTimeLimitSeconds.HasValue
-            || data.SearchBeamWidth.HasValue
-            || data.SearchPotionFreeBeamWidth.HasValue
-            || data.SearchPotionBeamWidth.HasValue
-            || data.SearchMaxExpandedNodes.HasValue
-            || data.SearchMaxCardBranchesPerNode.HasValue
-            || data.SearchMaxPileChoiceBranchesPerAction.HasValue
-            || data.SearchMaxHandChoiceBranchesPerAction.HasValue;
 }

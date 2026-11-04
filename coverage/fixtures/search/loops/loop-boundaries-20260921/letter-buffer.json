@@ -38,6 +38,5 @@
       "amount": 2,
       "target": "Enemy"
     }
-  ],
-  "performancePresetForTest": "Low"
+  ]
 }

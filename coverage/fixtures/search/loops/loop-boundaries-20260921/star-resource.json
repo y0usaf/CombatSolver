@@ -39,6 +39,5 @@
   "searchMaxDegreeOfParallelismForTest": 1,
   "stopAfterInitialSolverResultAssertion": true,
   "timeoutSeconds": 120,
-  "description": "Smaller non-multiple lethal boundary with explicit choices or changing resources.",
-  "performancePresetForTest": "Low"
+  "description": "Smaller non-multiple lethal boundary with explicit choices or changing resources."
 }

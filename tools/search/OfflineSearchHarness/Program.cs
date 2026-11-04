@@ -384,7 +384,7 @@ internal sealed record HarnessOptions
           --seed <string>        跑局种子（无 --request 时用，默认 OFFLINEHARNESS1）
           --ascension <int>      飞升层数（默认 0）
           --act-index <int>      测试幕索引（默认 0）
-          --profile <p>          Low|Medium|High|VeryHigh|Custom（默认 Custom）
+          --profile <p>          Medium|Custom（默认 Custom）
           --beam <int>           Beam 宽度（覆盖预设）
           --nodes <int>          最大展开节点（覆盖预设）
           --card-branches <int>  每节点卡牌分支上限（覆盖预设）
@@ -615,8 +615,8 @@ internal sealed record HarnessOptions
         }
         if (milestone is not ("M1" or "M2"))
             throw new ArgumentException("--milestone 只接受 M1 或 M2。");
-        if (profile is not ("Low" or "Medium" or "High" or "VeryHigh" or "Custom"))
-            throw new ArgumentException("--profile 只接受 Low|Medium|High|VeryHigh|Custom。");
+        if (profile is not ("Medium" or "Custom"))
+            throw new ArgumentException("--profile 只接受 Medium|Custom。");
         if (searchMode is not ("Evaluate" or "Coordinator"))
             throw new ArgumentException("--search-mode 只接受 Evaluate 或 Coordinator。");
         if (orderingObservationLimit is < 0 or > 100000 || orderingObservationLimit > 0 && searchMode != "Evaluate")

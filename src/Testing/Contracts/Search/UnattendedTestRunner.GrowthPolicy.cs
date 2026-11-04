@@ -40,39 +40,9 @@ internal sealed partial class UnattendedTestRunner
             && GrowthOpportunityPolicy.CaptureBuiltInForTesting([improvement], 1, 0)
                 .RequiredRewards.MadScience == 0,
             "upgrade opportunities are capped by eligible run-deck cards");
-        SolverSettingsData original = SolverSettings.Current;
         GrowthValues budgets = new(1, 2, 3, 4, 5, 6, 7, 8);
-        Check(new SolverSettingsData().GrowthBudgets == default, "default budgets");
-        Check(SolverSettings.RoundTripForTesting(original with { GrowthBudgets = budgets }).GrowthBudgets == budgets,
-            "settings round trip");
-        Check(SolverSettings.RoundTripForTesting(original with
-            { GrowthBudgets = budgets.With(GrowthSource.MadScience, 9) }).GrowthBudgets.MadScience == 9,
-            "Mad Science allowance persists as an independent growth source");
-        foreach (string retiredMode in new[] { "Survival", "PermanentGrowth", "NetResources" })
-        {
-            string previousSettings = "{\"objective\":{\"mode\":\"" + retiredMode
-                + "\",\"maximumBattleHpLoss\":0,\"minimumEndingHp\":100,\"growthTarget\":999},"
-                + "\"growthBudgets\":{\"geneticAlgorithm\":7},\"ignoreLongTermRewards\":false}";
-            SolverSettingsData migrated = SolverSettings.DeserializeForTesting(previousSettings);
-            Check(migrated.GrowthBudgets.GeneticAlgorithm == 7 && !migrated.IgnoreLongTermRewards,
-                "0.34.9 objective settings preserve the original per-source growth budget");
-        }
-        try
-        {
-            SolverSettings.ApplyForTesting(original with { GrowthBudgets = budgets });
-            Check(SolverSettings.Capture().GrowthBudgets == budgets, "immutable capture");
-            using SolverGrowthStrategyPanel panel = new();
-            Check(panel.SettingsConfiguredForTesting, "sidebar reload");
-
-            SolverSettings.ApplyForTesting(original with { GrowthBudgets = budgets, IgnoreLongTermRewards = true });
-            Check(SolverSettings.Capture().IgnoreLongTermRewards, "immutable capture carries the ignore switch");
-            using SolverGrowthStrategyPanel ignoringPanel = new();
-            // SettingsConfiguredForTesting 同时核对开关状态和「额度被灰掉」，所以这一条就够。
-            Check(ignoringPanel.SettingsConfiguredForTesting, "sidebar reloads with the switch on and budgets greyed out");
-            Check(!ignoringPanel.ToggleIgnoreLongTermRewardsForTesting(), "clicking the switch flips it");
-        }
-        finally { SolverSettings.ApplyForTesting(original); }
-        Check(await SolverOverlay.ExerciseGrowthPolicyUiForTesting(), "sidebar toggle, bounds and mutual exclusion");
+        Check(SolverSettings.Capture().GrowthBudgets == default && !SolverSettings.Capture().IgnoreLongTermRewards,
+            "fixed policy uses zero growth budgets and keeps long-term rewards");
         AssertThirdPartyGrowthSources(combat);
 
         CombatPredictionSimulator simulator = new(new SimulatedCombatState(combat));
@@ -131,9 +101,6 @@ internal sealed partial class UnattendedTestRunner
             Check(growth.ProjectedBattleHpLost > baseline.ProjectedBattleHpLost, "paid fixture actually spends HP");
 
         // 「不考虑局外收益」：同一份额度，开关一开就不再拿血去换收益，也不再靠它们在 Beam 里保留路线。
-        Check(!new SolverSettingsData().IgnoreLongTermRewards, "the ignore switch defaults to off");
-        Check(SolverSettings.RoundTripForTesting(original with { IgnoreLongTermRewards = true }).IgnoreLongTermRewards,
-            "the ignore switch round trips through settings");
         SearchPolicySnapshot ignoring = growthPolicy with
         {
             IgnoreLongTermRewards = true,
@@ -195,13 +162,6 @@ internal sealed partial class UnattendedTestRunner
             || policy.GrowthTargetSatisfied(default)
             || !policy.GrowthTargetSatisfied(new GrowthValues(MadScience: 1)))
             throw new InvalidOperationException("Mad Science root did not freeze its achievable upgrade target.");
-        using (SolverGrowthStrategyPanel panel = new())
-        {
-            if (!panel.SettingsConfiguredForTesting
-                || panel.FindChild(nameof(GrowthSource.MadScience), recursive: true, owned: false)
-                    is not Godot.SpinBox)
-                throw new InvalidOperationException("Growth sidebar did not include the Mad Science row.");
-        }
 
         CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
         CombatBeamSolver solver = new(root, SolverDisplayNames.Capture(combat),

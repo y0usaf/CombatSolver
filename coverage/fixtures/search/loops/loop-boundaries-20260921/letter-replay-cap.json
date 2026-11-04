@@ -37,6 +37,5 @@
   ],
   "initialEnemyCurrentHps": [
     7200
-  ],
-  "performancePresetForTest": "Low"
+  ]
 }

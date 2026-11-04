@@ -11,15 +11,10 @@ internal sealed partial class UnattendedTestRunner
     private async Task AssertAncientGrowthPolicyAsync(CombatState combat, Player player)
     {
         static void Check(bool value, string message) { if (!value) throw new InvalidOperationException("Ancient growth: " + message); }
-        SolverSettingsData original = SolverSettings.Current;
-        var settings = original with { GrowthBudgets = new GrowthValues(ForbiddenGrimoire: 12), BrightestFlameMaxHpLossLimit = 4 };
-        Check(SolverSettings.RoundTripForTesting(settings).BrightestFlameMaxHpLossLimit == 4
-            && SolverSettings.RoundTripForTesting(settings).GrowthBudgets.ForbiddenGrimoire == 12, "settings round trip");
+        GrowthValues growthBudgets = new(ForbiddenGrimoire: 12);
         try
         {
-            SolverSettings.ApplyForTesting(settings);
-            using var panel = new SolverGrowthStrategyPanel();
-            Check(panel.SettingsConfiguredForTesting, "growth rows reload");
+            SolverSettings.OverrideSnapshotForTesting(current => current with { GrowthBudgets = growthBudgets, BrightestFlameMaxHpLossLimit = 4 });
             Check(GrowthCostPolicy.AllowsBrightestFlame(4, 0, 4) && !GrowthCostPolicy.AllowsBrightestFlame(4, 0, 6)
                 && !GrowthCostPolicy.AllowsBrightestFlame(0, 0, 2) && GrowthCostPolicy.AllowsBrightestFlame(null, 0, 100)
                 && GrowthCostPolicy.AllowsBrightestFlame(2, 4, 4) && !GrowthCostPolicy.AllowsBrightestFlame(2, 4, 6), "hard cap and manual overage");
@@ -45,7 +40,7 @@ internal sealed partial class UnattendedTestRunner
                 var shadow = (SimulatedCombatState)simulator.State.CombatState;
                 var expected = CaptureSimulated(simulator,shadow,player,combat.Enemies[0]);
                 Check(shadow.BrightestFlameMaxHpSpent == 4 && shadow.GrowthRewards.ForbiddenGrimoire == 1, "replayed flame cost and grimoire reward");
-                Check(settings.GrowthBudgets.Credit(shadow.GrowthRewards) == 12, "removal allowance");
+                Check(growthBudgets.Credit(shadow.GrowthRewards) == 12, "removal allowance");
                 foreach (var action in actions)
                 {
                     Check(FindActualHandCard(player,action.CardId,0).TryManualPlay(null), "native play");
@@ -81,6 +76,6 @@ internal sealed partial class UnattendedTestRunner
                 && result.BestNode.Actions.All(a=>a.CardId is not ("BRIGHTEST_FLAME" or "CASCADE")), "search takes removal reward within exhausted flame cap, including nested auto-play");
             _completedChecks.Add("AncientGrowth:NativeReplay:ManualHistory:Fork:Turn:HardCapSearch:GrimoireAllowance");
         }
-        finally { SolverSettings.ApplyForTesting(original); }
+        finally { SolverSettings.OverrideSnapshotForTesting(null); }
     }
 }

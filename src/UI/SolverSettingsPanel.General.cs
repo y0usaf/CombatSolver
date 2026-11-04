@@ -8,13 +8,9 @@ internal sealed partial class SolverSettingsPanel
 {
     private CheckButton _solverEnabled = null!;
     private CheckButton _automaticCalculation = null!;
-    private CheckButton _predictPotionReward = null!;
     private CheckButton _stopOnCombatEnd = null!;
     private CheckButton _stopOnDeathTurn = null!;
     private CheckButton _stopOnWorseRecalculation = null!;
-    private OptionButton _actTransitionBossHpStrategy = null!;
-    private OptionButton _finalBossHpStrategy = null!;
-    private LineEdit _acceptableBattleHpLoss = null!;
     private OptionButton _searchCompletionNotificationPolicy = null!;
     private OptionButton _overlayTheme = null!;
     private HSlider _overlayOpacity = null!;
@@ -28,85 +24,6 @@ internal sealed partial class SolverSettingsPanel
     internal bool VisualSettingsConfiguredForTesting
         => _overlayTheme.GetItemId(_overlayTheme.Selected) == (int)SolverSettings.Current.OverlayTheme
            && Math.Abs(_overlayOpacity.Value - SolverSettings.Current.OverlayOpacity) < 0.001d;
-
-    internal bool BossHpStrategySettingsConfiguredForTesting
-        => _actTransitionBossHpStrategy.GetItemId(_actTransitionBossHpStrategy.Selected)
-               == (int)SolverSettings.Current.ActTransitionBossHpStrategy
-           && _finalBossHpStrategy.GetItemId(_finalBossHpStrategy.Selected)
-               == (int)SolverSettings.Current.FinalBossHpStrategy;
-
-    internal bool PotionRewardPredictionConfiguredForTesting
-        => _predictPotionReward.ButtonPressed == SolverSettings.Current.PredictPotionReward;
-
-    internal bool ExerciseBossHpStrategySettingsForTesting()
-    {
-        SolverSettingsData original = SolverSettings.Current;
-        try
-        {
-            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(original with
-            {
-                ActTransitionBossHpStrategy = BossHpStrategy.MinimizeHpLoss,
-                FinalBossHpStrategy = BossHpStrategy.ProgressionFirst,
-            }));
-            Reload();
-            bool actTransitionIndependent = BossHpStrategySettingsConfiguredForTesting;
-
-            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(original with
-            {
-                ActTransitionBossHpStrategy = BossHpStrategy.ProgressionFirst,
-                FinalBossHpStrategy = BossHpStrategy.MinimizeHpLoss,
-            }));
-            Reload();
-            return actTransitionIndependent && BossHpStrategySettingsConfiguredForTesting;
-        }
-        finally
-        {
-            SolverSettings.ApplyForTesting(original);
-            Reload();
-        }
-    }
-
-    internal bool AcceptableBattleHpLossSettingsConfiguredForTesting
-        => _acceptableBattleHpLoss.Text == SolverSettings.Current.AcceptableBattleHpLoss.ToString(CultureInfo.InvariantCulture);
-
-    internal bool ExerciseThresholdOutsideClickForTesting()
-    {
-        SettingsPage previousPage = _activePage;
-        if (!TrySelectPage(SettingsPage.Performance))
-            throw new InvalidOperationException("Cannot open performance settings for threshold input.");
-        try
-        {
-            _acceptableBattleHpLoss.GrabFocus();
-            _acceptableBattleHpLoss.Text = "19";
-            using InputEventMouseButton click = new() { Pressed = true, ButtonIndex = MouseButton.Left, Position = new Vector2(-1, -1) };
-            _Input(click);
-            return _performancePage.IsAncestorOf(_acceptableBattleHpLoss)
-                && !_acceptableBattleHpLoss.HasFocus() && SolverSettings.Current.AcceptableBattleHpLoss == 19;
-        }
-        finally { TrySelectPage(previousPage); }
-    }
-
-    private LineEdit CreateAcceptableBattleHpLossInput()
-    {
-        LineEdit input = CreateInput("0");
-        _reloadInputs.Add(data => input.Text = data.AcceptableBattleHpLoss.ToString(CultureInfo.InvariantCulture));
-        bool Commit()
-        {
-            if (!int.TryParse(input.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
-                || value < 0 || value > SolverSettings.MaximumAcceptableBattleHpLoss)
-            {
-                ShowInvalid(input, SolverText.Format($"请输入 0–{SolverSettings.MaximumAcceptableBattleHpLoss} 的整数"));
-                return false;
-            }
-            if (SolverSettings.Current.AcceptableBattleHpLoss == value)
-                return KeepUnchanged(input);
-            return SaveSetting(input, SolverSettings.Current with { AcceptableBattleHpLoss = value }, SolverText.Get("已保存，下次搜索生效"));
-        }
-        input.FocusExited += () => Commit();
-        input.TextSubmitted += _ => Commit();
-        _commitInputs.Add(Commit);
-        return input;
-    }
 
     internal bool ExerciseVisualSettingsForTesting()
     {
@@ -191,24 +108,6 @@ internal sealed partial class SolverSettingsPanel
         AddSettingsSection(content, SolverText.Get("开始计算"),
             SolverText.Get("控制求解器启停与自动计算。自动开启全自动可在主界面右侧设置。"), solverGrid);
 
-        GridContainer bossStrategyGrid = CreateSettingsGrid();
-        _actTransitionBossHpStrategy = CreateBossHpStrategyInput(
-            data => data.ActTransitionBossHpStrategy,
-            (data, strategy) => data with { ActTransitionBossHpStrategy = strategy });
-        AddBasicRow(
-            bossStrategyGrid,
-            SolverText.Get("第一、二幕血量取舍"),
-            _actTransitionBossHpStrategy,
-            SolverText.Get("通关优先会按战后回复 80% 折算血量价值并尽量保留药水；最低战损会按普通战斗完整比较掉血。重新计算后生效。"));
-        _finalBossHpStrategy = CreateBossHpStrategyInput(
-            data => data.FinalBossHpStrategy,
-            (data, strategy) => data with { FinalBossHpStrategy = strategy });
-        AddBasicRow(
-            bossStrategyGrid,
-            SolverText.Get("最终 Boss 血量取舍"),
-            _finalBossHpStrategy,
-            SolverText.Get("通关优先只要求路线存活并优先保留资源；最低战损会继续比较剩余血量。重新计算后生效。"));
-
         GridContainer executionGrid = CreateSettingsGrid();
         _stopOnCombatEnd = CreateToggle();
         _stopOnCombatEnd.Toggled += OnStopOnCombatEndToggled;
@@ -230,21 +129,6 @@ internal sealed partial class SolverSettingsPanel
         AddSettingsSection(content, SolverText.Get("出牌速度"), SolverText.Get("调整自动执行的节奏，下次执行生效。"), speedGrid);
         AddSettingsSection(content, SolverText.Get("自动执行的暂停条件"),
             SolverText.Get("选择哪些情况下暂停自动执行并交还操作权。"), executionGrid);
-        AddSettingsSection(content, SolverText.Get("幕末 Boss"),
-            SolverText.Get("分别设置幕末战斗的血量取舍，重新计算后生效。"), bossStrategyGrid);
-
-        GridContainer potionRewardGrid = CreateSettingsGrid();
-        _predictPotionReward = CreateToggle();
-        _predictPotionReward.Toggled += enabled =>
-        {
-            if (_loading) return;
-            PotionRewardPredictionChanged?.Invoke(enabled);
-            SetStatus(SolverText.Get("已保存，重新计算后生效"), SolverUiTokens.Palette.Success);
-        };
-        AddBasicRow(potionRewardGrid, SolverText.Get("预知战后药水奖励"), _predictPotionReward,
-            SolverText.Get("开启后提前显示战后是否掉落药水及其名称；药水栏已满时据此调整智能用药。此信息超出当前战斗 SL 可得的范围。默认关闭。"));
-        AddSettingsSection(content, SolverText.Get("药水奖励预测"),
-            SolverText.Get("控制是否预读战后奖励，重新计算后生效。"), potionRewardGrid);
 
         GridContainer interfaceGrid = CreateSettingsGrid();
         _overlayTheme = CreateOverlayThemeInput();
@@ -286,7 +170,6 @@ internal sealed partial class SolverSettingsPanel
     {
         _solverEnabled.ButtonPressed = !data.SolverDisabled;
         _automaticCalculation.ButtonPressed = data.AutomaticCalculationEnabled;
-        _predictPotionReward.ButtonPressed = data.PredictPotionReward;
         _stopOnCombatEnd.ButtonPressed = data.StopFullAutoOnCombatEnd;
         _stopOnDeathTurn.ButtonPressed = data.StopFullAutoOnDeathTurn;
         _stopOnWorseRecalculation.ButtonPressed = data.StopFullAutoOnWorseRecalculation;
@@ -314,26 +197,6 @@ internal sealed partial class SolverSettingsPanel
                     : SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground,
             });
             SetStatus(SolverText.Get("已保存并立即生效"), SolverUiTokens.Palette.Success);
-        };
-        return input;
-    }
-
-    private OptionButton CreateBossHpStrategyInput(
-        Func<SolverSettingsData, BossHpStrategy> read,
-        Func<SolverSettingsData, BossHpStrategy, SolverSettingsData> write)
-    {
-        OptionButton input = CreateOptionInput(260);
-        input.AddItem(SolverText.Get("通关优先（默认）"), (int)BossHpStrategy.ProgressionFirst);
-        input.AddItem(SolverText.Get("最低战损"), (int)BossHpStrategy.MinimizeHpLoss);
-        _reloadInputs.Add(data => input.Selected = input.GetItemIndex((int)read(data)));
-        input.ItemSelected += index =>
-        {
-            if (_loading)
-                return;
-            BossHpStrategy strategy = (BossHpStrategy)input.GetItemId((int)index);
-            SolverSettings.Update(write(SolverSettings.Current, strategy));
-            SolverOverlay.RefreshBossHpStrategyHint();
-            SetStatus(SolverText.Get("已保存，重新计算后生效"), SolverUiTokens.Palette.Success);
         };
         return input;
     }

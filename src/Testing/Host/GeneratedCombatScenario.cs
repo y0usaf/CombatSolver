@@ -228,7 +228,6 @@ internal static class GeneratedCombatScenario
         Set("deploymentInterActionDelaySecondsForTest", request.DeploymentInterActionDelaySecondsForTest ?? 0);
         Set("fixedSearchBudget", spec.FixedSearchBudget);
         Set("searchBudgetOverrideMilliseconds", request.SearchBudgetOverrideMilliseconds ?? 1000);
-        Set("performancePresetForTest", request.PerformancePresetForTest ?? SolverPerformancePreset.Medium);
         Set("potionPolicyForTest", request.PotionPolicyForTest ?? SolverPotionPolicy.Smart);
         return json.Deserialize<UnattendedTestRequest>(JsonOptions)!;
     }

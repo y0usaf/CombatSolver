@@ -1208,8 +1208,8 @@ internal static class CombatBugReportExporter
                     {
                         slot,
                         potionId = player.GetPotionAtSlotIndex(slot)!.Id.Entry,
-                        directive = SolverController.ResolvePotionDirective(
-                            state, slot, player.GetPotionAtSlotIndex(slot)!.Id.Entry),
+                        directive = SolverController.ResolvePotionDirectiveForTesting(
+                            slot, player.GetPotionAtSlotIndex(slot)!.Id.Entry),
                     }).ToArray()
                 : [],
             settings.ActTransitionBossHpStrategy,
@@ -1231,7 +1231,7 @@ internal static class CombatBugReportExporter
             profile = settings.Profile with { SoftTimeBudgetMilliseconds = UnattendedTestRunner.SearchBudgetOverrideMilliseconds
                 ?? settings.Profile.SoftTimeBudgetMilliseconds },
             fixedBudget = UnattendedTestRunner.FixedSearchBudget,
-            performancePreset = SolverSettings.Current.PerformancePreset,
+            speed = settings.Speed,
         };
 
     internal static string? LastCompletedSearchRootId => _currentSession?.LastCompletedSearchRootId;

@@ -12,7 +12,6 @@
   "potions": [
     { "potionId": "TouchOfInsanity" }
   ],
-  "performancePresetForTest": "Medium",
   "forceShortSearchOnly": true,
   "expectedInitialCombatEndedTurn": 1,
   "expectedInitialPotionCount": 1,

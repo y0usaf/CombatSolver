@@ -8,7 +8,7 @@ internal static class RuntimeGcStartup
 {
     internal static string Status { get; private set; } = "Unchanged";
 
-    internal static void Prepare(bool enabled)
+    internal static void Prepare()
     {
         // Freeze actual startup state before touching the file for the next run.
         _ = RuntimeGcProfile.Current;
@@ -40,8 +40,8 @@ internal static class RuntimeGcStartup
         string path = Path.ChangeExtension(assemblyPath, ".runtimeconfig.json");
         try
         {
-            Status = RuntimeGcStartupConfig.Apply(path, enabled);
-            Entry.Logger.Info($"[CombatSolver] RUNTIME_GC_STARTUP status={Status} next_launch_enabled={enabled}");
+            Status = RuntimeGcStartupConfig.Apply(path, true);
+            Entry.Logger.Info($"[CombatSolver] RUNTIME_GC_STARTUP status={Status}");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {

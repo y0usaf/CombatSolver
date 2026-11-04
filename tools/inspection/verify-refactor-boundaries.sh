@@ -1537,7 +1537,6 @@ $solver_settings_panel_path	TrySelectPage(SettingsPage page)
 $solver_settings_panel_path	CommitPending()
 $solver_settings_general_path	CreateGeneralPage()
 $solver_settings_performance_path	CreatePerformancePage()
-$solver_settings_performance_path	SetAdvancedParametersExpanded
 $solver_settings_bug_reports_path	CreateBugReportsPage()
 $solver_settings_controls_path	CreatePageScroll(Control content)
 EOF
@@ -1573,7 +1572,6 @@ src/Search/CombatBeamSolver.Phases.cs	policy.RelicTargetsSatisfied(node.Snapshot
 src/Search/CombatSearchCoordinator.cs	policy.RelicTargetsSatisfied(result.Snapshot.RelicCounters)
 src/Runtime/SolvedRouteCache.cs	policy.RelicTargets
 src/Search/CombatBeamSolver.Expansion.Opening.cs	ApplyFixedPrefix(seed, prefix)
-src/UI/SolverRelicStrategyPanel.cs	row.Enabled.ButtonPressed
 EOF
 for rule in 'SimulationNotificationIsolation.IsActive' '"DynamicVarUpgrades"' 'table.TryGetValue(source' 'Tips.TryGetValue(__0'; do
     require_fixed "$repository_root/src/Runtime/DynamicVarCloneMetadataPatches.cs" "$rule" 'missing sparse metadata boundary'

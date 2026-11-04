@@ -16,7 +16,6 @@
   ],
   "fixedSearchBudget": true,
   "searchBudgetOverrideMilliseconds": 20000,
-  "performancePresetForTest": "Low",
   "searchBeamWidthForTest": 24,
   "searchMaxExpandedNodesForTest": 6000,
   "searchMaxDegreeOfParallelismForTest": 2,

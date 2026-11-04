@@ -146,9 +146,9 @@ internal sealed partial class UnattendedTestRunner
         {
             SolverSettings.ApplyForTesting(originalSettings with
             {
-                PotionPolicy = changedPotionPolicy,
                 EnableDetailedDiagnosticLogs = !capturedPolicy.DetailedDiagnostics,
             });
+            SolverSettings.OverrideSnapshotForTesting(current => current with { PotionPolicy = changedPotionPolicy });
             SolverResult afterMutation = await Task.Run(() => CombatSearchCoordinator.Solve(
                 rootSnapshot,
                 displayNames,
@@ -160,6 +160,7 @@ internal sealed partial class UnattendedTestRunner
         }
         finally
         {
+            SolverSettings.OverrideSnapshotForTesting(null);
             SolverSettings.ApplyForTesting(originalSettings);
         }
     }

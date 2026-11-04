@@ -22,7 +22,6 @@
     { "potionId": "TouchOfInsanity" }
   ],
   "initialEnemyMoveIds": ["SLICE_MOVE"],
-  "performancePresetForTest": "Medium",
   "forceShortSearchOnly": true,
   "expectedInitialSearchedTurnsAtLeast": 3,
   "expectedInitialCombatEndedTurn": 3,

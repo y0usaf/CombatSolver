@@ -98,7 +98,7 @@ internal sealed partial class UnattendedTestRunner
         _completedChecks.Add("CheckpointContinuationMatched");
     }
 
-    private SolverSettingsData ApplyRecordedCheckpointPolicy(SolverSettingsData current)
+    private SolverSettingsSnapshot ApplyRecordedCheckpointPolicy(SolverSettingsSnapshot current)
     {
         if (_checkpointImport == null)
             return current;
@@ -108,36 +108,31 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidDataException("legacy_missing_effective_policy");
             return current;
         }
-        JsonObject settings = JsonSerializer.SerializeToNode(current, UnattendedTestFiles.JsonOptions)!.AsObject();
-        // Archives recorded before growth policy existed used zero willingness for this feature.
-        settings["growthBudgets"] = recorded["growthBudgets"]?.DeepClone()
-            ?? JsonSerializer.SerializeToNode(default(GrowthValues), UnattendedTestFiles.JsonOptions);
-        settings["brightestFlameMaxHpLossLimit"] = recorded["brightestFlameMaxHpLossLimit"]?.DeepClone();
-        settings["relicStrategyEnabled"] = recorded["relicStrategyEnabled"]?.DeepClone() ?? JsonValue.Create(false);
-        settings["relicCounterRules"] = recorded["relicCounterRules"]?.DeepClone() ?? new JsonArray();
-        settings["stopAtAcceptableBattleHpLoss"] = recorded["stopAtAcceptableBattleHpLoss"]?.DeepClone() ?? JsonValue.Create(true);
-        // Archives recorded before the ignore switch existed considered long-term rewards.
-        settings["ignoreLongTermRewards"] = recorded["ignoreLongTermRewards"]?.DeepClone()
-            ?? JsonSerializer.SerializeToNode(false, UnattendedTestFiles.JsonOptions);
-        // Preserve explicitly recorded false values as well as true. Archives that
-        // predate these fields keep the existing legacy settings fallback.
-        foreach (string name in new[] { "useNoveltyPortfolio", "useBeamWidthPortfolio", "useEarlyTurnExploration", "predictPotionReward" })
-            if (recorded[name] != null)
-                settings[name] = recorded[name]!.DeepClone();
-        foreach (string name in new[] { "potionDirectives", "actTransitionBossHpStrategy", "finalBossHpStrategy", "acceptableBattleHpLoss", "stopAtAcceptableBattleHpLoss", "searchMaxDegreeOfParallelism" })
-            settings[name] = recorded[name]?.DeepClone() ?? throw new InvalidDataException($"missing_policy:{name}");
-        SolverSearchProfile profile = recorded["profile"]!.Deserialize<SolverSearchProfile>(UnattendedTestFiles.JsonOptions)!;
-        SolverSettingsData restored = settings.Deserialize<SolverSettingsData>(UnattendedTestFiles.JsonOptions)!;
-        return restored with
+        T Read<T>(string name, T fallback)
+            => recorded[name] is { } node ? node.Deserialize<T>(UnattendedTestFiles.JsonOptions)! : fallback;
+        T Require<T>(string name)
+            => (recorded[name] ?? throw new InvalidDataException($"missing_policy:{name}"))
+                .Deserialize<T>(UnattendedTestFiles.JsonOptions)!;
+        foreach (PotionSlotDirective directive in Read<PotionSlotDirective[]>("potionDirectives", []))
+            SolverController.ApplyPotionDirectiveForTesting(directive);
+        return current with
         {
-            PotionPolicy = recorded["potionPolicy"]!.Deserialize<SolverPotionPolicy>(UnattendedTestFiles.JsonOptions),
-            PerformancePreset = SolverPerformancePreset.Custom,
-            SearchBeamWidth = profile.BeamWidth,
-            SearchMaxExpandedNodes = profile.MaxExpandedNodes,
-            SearchMaxCardBranchesPerNode = profile.MaxCardBranchesPerNode,
-            SearchMaxPileChoiceBranchesPerAction = profile.MaxPileChoiceBranchesPerAction,
-            SearchMaxHandChoiceBranchesPerAction = profile.MaxHandChoiceBranchesPerAction,
-            SearchTimeLimitSeconds = profile.SoftTimeBudgetMilliseconds / 1000d,
+            GrowthBudgets = Read("growthBudgets", default(GrowthValues)),
+            BrightestFlameMaxHpLossLimit = Read<int?>("brightestFlameMaxHpLossLimit", null),
+            RelicStrategyEnabled = Read("relicStrategyEnabled", false),
+            RelicCounterRules = Read<RelicCounterRule[]>("relicCounterRules", []),
+            IgnoreLongTermRewards = Read("ignoreLongTermRewards", false),
+            UseNoveltyPortfolio = Read("useNoveltyPortfolio", current.UseNoveltyPortfolio),
+            UseBeamWidthPortfolio = Read("useBeamWidthPortfolio", current.UseBeamWidthPortfolio),
+            UseEarlyTurnExploration = Read("useEarlyTurnExploration", current.UseEarlyTurnExploration),
+            PredictPotionReward = Read("predictPotionReward", current.PredictPotionReward),
+            ActTransitionBossHpStrategy = Require<BossHpStrategy>("actTransitionBossHpStrategy"),
+            FinalBossHpStrategy = Require<BossHpStrategy>("finalBossHpStrategy"),
+            AcceptableBattleHpLoss = Require<int>("acceptableBattleHpLoss"),
+            StopAtAcceptableBattleHpLoss = Require<bool>("stopAtAcceptableBattleHpLoss"),
+            SearchMaxDegreeOfParallelism = Require<int>("searchMaxDegreeOfParallelism"),
+            PotionPolicy = Require<SolverPotionPolicy>("potionPolicy"),
+            Profile = Require<SolverSearchProfile>("profile"),
         };
     }
 

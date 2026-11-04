@@ -133,7 +133,6 @@
     }
   ],
   "cards": [],
-  "performancePresetForTest": "VeryHigh",
   "searchMaxDegreeOfParallelismForTest": 4,
   "enableNoGcRegionForTest": true,
   "noGcRegionBudgetGigabytesForTest": 16,

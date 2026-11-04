@@ -104,18 +104,6 @@ internal sealed partial class UnattendedTestRunner
                     == edited.With(unloaded, 9).Extras,
                 "publishing keeps budgets for sources whose mod is not loaded");
 
-            SolverSettingsData original = SolverSettings.Current;
-            Check(SolverSettings.RoundTripForTesting(original with { GrowthBudgets = persisted }).GrowthBudgets == persisted,
-                "third-party budgets round trip through settings, unknown ids included");
-            try
-            {
-                SolverSettings.ApplyForTesting(original with { GrowthBudgets = persisted });
-                using SolverGrowthStrategyPanel panel = new();
-                Check(panel.ThirdPartyRowsForTesting.Count == 1
-                    && panel.ThirdPartyRowsForTesting[0].Source == source, "the sidebar grows exactly one row");
-                Check(panel.SettingsConfiguredForTesting, "the third-party row reloads its budget from settings");
-            }
-            finally { SolverSettings.ApplyForTesting(original); }
         }
         finally { GrowthSourceMirrors.UnregisterForTesting(source); }
         Check(!GrowthSourceMirrors.IsRegistered(ThirdPartyGrowthTestId), "test registration cleaned up");

@@ -17,9 +17,7 @@ internal readonly record struct RuntimeGcProfileSelection(
 {
     public bool IsActive => Status == RuntimeGcProfileStatus.Active;
 
-    // Apply only to the effective search snapshot. The saved setting remains the
-    // player's choice for an ordinary launch, including an explicit NoGC=true.
-    public bool ResolveEnableNoGcRegion(bool configured) => configured && !IsActive;
+    public bool EnableNoGcRegion => !IsActive;
 }
 
 internal static class RuntimeGcProfile

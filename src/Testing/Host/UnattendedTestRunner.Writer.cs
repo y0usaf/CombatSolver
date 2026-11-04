@@ -211,7 +211,6 @@ internal sealed partial class UnattendedTestRunner
                         clr = Environment.Version.ToString(),
                         serverGc = GCSettings.IsServerGC,
                         profile = RuntimeGcProfile.Current.Status.ToString(),
-                        savedNoGcRegionEnabled = SolverSettings.Current.EnableNoGcRegion,
                         effectiveNoGcRegionEnabled = configuredSettings.EnableNoGcRegion,
                     },
                 });

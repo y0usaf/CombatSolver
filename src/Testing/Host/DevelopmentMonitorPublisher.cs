@@ -28,7 +28,6 @@ internal sealed class DevelopmentMonitorPublisher : IAsyncDisposable
                         ["processId"] = Environment.ProcessId,
                         ["scriptHash"] = request.DevelopmentStrategyScriptHash,
                         ["parametersHash"] = request.DevelopmentStrategyParametersHash,
-                        ["performancePreset"] = request.PerformancePresetForTest?.ToString(),
                         ["parallelism"] = request.SearchMaxDegreeOfParallelismForTest,
                         ["requestTimeoutSeconds"] = request.TimeoutSeconds,
                         ["phase"] = progress?.Phase,

@@ -33,7 +33,6 @@
   "measureSearchPhases": true,
   "stopAfterInitialSolverResultAssertion": true,
   "timeoutSeconds": 120,
-  "performancePresetForTest": "Low",
   "initialEnemyMaxHps": [
     71
   ],

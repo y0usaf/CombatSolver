@@ -5,12 +5,32 @@ namespace CombatSolver;
 internal sealed record FairPlannerSettings(
     int Samples,
     int MaxCandidates,
-    double DeathPenalty,
-    double UnfinishedEnemyHpWeight,
-    double CommitAgreement = 0,
-    double TieStandardErrors = 0,
-    double TieMarginHp = 0,
-    int MaxParallelism = 0);
+    int BeamWidth,
+    int MaxExpandedNodes,
+    int SolveBudgetMilliseconds,
+    int MaxParallelism = 0)
+{
+    public const double DeathPenalty = 200;
+    public const double UnfinishedEnemyHpWeight = 0.25;
+    public const double CommitAgreement = 1;
+    public const double TieStandardErrors = 1;
+    public const double TieMarginHp = 1;
+
+    public static FairPlannerSettings For(SolverSpeed speed) => speed switch
+    {
+        SolverSpeed.Fast => new(8, 3, 16, 800, 2500),
+        SolverSpeed.Normal => new(12, 4, 20, 1500, 5000),
+        SolverSpeed.Thorough => new(16, 5, 24, 2500, 10000),
+        _ => throw new ArgumentOutOfRangeException(nameof(speed), speed, null),
+    };
+
+    public SolverSearchProfile Profile(SolverSearchProfile basis) => basis with
+    {
+        BeamWidth = Math.Min(basis.BeamWidth, BeamWidth),
+        MaxExpandedNodes = Math.Min(basis.MaxExpandedNodes, MaxExpandedNodes),
+        SoftTimeBudgetMilliseconds = Math.Min(basis.SoftTimeBudgetMilliseconds, SolveBudgetMilliseconds),
+    };
+}
 
 internal sealed record FairCandidateScore(
     string Key,
@@ -155,14 +175,14 @@ internal static class FairDecisionPlanner
             $"[CombatSolver/Fair] FAIR_CANDIDATE_INVALID sample={sample} candidate={candidate} " +
             $"error={ex.GetType().Name}: {ex.Message.ReplaceLineEndings(" ")}");
 
-    public static double Utility(SolverResult result, FairPlannerSettings settings)
+    public static double Utility(SolverResult result)
     {
         SolverSnapshot snapshot = result.Snapshot;
         double utility = -result.ProjectedBattleHpLost;
         if (snapshot.PlayerDead)
-            return utility - settings.DeathPenalty;
+            return utility - FairPlannerSettings.DeathPenalty;
         if (!snapshot.AllEnemiesDead)
-            utility -= settings.UnfinishedEnemyHpWeight * snapshot.EnemyHp;
+            utility -= FairPlannerSettings.UnfinishedEnemyHpWeight * snapshot.EnemyHp;
         return utility;
     }
 
@@ -298,7 +318,7 @@ internal static class FairDecisionPlanner
                 try
                 {
                     SolverResult result = TimedSolve(samples[sample], prefix);
-                    double utility = Utility(result, settings);
+                    double utility = Utility(result);
                     if (utilities[candidate, sample] is not { } known || utility > known)
                     {
                         routes[candidate, sample] = result;
@@ -331,7 +351,7 @@ internal static class FairDecisionPlanner
                     || utilities[candidate, sample].HasValue)
                     continue;
                 routes[candidate, sample] = own[sample];
-                utilities[candidate, sample] = Utility(own[sample]!, settings);
+                utilities[candidate, sample] = Utility(own[sample]!);
             }
         }
 
@@ -387,7 +407,7 @@ internal static class FairDecisionPlanner
             .First();
         int bestIndex = eligible
             .Where(candidate => candidate == leader
-                || IsTied(leader, candidate, common, values, settings.TieStandardErrors, settings.TieMarginHp))
+                || IsTied(leader, candidate, common, values))
             .OrderBy(candidate => scores[candidate].DeathRate)
             .ThenBy(candidate => proposals[candidate].EnemyHp)
             .ThenByDescending(candidate => scores[candidate].Proposals)
@@ -406,11 +426,11 @@ internal static class FairDecisionPlanner
             AgreedCommitCount(route, proposals[bestIndex].Prefix.Length, Enumerable.Range(0, sampleCount)
                 .Select(sample => routes[bestIndex, sample])
                 .OfType<SolverResult>()
-                .ToArray(), sampleCount, settings.CommitAgreement),
+                .ToArray(), sampleCount),
             Volatile.Read(ref safetyStops));
     }
 
-    private static bool IsTied(int leader, int candidate, int[] common, double?[,] values, double standardErrors, double margin)
+    private static bool IsTied(int leader, int candidate, int[] common, double?[,] values)
     {
         if (common.Length == 0)
             return false;
@@ -418,21 +438,19 @@ internal static class FairDecisionPlanner
             .Select(sample => values[leader, sample]!.Value - values[candidate, sample]!.Value)
             .ToArray();
         double mean = differences.Average();
-        if (mean <= Math.Max(1e-6, margin))
+        if (mean <= Math.Max(1e-6, FairPlannerSettings.TieMarginHp))
             return true;
-        if (standardErrors <= 0 || differences.Length < 2)
+        if (differences.Length < 2)
             return false;
         double variance = differences.Sum(value => (value - mean) * (value - mean)) / (differences.Length - 1);
-        return mean <= standardErrors * Math.Sqrt(variance / differences.Length);
+        return mean <= FairPlannerSettings.TieStandardErrors * Math.Sqrt(variance / differences.Length);
     }
 
-    private static int AgreedCommitCount(SolverResult route, int segment, SolverResult[] sampleRoutes, int sampleCount, double agreement)
+    private static int AgreedCommitCount(SolverResult route, int segment, SolverResult[] sampleRoutes, int sampleCount)
     {
         IReadOnlyList<PlanAction> lead = route.BestNode.Actions;
         int commit = Math.Max(1, Math.Min(segment, lead.Count));
-        if (agreement <= 0)
-            return commit;
-        int required = (int)Math.Ceiling(agreement * sampleCount);
+        int required = (int)Math.Ceiling(FairPlannerSettings.CommitAgreement * sampleCount);
         while (commit < lead.Count
             && lead[commit - 1].Kind != PlanActionKind.EndTurn
             && lead[commit].Turn == lead[0].Turn)

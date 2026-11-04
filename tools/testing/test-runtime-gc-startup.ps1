@@ -39,7 +39,7 @@ try {
             $settings.autoConfigureServerGc=$false
             $settings | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding utf8NoBOM
         }
-        & pwsh -NoProfile -File $launcher -Sts2GameRoot $game -RitsuWorkshopRoot $ritsu -CombatSolverBuildDir ([IO.Path]::GetFullPath($Build)) -HeadlessInstance $instance -RuntimeProfile default -EvidenceDirectory $out -GeneratedScenarioPath (Join-Path $source 'coverage\runtime-gc-profile\strict-starter.json') -PerformancePresetForTest Low -SearchBudgetOverrideMilliseconds 3000 -SearchMaxExpandedNodesForTest 300 -SearchMaxDegreeOfParallelismForTest 1 -HeadlessMemoryReservationMiB 12288 -HeadlessCpuReservation 1 -TimeoutSeconds 120 -ExitOnComplete
+        & pwsh -NoProfile -File $launcher -Sts2GameRoot $game -RitsuWorkshopRoot $ritsu -CombatSolverBuildDir ([IO.Path]::GetFullPath($Build)) -HeadlessInstance $instance -RuntimeProfile default -EvidenceDirectory $out -GeneratedScenarioPath (Join-Path $source 'coverage\runtime-gc-profile\strict-starter.json') -SearchBudgetOverrideMilliseconds 3000 -SearchMaxExpandedNodesForTest 300 -SearchMaxDegreeOfParallelismForTest 1 -HeadlessMemoryReservationMiB 12288 -HeadlessCpuReservation 1 -TimeoutSeconds 120 -ExitOnComplete
         if($LASTEXITCODE -ne 0){throw "Native launch $launch failed"}
         $result=Get-Content (Join-Path $out 'result.json') -Raw | ConvertFrom-Json
         $runtime=(Get-Content (Join-Path $out 'search-result.json') -Raw | ConvertFrom-Json).runtime

@@ -30,8 +30,8 @@ foreach (bool serverGc in new[] { false, true })
         RuntimeGcProfileSelection profile = RuntimeGcProfile.Resolve(requested, serverGc);
         Check(profile.Status == RuntimeGcProfileStatus.Default && !profile.IsActive,
             "No explicit profile must preserve ordinary launch behavior.");
-        Check(profile.ResolveEnableNoGcRegion(true) && !profile.ResolveEnableNoGcRegion(false),
-            "CLR ServerGC alone must never override either saved NoGC choice.");
+        Check(profile.EnableNoGcRegion,
+            "CLR ServerGC alone must never disable the NoGC search region.");
     }
 
     RuntimeGcProfileSelection unknown = RuntimeGcProfile.Resolve("future-profile", serverGc);
@@ -39,33 +39,29 @@ foreach (bool serverGc in new[] { false, true })
         "An unknown profile must remain observable and inactive.");
     Check(unknown.RequestedProfile == "future-profile" && unknown.IsServerGc == serverGc,
         "Diagnostics must retain the requested profile and actual CLR mode.");
-    Check(unknown.ResolveEnableNoGcRegion(true) && !unknown.ResolveEnableNoGcRegion(false),
-        "An unknown profile must preserve saved settings.");
+    Check(unknown.EnableNoGcRegion,
+        "An unknown profile must keep the NoGC search region.");
 }
 
 RuntimeGcProfileSelection unavailable = RuntimeGcProfile.Resolve(
     RuntimeGcProfile.ServerGenerational, isServerGc: false);
 Check(unavailable.Status == RuntimeGcProfileStatus.ServerGcUnavailable && !unavailable.IsActive,
     "A requested profile cannot claim activation when CLR ServerGC is unavailable.");
-Check(unavailable.ResolveEnableNoGcRegion(true) && !unavailable.ResolveEnableNoGcRegion(false),
-    "An unavailable profile must preserve both saved NoGC choices.");
+Check(unavailable.EnableNoGcRegion,
+    "An unavailable profile must keep the NoGC search region.");
 
 foreach (string requested in new[] { RuntimeGcProfile.ServerGenerational, " SERVER-GENERATIONAL " })
 {
     RuntimeGcProfileSelection active = RuntimeGcProfile.Resolve(requested, isServerGc: true);
     Check(active.Status == RuntimeGcProfileStatus.Active && active.IsActive,
         "An explicit profile with actual ServerGC must activate.");
-    Check(!active.ResolveEnableNoGcRegion(true) && !active.ResolveEnableNoGcRegion(false),
-        "The active profile must use generational GC for either saved choice.");
+    Check(!active.EnableNoGcRegion,
+        "The active profile must use generational GC.");
 }
 
-// Applying one immutable process selection cannot alter a subsequent ordinary
-// selection or the caller-owned saved value. Persistence remains outside this API.
-bool savedNoGc = true;
-RuntimeGcProfileSelection selected = RuntimeGcProfile.Resolve(RuntimeGcProfile.ServerGenerational, true);
-_ = selected.ResolveEnableNoGcRegion(savedNoGc);
-Check(RuntimeGcProfile.Resolve(null, true).ResolveEnableNoGcRegion(savedNoGc),
-    "A normal launch must still honor the original saved setting after a profile launch.");
+_ = RuntimeGcProfile.Resolve(RuntimeGcProfile.ServerGenerational, true);
+Check(RuntimeGcProfile.Resolve(null, true).EnableNoGcRegion,
+    "A normal launch must keep the NoGC search region after a profile launch.");
 Console.WriteLine($"RUNTIME_GC_PROFILE_CHECKS_OK checks={checks}");
 
 Check(RuntimeGcProfile.ResolveRequest("", RuntimeGcProfile.ServerGenerational) == RuntimeGcProfile.ServerGenerational

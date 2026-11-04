@@ -57,6 +57,7 @@ internal static partial class SolverController
     private static readonly HashSet<string> DeployedCardIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> DeployedPotionIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<Task> PendingSearchReferenceReleases = [];
+    private static readonly List<PotionSlotDirective> _potionDirectivesForTesting = [];
     private static readonly List<Task> PendingDeploymentReferenceReleases = [];
     private static readonly List<Task> PendingDeferredSearchReleases = [];
     private static readonly List<Task> PendingCombatDeferredOperations = [];
@@ -612,8 +613,6 @@ internal static partial class SolverController
         _combat.TheftPolicy = state is CombatState combat && TheftEncounterStrategy.IsApplicable(combat)
             ? SolverTheftPolicy.PreserveResources
             : null;
-        if (state is CombatState activeCombat)
-            ReconcilePersistedPotionDirectives(activeCombat);
         Entry.Logger.Info(
             $"[CombatSolver/Test] THEFT_POLICY_INIT policy={_combat.TheftPolicy?.ToString() ?? "-"}");
     }
@@ -1136,7 +1135,7 @@ internal static partial class SolverController
             }
             bool fairForcedEndTurn = FairDecisionPlanner.IsForcedEndTurn(LocalContext.GetMe(state)!);
             CombatRootSnapshot[] fairSamples = [rootSnapshot, .. Enumerable.Range(1,
-                    fairForcedEndTurn ? 0 : Math.Max(1, SolverSettings.Current.FairPlannerSamples) - 1)
+                    fairForcedEndTurn ? 0 : FairPlannerSettings.For(settings.Speed).Samples - 1)
                 .Select(index => CombatRootSnapshot.Capture(state, settings.PredictPotionReward,
                     FairObservation.FromSeed(fairSeed + (ulong)index)))];
             searchPolicy = searchPolicy with
@@ -1210,7 +1209,7 @@ internal static partial class SolverController
                     using ISearchGcScope admittedGcPolicy = gcPolicy =
                         FairDecisionPlanner.EnterGcScope(settings.NoGcRegionBudgetBytes, token);
                     SolverResult result = SolveFairDecision(
-                        fairSamples, fairForcedEndTurn, displayNames, battleDamage, searchPolicy, generation, token);
+                        fairSamples, fairForcedEndTurn, settings.Speed, displayNames, battleDamage, searchPolicy, generation, token);
                     finalizedResult = search.Interaction.FinalizeWorkerResult(result);
                     token.ThrowIfCancellationRequested();
                     return finalizedResult;
@@ -1681,34 +1680,6 @@ internal static partial class SolverController
         SolverOverlay.RefreshControls();
     }
 
-    public static void SetTheftPolicy(NGame host, CombatState state, SolverTheftPolicy policy)
-    {
-        AssertMainThread();
-        if (!TheftEncounterStrategy.IsApplicable(state))
-            throw new InvalidOperationException("当前战斗不支持偷窃路线策略。");
-        if (_deployment != null)
-        {
-            Entry.Logger.Info("[CombatSolver/Test] THEFT_POLICY_REJECT reason=deploying");
-            return;
-        }
-        if (_combat.TheftPolicy == policy)
-            return;
-
-        SolverTheftPolicy? previous = _combat.TheftPolicy;
-        _combat.TheftPolicy = policy;
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] THEFT_POLICY_CHANGED previous={previous?.ToString() ?? "-"} current={policy}");
-        SolverOverlay.RefreshControls();
-        if (_combat.AutomaticSearchPaused || !AutomaticCalculationEnabled)
-        {
-            Entry.Logger.Info("[CombatSolver/Test] THEFT_POLICY_RECALCULATION_SKIPPED reason=automatic_calculation_inactive");
-            return;
-        }
-        RequestSearch(host, state, SearchReason.Manual);
-    }
-
     internal static PotionStrategySnapshot CapturePotionStrategy(
         CombatState state,
         SolverPotionPolicy defaultPolicy)
@@ -1717,197 +1688,14 @@ internal static partial class SolverController
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
         List<PotionSlotDirective> directives = [];
-        foreach (PersistedPotionDirective persisted in SolverSettings.Current.PotionDirectives)
+        foreach (PotionSlotDirective directive in _potionDirectivesForTesting)
         {
-            PotionModel? potion = GetPotionAtExistingSlot(player, persisted.Slot);
+            PotionModel? potion = GetPotionAtExistingSlot(player, directive.Slot);
             if (potion != null
-                && string.Equals(potion.Id.Entry, persisted.PotionId, StringComparison.Ordinal))
-            {
-                directives.Add(new PotionSlotDirective(
-                    persisted.Slot,
-                    persisted.PotionId,
-                    persisted.Directive));
-            }
+                && string.Equals(potion.Id.Entry, directive.PotionId, StringComparison.Ordinal))
+                directives.Add(directive);
         }
         return new PotionStrategySnapshot(defaultPolicy, directives);
-    }
-
-    internal static SolverPotionDirective ResolvePotionDirective(
-        CombatState state,
-        int slot,
-        string potionId)
-        => SolverSettings.ResolvePotionDirective(slot, potionId);
-
-    internal static void SetBrightestFlameLimit(NGame host, CombatState state, int? limit)
-    {
-        AssertMainThread();
-        if (_deployment != null || SolverSettings.Current.BrightestFlameMaxHpLossLimit == limit)
-            return;
-        SolverSettings.Update(SolverSettings.Current with { BrightestFlameMaxHpLossLimit = limit });
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        _combat.LatestResult = null;
-        _combat.LatestStamp = null;
-        RequestSearch(host, state, SearchReason.Manual);
-        SolverOverlay.RefreshControls();
-    }
-
-    internal static void SetGrowthPolicy(NGame host, CombatState state, GrowthValues budgets)
-    {
-        AssertMainThread();
-        if (_deployment != null)
-            return;
-        SolverSettingsData current = SolverSettings.Current;
-        if (current.GrowthBudgets == budgets)
-            return;
-        SolverSettings.Update(current with { GrowthBudgets = budgets });
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        SolverOverlay.RefreshControls();
-        if (!_combat.AutomaticSearchPaused && AutomaticCalculationEnabled)
-            RequestSearch(host, state, SearchReason.Manual);
-    }
-
-    internal static void SetRelicCounterPolicy(NGame host, CombatState state, bool enabled, RelicCounterRule[] rules)
-    {
-        AssertMainThread();
-        if (_deployment != null) return;
-        var copied = RelicCounterPolicy.ValidateAndCopy(rules);
-        var current = SolverSettings.Current;
-        if (current.RelicStrategyEnabled == enabled && current.RelicCounterRules.SequenceEqual(copied)) return;
-        SolverSettings.Update(current with { RelicStrategyEnabled = enabled, RelicCounterRules = copied });
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        SolverOverlay.RefreshControls();
-        if (!_combat.AutomaticSearchPaused && AutomaticCalculationEnabled)
-            RequestSearch(host, state, SearchReason.Manual);
-    }
-
-    internal static void SetIgnoreLongTermRewards(NGame host, CombatState state, bool ignore)
-    {
-        AssertMainThread();
-        if (_deployment != null)
-            return;
-        SolverSettingsData current = SolverSettings.Current;
-        if (current.IgnoreLongTermRewards == ignore)
-            return;
-        SolverSettings.Update(current with { IgnoreLongTermRewards = ignore });
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        SolverOverlay.RefreshControls();
-        if (!_combat.AutomaticSearchPaused && AutomaticCalculationEnabled)
-            RequestSearch(host, state, SearchReason.Manual);
-    }
-
-    internal static void SetPotionDirective(
-        NGame host,
-        CombatState state,
-        int slot,
-        string potionId,
-        SolverPotionDirective directive)
-    {
-        AssertMainThread();
-        if (!Enum.IsDefined(directive))
-            throw new ArgumentOutOfRangeException(nameof(directive));
-        if (_deployment != null)
-        {
-            Entry.Logger.Info("[CombatSolver/Test] POTION_DIRECTIVE_REJECT reason=deploying");
-            return;
-        }
-        Player player = LocalContext.GetMe(state)
-            ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
-        PotionModel potion = player.GetPotionAtSlotIndex(slot)
-            ?? throw new InvalidOperationException($"药水槽位 {slot} 为空。");
-        if (!string.Equals(potion.Id.Entry, potionId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"药水槽位 {slot} 为 {potion.Id.Entry}，预期 {potionId}。");
-        }
-
-        if (SolverSettings.ResolvePotionDirective(slot, potionId) == directive)
-            return;
-        SolverSettings.Update(SolverSettings.ApplyPotionDirective(
-            SolverSettings.Current,
-            slot,
-            potionId,
-            directive));
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] POTION_DIRECTIVE_CHANGED slot={slot} potion={potionId} directive={directive}");
-        SolverOverlay.RefreshControls();
-        if (_combat.AutomaticSearchPaused || !AutomaticCalculationEnabled)
-        {
-            Entry.Logger.Info("[CombatSolver/Test] POTION_DIRECTIVE_RECALCULATION_SKIPPED reason=automatic_calculation_inactive");
-            return;
-        }
-        RequestSearch(host, state, SearchReason.Manual);
-    }
-
-    internal static void SetPotionRewardPrediction(NGame host, CombatState state, bool enabled)
-    {
-        AssertMainThread();
-        if (SolverSettings.Current.PredictPotionReward == enabled)
-            return;
-        SolverSettings.Update(SolverSettings.Current with { PredictPotionReward = enabled });
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        if (_deployment != null)
-            return;
-        _combat.LatestResult = null;
-        _combat.LatestStamp = null;
-        if (_combat.AutomaticSearchPaused || !AutomaticCalculationEnabled)
-        {
-            SolverOverlay.ShowPotionRewardSettingChanged(host);
-            return;
-        }
-        RequestSearch(host, state, SearchReason.Manual);
-    }
-
-    internal static void SetPotionPreset(
-        NGame host,
-        CombatState state,
-        PotionStrategyPreset preset)
-    {
-        AssertMainThread();
-        if (!Enum.IsDefined(preset))
-            throw new ArgumentOutOfRangeException(nameof(preset));
-        if (_deployment != null)
-        {
-            Entry.Logger.Info("[CombatSolver/Test] POTION_PRESET_REJECT reason=deploying");
-            return;
-        }
-
-        Player player = LocalContext.GetMe(state)
-            ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
-        SolverSettingsData current = SolverSettings.Current;
-        PotionStrategySnapshot currentStrategy = CapturePotionStrategy(state, current.PotionPolicy);
-        List<PotionSlotDirective> searchable = [];
-        for (int slot = 0; slot < player.PotionSlots.Count; slot++)
-        {
-            PotionModel? potion = player.GetPotionAtSlotIndex(slot);
-            if (potion == null || !PotionOnUseSupport.CanSearch(potion))
-                continue;
-            searchable.Add(new PotionSlotDirective(
-                slot,
-                potion.Id.Entry,
-                currentStrategy.Resolve(slot, potion.Id.Entry)));
-        }
-        SolverSettingsData updated = SolverSettings.ApplyPotionPreset(current, searchable, preset);
-        if (updated == current)
-            return;
-
-        SolverSettings.Update(updated);
-        _combat.ContinuationSource = null;
-        _combat.PendingCompleteProjectionBaseline = null;
-        Entry.Logger.Info($"[CombatSolver/Test] POTION_PRESET_CHANGED preset={preset} potions={searchable.Count}");
-        SolverOverlay.RefreshControls();
-        if (_combat.AutomaticSearchPaused || !AutomaticCalculationEnabled)
-        {
-            Entry.Logger.Info("[CombatSolver/Test] POTION_PRESET_RECALCULATION_SKIPPED reason=automatic_calculation_inactive");
-            return;
-        }
-        RequestSearch(host, state, SearchReason.Manual);
     }
 
     internal static void SetPotionDirectiveForTesting(
@@ -1923,33 +1711,23 @@ internal static partial class SolverController
             ?? throw new InvalidOperationException($"测试药水槽位 {slot} 为空。");
         if (!string.Equals(potion.Id.Entry, potionId, StringComparison.Ordinal))
             throw new InvalidOperationException($"测试药水槽位 {slot} 与 {potionId} 不一致。");
-        SolverSettings.ApplyForTesting(SolverSettings.ApplyPotionDirective(
-            SolverSettings.Current,
-            slot,
-            potionId,
-            directive));
+        ApplyPotionDirectiveForTesting(new PotionSlotDirective(slot, potionId, directive));
     }
 
-    private static void ReconcilePersistedPotionDirectives(CombatState state)
+    internal static void ApplyPotionDirectiveForTesting(PotionSlotDirective directive)
     {
-        Player player = LocalContext.GetMe(state)
-            ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
-        SolverSettingsData settings = SolverSettings.Current;
-        PersistedPotionDirective[] retained = settings.PotionDirectives
-            .Where(directive =>
-            {
-                PotionModel? potion = GetPotionAtExistingSlot(player, directive.Slot);
-                return potion != null
-                    && string.Equals(potion.Id.Entry, directive.PotionId, StringComparison.Ordinal);
-            })
-            .ToArray();
-        if (retained.Length == settings.PotionDirectives.Length)
-            return;
-        SolverSettings.Update(settings with { PotionDirectives = retained });
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] POTION_DIRECTIVES_RECONCILED " +
-            $"previous={settings.PotionDirectives.Length} current={retained.Length}");
+        _potionDirectivesForTesting.RemoveAll(item => item.Slot == directive.Slot);
+        if (directive.Directive != SolverPotionDirective.Smart)
+            _potionDirectivesForTesting.Add(directive);
     }
+
+    internal static SolverPotionDirective ResolvePotionDirectiveForTesting(int slot, string potionId)
+        => _potionDirectivesForTesting.FirstOrDefault(item => item.Slot == slot
+            && string.Equals(item.PotionId, potionId, StringComparison.Ordinal)) is { PotionId: not null } found
+            ? found.Directive
+            : SolverPotionDirective.Smart;
+
+    internal static void ClearPotionDirectivesForTesting() => _potionDirectivesForTesting.Clear();
 
     private static PotionModel? GetPotionAtExistingSlot(Player player, int slot)
         => slot >= 0 && slot < player.PotionSlots.Count
@@ -2395,32 +2173,18 @@ internal static partial class SolverController
     private static SolverResult SolveFairDecision(
         IReadOnlyList<CombatRootSnapshot> samples,
         bool forcedEndTurn,
+        SolverSpeed speed,
         SolverDisplayNames displayNames,
         BattleDamageSnapshot battleDamage,
         SearchPolicySnapshot searchPolicy,
         int generation,
         CancellationToken token)
     {
-        SolverSettingsData data = SolverSettings.Current;
-        int candidates = Math.Max(1, data.FairPlannerCandidates);
-        SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(searchPolicy, searchPolicy.Profile with
-        {
-            BeamWidth = Math.Min(searchPolicy.Profile.BeamWidth, Math.Max(1, data.FairPlannerBeamWidth)),
-            MaxExpandedNodes = Math.Min(searchPolicy.Profile.MaxExpandedNodes, Math.Max(1, data.FairPlannerMaxExpandedNodes)),
-            SoftTimeBudgetMilliseconds = Math.Min(
-                searchPolicy.Profile.SoftTimeBudgetMilliseconds,
-                Math.Max(250, data.FairPlannerSolveBudgetMilliseconds)),
-        });
+        FairPlannerSettings plannerSettings = FairPlannerSettings.For(speed) with { Samples = samples.Count };
+        SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(
+            searchPolicy, plannerSettings.Profile(searchPolicy.Profile));
         if (forcedEndTurn)
             isolated = FairDecisionPlanner.ForcedEndTurnPolicy(isolated);
-        FairPlannerSettings plannerSettings = new(
-            samples.Count,
-            candidates,
-            data.FairPlannerDeathPenalty,
-            data.FairPlannerUnfinishedEnemyHpWeight,
-            data.FairPlannerCommitAgreement,
-            data.FairPlannerTieStandardErrors,
-            data.FairPlannerTieMarginHp);
         Stopwatch stopwatch = Stopwatch.StartNew();
         long allocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
         TimeSpan gcPauseAtStart = GC.GetTotalPauseDuration();
@@ -2435,7 +2199,7 @@ internal static partial class SolverController
             ?? FairDecisionPlanner.Solve(samples[0], displayNames, battleDamage, isolated, null, token);
         route.FairCommitActionLimit = decision?.CommitCount ?? 1;
         Entry.Logger.Info(
-            $"[CombatSolver/Fair] MULTI_SAMPLE_DECISION generation={generation} samples={samples.Count} " +
+            $"[CombatSolver/Fair] MULTI_SAMPLE_DECISION generation={generation} speed={speed} samples={samples.Count} " +
             $"solves={decision?.Solves ?? 1} elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F0} " +
             $"own_phase_ms={decision?.OwnPhaseMilliseconds ?? 0} slowest_solve_ms={decision?.SlowestSolveMilliseconds ?? 0} " +
             $"allocated_mb={(GC.GetTotalAllocatedBytes(precise: false) - allocatedAtStart) / (1024 * 1024)} " +
@@ -3064,7 +2828,7 @@ internal static partial class SolverController
                     LiveEndTurnRiskProjection liveRisk = LiveEndTurnRiskEvaluator.EvaluateFair(
                         state,
                         plannedEndTurn.TurnStartChoices,
-                        SolverSettings.Current.FairPlannerSamples);
+                        FairPlannerSettings.For(SolverSettings.Capture().Speed).Samples);
                     int plannedHpLoss = result.RequireHpLostForTurn(turn);
                     bool worsened = false;
                     if ((_stopFullAutoOnDeathTurn && liveRisk.PlayerDead)

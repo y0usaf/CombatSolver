@@ -12,15 +12,15 @@ internal sealed partial class UnattendedTestRunner
         {
             if (!value) throw new InvalidOperationException("HP target stop: " + message);
         }
-        SolverSettingsData original = SolverSettings.Current;
         try
         {
-            Check(new SolverSettingsData().StopAtAcceptableBattleHpLoss, "default enabled");
-            var settings = original with { StopAtAcceptableBattleHpLoss = true,
-                GrowthBudgets = new GrowthValues(ForbiddenGrimoire: 12), IgnoreLongTermRewards = false };
-            Check(!SolverSettings.RoundTripForTesting(settings with { StopAtAcceptableBattleHpLoss = false }).StopAtAcceptableBattleHpLoss,
-                "disabled preference round trip");
-            SolverSettings.ApplyForTesting(settings);
+            Check(SolverSettings.Capture().StopAtAcceptableBattleHpLoss, "fixed policy stops at the HP target");
+            SolverSettings.OverrideSnapshotForTesting(current => current with
+            {
+                StopAtAcceptableBattleHpLoss = true,
+                GrowthBudgets = new GrowthValues(ForbiddenGrimoire: 12),
+                IgnoreLongTermRewards = false,
+            });
             foreach (var relic in player.Relics.ToArray()) await RelicCmd.Remove(relic);
             foreach (var power in combat.Creatures.SelectMany(c => c.Powers).ToArray()) await PowerCmd.Remove(power);
             await ClearPlayerPilesAsync(player);
@@ -258,6 +258,6 @@ internal sealed partial class UnattendedTestRunner
                 "reachable exhaust recovery disables growth early stopping");
             _completedChecks.Add("HpTargetStop:GrowthOpportunityTargets:Power:Exhaust:DeckBacked:Replay:Goopy:FatalCompetition:Recovery");
         }
-        finally { SolverSettings.ApplyForTesting(original); }
+        finally { SolverSettings.OverrideSnapshotForTesting(null); }
     }
 }

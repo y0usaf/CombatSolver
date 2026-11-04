@@ -98,7 +98,6 @@ $request = [ordered]@{
     clearPlayerPiles = $false
     verifyIncrementalSearch = $false
     verifyBaseLibCardModifierBoundary = $VerifyBaseLibCardModifierBoundary.IsPresent
-    performancePresetForTest = "Medium"
     enableNoGcRegionForTest = $true
     noGcRegionBudgetGigabytesForTest = 16
     deploymentFastModeForTest = "Instant"

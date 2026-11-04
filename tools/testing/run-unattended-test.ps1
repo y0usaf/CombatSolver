@@ -240,8 +240,6 @@ param(
     [string]$HeadlessFastModeForTest = "",
     [ValidateSet("", "FollowGame", "Normal", "Fast", "Instant")]
     [string]$DeploymentFastModeForTest = "",
-    [ValidateSet("", "Low", "Medium", "High", "VeryHigh", "Custom")]
-    [string]$PerformancePresetForTest = "",
     [ValidateScript({ $_ -eq -1 -or ($_ -ge 1 -and $_ -le 512) })]
     [int]$SearchBeamWidthForTest = -1,
     [ValidateScript({ $_ -eq -1 -or $_ -ge 100 })]
@@ -960,7 +958,6 @@ $request = [ordered]@{
     expectedPlayerDeath = $ExpectedPlayerDeath.IsPresent
     headlessFastModeForTest = if ([string]::IsNullOrWhiteSpace($HeadlessFastModeForTest)) { $null } else { $HeadlessFastModeForTest }
     deploymentFastModeForTest = if ([string]::IsNullOrWhiteSpace($DeploymentFastModeForTest)) { $null } else { $DeploymentFastModeForTest }
-    performancePresetForTest = if ([string]::IsNullOrWhiteSpace($PerformancePresetForTest)) { $null } else { $PerformancePresetForTest }
     searchBeamWidthForTest = if ($SearchBeamWidthForTest -ge 0) { $SearchBeamWidthForTest } else { $null }
     searchMaxExpandedNodesForTest = if ($SearchMaxExpandedNodesForTest -ge 0) { $SearchMaxExpandedNodesForTest } else { $null }
     beamWeightTermForTest = if ($BeamWeightTermForTest) { $BeamWeightTermForTest } else { $null }
