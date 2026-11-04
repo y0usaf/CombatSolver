@@ -161,6 +161,7 @@ internal static class FairObservationChecks
         multiSampleDecisions.Add(visibleDecisionA);
 
         Restore(combat, player, worldA);
+        object decisionGc = CheckDecisionGcIsolation(combat, loop, Check);
         object knownPositions = CheckKnownPositions(combat, player, loop, Check);
         object setupDraws = CheckRevealedSetupDraws(combat, player, loop, Check);
 
@@ -177,12 +178,60 @@ internal static class FairObservationChecks
             samples,
             knownPositions,
             setupDraws,
+            decisionGc,
             multiSampleDecisions,
             liveDrawA = Field(liveA, "D"),
             liveDrawB = Field(liveB, "D"),
             sanitizedDraw = Field(rootA.Stamp, "D"),
         }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"FAIR_OBSERVATION_CHECKS Passed checks={checks} search_seeds={searchSeeds} identical_routes={identicalRoutes} distinct_routes={distinctRoutes.Count} distinct_first_actions={firstActionsA.Count}");
+    }
+
+    private static object CheckDecisionGcIsolation(CombatState combat, MainLoopContext loop, Action<bool, string> check)
+    {
+        CombatRootSnapshot[] roots = [.. Enumerable.Range(0, 4).Select(index =>
+            CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(SamplerSeed + (ulong)index)))];
+        SolverDisplayNames names = SolverDisplayNames.Capture(combat);
+        BattleDamageSnapshot damage = BattleDamageTracker.Observe(combat);
+        SolverSettingsSnapshot settings = SolverSettings.Capture();
+        SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
+            settings, combat, includeTurnSetup: false, theftPolicy: SolverController.ResolveTheftPolicy(combat));
+        int reclaims = 0;
+        policy.MemoryPressureSignal.Configure(
+            GC.GetTotalAllocatedBytes(precise: false),
+            1,
+            0,
+            1,
+            (_, _) => Interlocked.Increment(ref reclaims),
+            _ => Interlocked.Increment(ref reclaims));
+        SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(policy, policy.Profile);
+        check(!isolated.MemoryPressureSignal.IsEnabled, "fair sample solves run without the search memory-pressure signal");
+        int noGcSolves = 0;
+        SearchGcLifecycleSnapshot before = SearchGcPolicy.CaptureLifecycle();
+        Task<FairDecision?> task = Task.Run(() =>
+        {
+            using ISearchGcScope scope = FairDecisionPlanner.EnterGcScope(settings.NoGcRegionBudgetBytes, CancellationToken.None);
+            return FairDecisionPlanner.Decide(
+                roots,
+                (root, prefix) =>
+                {
+                    if (System.Runtime.GCSettings.LatencyMode == System.Runtime.GCLatencyMode.NoGCRegion)
+                        Interlocked.Increment(ref noGcSolves);
+                    return FairDecisionPlanner.Solve(root, names, damage, isolated, prefix, CancellationToken.None);
+                },
+                (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, isolated, action, CancellationToken.None),
+                new FairPlannerSettings(roots.Length, 3, 200, 0.25),
+                CancellationToken.None);
+        });
+        loop.RunUntilCompleted(task, TimeSpan.FromMinutes(5), "gc-isolated multi-sample decision");
+        FairDecision? decision = task.GetAwaiter().GetResult();
+        SearchGcLifecycleSnapshot delta = SearchGcPolicy.CaptureLifecycle().DeltaFrom(before);
+        check(decision != null, "gc-isolated decision returns an action");
+        check(reclaims == 0, "a fair decision never runs an in-search reclaim checkpoint");
+        check(noGcSolves == 0 && delta.NoGcStarts == 0, "a fair decision never runs inside a No-GC region");
+        check(delta.ForcedCollections == 0, "a fair decision forces no collection");
+        policy.MemoryPressureSignal.Disable();
+        return new { solves = decision!.Solves, reclaims, noGcSolves, delta.ForcedCollections, delta.NoGcStarts };
     }
 
     private static object CheckKnownPositions(

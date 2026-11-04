@@ -55,8 +55,12 @@ internal static class FairDecisionPlanner
             DisableSharedPrimaryIncumbentsForTesting = true,
             PrimaryIncumbents = null,
             Diagnostics = new SearchDiagnosticsSink(_ => { }, _ => { }),
+            MemoryPressureSignal = new SearchMemoryPressureSignal(),
             Profile = profile,
         };
+
+    public static ISearchGcScope EnterGcScope(long configuredBudgetBytes, CancellationToken token)
+        => SearchGcPolicy.EnterSearchScope(false, configuredBudgetBytes, new SearchMemoryPressureSignal(), token);
 
     public static ulong VisibleSeed(MegaCrit.Sts2.Core.Combat.CombatState state, MegaCrit.Sts2.Core.Entities.Players.Player player)
     {

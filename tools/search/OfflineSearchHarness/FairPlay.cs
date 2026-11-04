@@ -192,10 +192,8 @@ internal static class FairPlay
                 {
                     Task<FairDecision?> decide = Task.Run(() =>
                     {
-                        using IDisposable? gcScope = solverSettings.EnableNoGcRegion
-                            ? SearchGcPolicy.EnterSearchScope(true, solverSettings.NoGcRegionBudgetBytes,
-                                policy.MemoryPressureSignal, CancellationToken.None)
-                            : null;
+                        using ISearchGcScope gcScope = FairDecisionPlanner.EnterGcScope(
+                            solverSettings.NoGcRegionBudgetBytes, CancellationToken.None);
                         return FairDecisionPlanner.Decide(
                             decisionRoots,
                             (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, decisionPolicy, prefix, CancellationToken.None),

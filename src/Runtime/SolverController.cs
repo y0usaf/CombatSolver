@@ -1313,11 +1313,13 @@ internal static partial class SolverController
                 SolverResult? finalizedResult = null;
                 try
                 {
-                    using ISearchGcScope admittedGcPolicy = gcPolicy = SearchGcPolicy.EnterSearchScope(
-                        settings.EnableNoGcRegion,
-                        settings.NoGcRegionBudgetBytes,
-                        searchPolicy.MemoryPressureSignal,
-                        token);
+                    using ISearchGcScope admittedGcPolicy = gcPolicy = fairSamples != null
+                        ? FairDecisionPlanner.EnterGcScope(settings.NoGcRegionBudgetBytes, token)
+                        : SearchGcPolicy.EnterSearchScope(
+                            settings.EnableNoGcRegion,
+                            settings.NoGcRegionBudgetBytes,
+                            searchPolicy.MemoryPressureSignal,
+                            token);
                     SolverResult result = fairSamples != null
                         ? SolveFairDecision(fairSamples, fairForcedEndTurn, displayNames, battleDamage, searchPolicy, generation, token)
                         : CombatSearchCoordinator.Solve(
