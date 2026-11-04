@@ -77,7 +77,6 @@ internal sealed record SolverSettingsData
     public bool SolverDisabled { get; init; }
     public bool AutomaticCalculationEnabled { get; init; } = true;
     public bool AutoEnableFullAuto { get; init; }
-    public FairPlannerMode FairPlanner { get; init; } = FairPlannerMode.MultiSample;
     public int FairPlannerSamples { get; init; } = 12;
     public int FairPlannerCandidates { get; init; } = 4;
     public double FairPlannerDeathPenalty { get; init; } = 200;
@@ -85,12 +84,8 @@ internal sealed record SolverSettingsData
     public int FairPlannerBeamWidth { get; init; } = 20;
     public int FairPlannerMaxExpandedNodes { get; init; } = 1500;
     public int FairPlannerSolveBudgetMilliseconds { get; init; } = 5000;
-    public double FairPlannerEvaluationTimeFactor { get; init; }
     public double FairPlannerCommitAgreement { get; init; } = 1;
-    public double FairPlannerConsensusShare { get; init; } = 1;
-    public bool FairPlannerForcedEndTurnShortcut { get; init; } = true;
     public double FairPlannerTieStandardErrors { get; init; } = 1;
-    public bool FairPlannerSegments { get; init; } = true;
     public double FairPlannerTieMarginHp { get; init; } = 1;
     [JsonPropertyName("fairForkOnlineStatisticsEnabled")]
     public bool OnlineStatisticsEnabled { get; init; }

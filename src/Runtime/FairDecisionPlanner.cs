@@ -2,24 +2,15 @@ using System.Diagnostics;
 
 namespace CombatSolver;
 
-internal enum FairPlannerMode
-{
-    SingleSample,
-    MultiSample,
-}
-
 internal sealed record FairPlannerSettings(
     int Samples,
     int MaxCandidates,
     double DeathPenalty,
     double UnfinishedEnemyHpWeight,
-    double EvaluationTimeFactor = 0,
     double CommitAgreement = 0,
-    double ConsensusShare = 1,
-    int MaxParallelism = 0,
     double TieStandardErrors = 0,
-    bool EvaluateProposers = false,
-    double TieMarginHp = 0);
+    double TieMarginHp = 0,
+    int MaxParallelism = 0);
 
 internal sealed record FairCandidateScore(
     string Key,
@@ -37,7 +28,6 @@ internal sealed record FairDecision(
     int Solves,
     long OwnPhaseMilliseconds,
     long SlowestSolveMilliseconds,
-    int SkippedEvaluations,
     int CommitCount = 1,
     int SafetyStops = 0);
 
@@ -189,9 +179,9 @@ internal static class FairDecisionPlanner
         IReadOnlyList<CombatRootSnapshot> samples,
         Func<CombatRootSnapshot, IReadOnlyList<PlanAction>?, SolverResult> solve,
         Func<CombatRootSnapshot, PlanAction, IReadOnlyList<PlanAction>> revealedVariants,
+        Func<CombatRootSnapshot, IReadOnlyList<PlanAction>, (int Length, int EnemyHp)> revealFreeLength,
         FairPlannerSettings settings,
-        CancellationToken token,
-        Func<CombatRootSnapshot, IReadOnlyList<PlanAction>, (int Length, int EnemyHp)>? revealFreeLength = null)
+        CancellationToken token)
     {
         int sampleCount = samples.Count;
         SolverResult?[] own = new SolverResult?[sampleCount];
@@ -245,12 +235,10 @@ internal static class FairDecisionPlanner
             if (own[sample] is not { } result || result.BestNode.Actions.Count == 0)
                 return;
             IReadOnlyList<PlanAction> actions = result.BestNode.Actions;
-            int length = revealFreeLength == null || HasRevealedChoice(actions[0])
-                ? 1
-                : revealFreeLength(samples[sample], actions).Length;
+            int length = HasRevealedChoice(actions[0]) ? 1 : revealFreeLength(samples[sample], actions).Length;
             int revealed = Enumerable.Range(1, Math.Max(0, length - 1)).FirstOrDefault(index => HasRevealedChoice(actions[index]));
             ownSegments[sample] = [.. actions.Take(revealed > 0 ? revealed : Math.Max(1, length))];
-            ownSegmentEnemyHp[sample] = revealFreeLength == null || HasRevealedChoice(actions[0])
+            ownSegmentEnemyHp[sample] = HasRevealedChoice(actions[0])
                 ? 0
                 : revealFreeLength(samples[sample], ownSegments[sample]!).EnemyHp;
         });
@@ -270,37 +258,23 @@ internal static class FairDecisionPlanner
             .ToArray();
         if (proposals.Length == 0)
             return null;
-        int proposing = ownKeys.Count(key => key != null);
-        if (proposals.Length > 1 && settings.ConsensusShare < 1
-            && proposals[0].Count >= Math.Ceiling(settings.ConsensusShare * proposing))
-            proposals = [proposals[0]];
 
         double?[,] utilities = new double?[proposals.Length, sampleCount];
         SolverResult?[,] routes = new SolverResult?[proposals.Length, sampleCount];
         bool[,] timedOut = new bool[proposals.Length, sampleCount];
         int solves = sampleCount;
-        int skipped = 0;
         if (proposals.Length > 1)
         {
-            long evaluationDeadline = settings.EvaluationTimeFactor > 0
-                ? Stopwatch.GetTimestamp() + (long)(Math.Max(ownPhase.Elapsed.TotalSeconds * settings.EvaluationTimeFactor, 3d)
-                    * Stopwatch.Frequency)
-                : long.MaxValue;
             int[] extra = new int[sampleCount];
             Parallel.For(0, sampleCount, parallel, sample =>
             {
                 for (int candidate = 0; candidate < proposals.Length; candidate++)
                 {
                     if (string.Equals(ownKeys[sample], proposals[candidate].Key, StringComparison.Ordinal))
-                    {
-                        if (settings.EvaluateProposers)
-                            TryEvaluate(sample, candidate, ownSegments[sample]!, revealedFallback: false);
                         continue;
-                    }
                     PlanAction action = proposals[candidate].Action;
-                    bool resolved = !HasRevealedChoice(action)
-                        && TryEvaluate(sample, candidate, proposals[candidate].Prefix, revealedFallback: true);
-                    if (resolved)
+                    if (!HasRevealedChoice(action)
+                        && TryEvaluate(sample, candidate, proposals[candidate].Prefix, revealedFallback: true))
                         continue;
                     IReadOnlyList<PlanAction> variants;
                     try
@@ -320,11 +294,6 @@ internal static class FairDecisionPlanner
 
             bool TryEvaluate(int sample, int candidate, IReadOnlyList<PlanAction> prefix, bool revealedFallback)
             {
-                if (Stopwatch.GetTimestamp() > evaluationDeadline)
-                {
-                    Interlocked.Increment(ref skipped);
-                    return true;
-                }
                 extra[sample]++;
                 try
                 {
@@ -433,7 +402,7 @@ internal static class FairDecisionPlanner
             .First();
         SolverResult route = routes[bestIndex, routeSample]!;
         return new FairDecision(best.Action, route, scores, solves,
-            ownPhase.ElapsedMilliseconds, Interlocked.Read(ref slowestSolve), skipped,
+            ownPhase.ElapsedMilliseconds, Interlocked.Read(ref slowestSolve),
             AgreedCommitCount(route, proposals[bestIndex].Prefix.Length, Enumerable.Range(0, sampleCount)
                 .Select(sample => routes[bestIndex, sample])
                 .OfType<SolverResult>()

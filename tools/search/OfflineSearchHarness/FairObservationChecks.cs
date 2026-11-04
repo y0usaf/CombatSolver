@@ -220,6 +220,7 @@ internal static class FairObservationChecks
                     return FairDecisionPlanner.Solve(root, names, damage, isolated, prefix, CancellationToken.None);
                 },
                 (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, isolated, action, CancellationToken.None),
+                (root, actions) => FairDecisionPlanner.RevealFreeLength(root, names, damage, isolated, actions, CancellationToken.None),
                 new FairPlannerSettings(roots.Length, 3, 200, 0.25),
                 CancellationToken.None);
         });
@@ -400,6 +401,7 @@ internal static class FairObservationChecks
             roots,
             (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, isolated, prefix, CancellationToken.None),
             (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, isolated, action, CancellationToken.None),
+            (root, actions) => FairDecisionPlanner.RevealFreeLength(root, names, damage, isolated, actions, CancellationToken.None),
             settings,
             CancellationToken.None));
         loop.RunUntilCompleted(task, TimeSpan.FromMinutes(5), "multi-sample decision");

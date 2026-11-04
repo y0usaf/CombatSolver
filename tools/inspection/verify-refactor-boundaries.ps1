@@ -865,7 +865,8 @@ if (Select-String -LiteralPath $searchGcPolicyPath -SimpleMatch "ReclaimAfterAct
 # GC admission accounting and scratch-container ownership remain in their existing layers.
 foreach ($check in @(
     @{ RelativePath = "src/Runtime/SearchGcPolicy.cs"; Text = "scope.CompleteLifecycle(CaptureLifecycle())" },
-    @{ RelativePath = "src/Runtime/SolverController.cs"; Text = "SearchGcPolicy.EnterSearchScope(" },
+    @{ RelativePath = "src/Runtime/SolverController.cs"; Text = "FairDecisionPlanner.EnterGcScope(" },
+    @{ RelativePath = "src/Runtime/FairDecisionPlanner.cs"; Text = "SearchGcPolicy.EnterSearchScope(" },
     @{ RelativePath = "src/Search/CombatBeamSolver.Models.cs"; Text = "ExpansionBatchPool = new(static snapshot => snapshot.ReleaseSimulator())" },
     @{ RelativePath = "src/Search/CombatBeamSolver.ParallelExpansion.cs"; Text = "new(_run.ExpansionBatchPool)" },
     @{ RelativePath = "src/Engine/InCombat/Simulation/CombatPredictionRngSet.cs"; Text = "private sealed class FrozenStream(PredictionRngState state)" },
@@ -921,7 +922,7 @@ $rootSnapshotChecks = @(
     },
     @{
         Path = Join-Path $repositoryRoot "src\Runtime\SolverController.cs"
-        Text = "CombatRootSnapshot.Capture(state, settings.PredictPotionReward)"
+        Text = "CombatRootSnapshot.Capture(state, settings.PredictPotionReward,"
     },
     @{
         Path = Join-Path $repositoryRoot "src\Runtime\PlayerTurnSetupPatches.cs"

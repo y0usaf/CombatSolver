@@ -1080,100 +1080,6 @@ internal static partial class SolverController
                     "field=live_combat_stamp expected={solver_result} actual={manual_state_change}",
                     CombatBugReportExporter.LastCompletedSearchRootId);
             }
-            setupStage = "continuation";
-            ContinuationStamp? continuationStamp = reason == SearchReason.AutoTurnStart
-                && _combat.ContinuationSource != null
-                && !FairObservation.Enabled
-                ? ContinuationStamp.CaptureLive(state)
-                : null;
-            if (continuationStamp != null
-                && _combat.ContinuationSource!.TryCreateContinuation(
-                    continuationStamp,
-                    LocalContext.GetMe(state)!.Creature.CurrentHp,
-                    battleDamage,
-                    out SolverResult? reused))
-            {
-                CancelSearch();
-                _combat.State = state;
-                _combat.LatestResult = reused;
-                _combat.LatestStamp = stamp;
-                _combat.ContinuationsReused++;
-                if (UnattendedTestRunner.IsActive)
-                {
-                    LastCompletedResultForTesting = reused;
-                    LastReusedTurnForTesting = reused!.StartTurnNumber;
-                    LastReusedProjectedBattleHpLostForTesting = reused.ProjectedBattleHpLost;
-                }
-                BattleDamageTracker.RegisterPlan(state, reused!);
-                CombatBugReportExporter.RecordCheckpoint(
-                    state,
-                    "search_reused",
-                    reused,
-                    DescribeReplanAudit());
-                SolverOverlay.ShowResult(
-                    host,
-                    SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-                        reused!,
-                        UnexpectedReplanCount > 0,
-                        _combat.ReviewedWorldlinesTotal));
-                Entry.Logger.Info($"[CombatSolver/Test] SEARCH_REUSED from_turn={reused!.ReusedFromTurn} turn={reused.StartTurnNumber} validation=exact_state_text remaining_turns={reused.SearchedTurns}");
-                Entry.Logger.Info(SolverDiagnostics.DescribeResult(reused));
-                if (_combat.FullAutoEnabled)
-                    StartFullAutoDeployment(host, state, reused);
-                else if (deployWhenReady)
-                    StartDeployment(host, state, reused);
-                return;
-            }
-
-            if (continuationStamp != null)
-            {
-                _combat.PendingCompleteProjectionBaseline = null;
-                int currentTurn = LocalContext.GetMe(state)!.PlayerCombatState!.TurnNumber;
-                CachedContinuation? expected = _combat.ContinuationSource!.Continuations
-                    .FirstOrDefault(item => item.StartTurnNumber == currentTurn);
-                _combat.LastContinuationDifferences = expected == null
-                    ? ["field=continuation expected={cached_turn_missing} actual={live_turn_present}"]
-                    : expected.ExpectedState.DescribeDifferences(continuationStamp);
-                string difference = _combat.LastContinuationDifferences[0];
-                bool followedBySolver = _combat.LastSolverDeployedTurn == currentTurn - 1;
-                replanCause = !followedBySolver
-                    ? ReplanCause.ManualDivergence
-                    : expected == null
-                        ? ReplanCause.ContinuationMissing
-                        : ReplanCause.StateMismatch;
-                if (replanCause == ReplanCause.ManualDivergence)
-                {
-                    _combat.PendingManualProjectionBaseline = new ManualProjectionBaseline(
-                        _combat.ContinuationSource.StartTurnNumber,
-                        _combat.ContinuationSource.ProjectedBattleHpLost,
-                        _combat.ContinuationSource.ProjectedBattlePotionCount,
-                        difference,
-                        CombatBugReportExporter.LastCompletedSearchRootId);
-                }
-                if (followedBySolver
-                    && _combat.ContinuationSource.BoundaryReason == SearchBoundaryReason.None
-                    && _combat.ContinuationSource.CombatEndedTurn.HasValue)
-                {
-                    _combat.PendingCompleteProjectionBaseline = new CompleteProjectionBaseline(
-                        _combat.ContinuationSource.StartTurnNumber,
-                        _combat.ContinuationSource.ProjectedBattleHpLost,
-                        difference);
-                }
-                Entry.Logger.Info(
-                    $"[CombatSolver/Test] SEARCH_REUSE_MISS turn={currentTurn} " +
-                    $"reason={CauseToken(replanCause)} cached_turns={_combat.ContinuationSource.Continuations.Count} " +
-                    $"previous_boundary={_combat.ContinuationSource.BoundaryReason} diff_count={_combat.LastContinuationDifferences.Count} {difference}");
-                if (_combat.LastContinuationDifferences.Count > 0)
-                {
-                    for (int index = 0; index < _combat.LastContinuationDifferences.Count; index++)
-                    {
-                        Entry.Logger.Info(
-                            $"[CombatSolver/Debug] STATE_DIFF index={index} " +
-                            _combat.LastContinuationDifferences[index]);
-                    }
-                }
-            }
-
             if (_combat.ShowcaseMode)
             {
                 StopShowcaseRoute(host, "新回合状态与预计算续接点不一致。");
@@ -1228,14 +1134,11 @@ internal static partial class SolverController
                     "combat_root_snapshot",
                     settings.EnableNoGcRegion);
             }
-            bool fairForcedEndTurn = SolverSettings.Current.FairPlanner == FairPlannerMode.MultiSample
-                && SolverSettings.Current.FairPlannerForcedEndTurnShortcut
-                && FairDecisionPlanner.IsForcedEndTurn(LocalContext.GetMe(state)!);
-            CombatRootSnapshot[]? fairSamples = SolverSettings.Current.FairPlanner == FairPlannerMode.MultiSample
-                ? [rootSnapshot, .. Enumerable.Range(1, fairForcedEndTurn ? 0 : Math.Max(1, SolverSettings.Current.FairPlannerSamples) - 1)
-                    .Select(index => CombatRootSnapshot.Capture(state, settings.PredictPotionReward,
-                        FairObservation.FromSeed(fairSeed + (ulong)index)))]
-                : null;
+            bool fairForcedEndTurn = FairDecisionPlanner.IsForcedEndTurn(LocalContext.GetMe(state)!);
+            CombatRootSnapshot[] fairSamples = [rootSnapshot, .. Enumerable.Range(1,
+                    fairForcedEndTurn ? 0 : Math.Max(1, SolverSettings.Current.FairPlannerSamples) - 1)
+                .Select(index => CombatRootSnapshot.Capture(state, settings.PredictPotionReward,
+                    FairObservation.FromSeed(fairSeed + (ulong)index)))];
             searchPolicy = searchPolicy with
             {
                 PrimaryIncumbents = _combat.AcquirePrimaryIncumbents(
@@ -1294,17 +1197,8 @@ internal static partial class SolverController
                 settings.Profile));
 
             setupStage = "worker_schedule";
-            SolvedRouteCache routeCache = SolvedRouteCache.Capture(state, rootSnapshot, searchPolicy, battleDamage);
             Task<SolverResult> solveTask = Task.Run(() =>
             {
-                if (fairSamples == null
-                    && !searchPolicy.VerifyIncrementalSearch && !searchPolicy.MeasurePhasePerformance
-                    && reason is SearchReason.AutoTurnStart or SearchReason.Deploy or SearchReason.FullAuto
-                    && routeCache.Read(rootSnapshot.Forecast) is { } cached)
-                {
-                    token.ThrowIfCancellationRequested();
-                    return cached;
-                }
                 Entry.Logger.Info($"[CombatSolver/Test] SEARCH_WORKER_START generation={generation} thread={System.Environment.CurrentManagedThreadId} main_thread={NGame.IsMainThread()}");
                 Thread worker = Thread.CurrentThread;
                 ThreadPriority previousPriority = worker.Priority;
@@ -1313,26 +1207,12 @@ internal static partial class SolverController
                 SolverResult? finalizedResult = null;
                 try
                 {
-                    using ISearchGcScope admittedGcPolicy = gcPolicy = fairSamples != null
-                        ? FairDecisionPlanner.EnterGcScope(settings.NoGcRegionBudgetBytes, token)
-                        : SearchGcPolicy.EnterSearchScope(
-                            settings.EnableNoGcRegion,
-                            settings.NoGcRegionBudgetBytes,
-                            searchPolicy.MemoryPressureSignal,
-                            token);
-                    SolverResult result = fairSamples != null
-                        ? SolveFairDecision(fairSamples, fairForcedEndTurn, displayNames, battleDamage, searchPolicy, generation, token)
-                        : CombatSearchCoordinator.Solve(
-                            rootSnapshot,
-                            displayNames,
-                            battleDamage,
-                            searchPolicy,
-                            token,
-                            progress => PublishSearchProgress(search, progress));
+                    using ISearchGcScope admittedGcPolicy = gcPolicy =
+                        FairDecisionPlanner.EnterGcScope(settings.NoGcRegionBudgetBytes, token);
+                    SolverResult result = SolveFairDecision(
+                        fairSamples, fairForcedEndTurn, displayNames, battleDamage, searchPolicy, generation, token);
                     finalizedResult = search.Interaction.FinalizeWorkerResult(result);
                     token.ThrowIfCancellationRequested();
-                    if (fairSamples == null && !search.Interaction.StopRequested)
-                        routeCache.StoreFirst(finalizedResult);
                     return finalizedResult;
                 }
                 finally
@@ -2440,12 +2320,6 @@ internal static partial class SolverController
                 $"gc_pause_delta_ms={(GC.GetTotalPauseDuration() - search.ProcessGcPauseAtStart).TotalMilliseconds:F1}");
         }
     }
-    private static void PublishSearchProgress(SolverSearchSession search, SolverProgress progress)
-    {
-        if (ReferenceEquals(_search, search))
-            search.Interaction.PublishProgress(progress);
-    }
-
     internal static SolverProgress? CaptureDevelopmentMonitorProgress()
     {
         SolverSearchSession? search = Volatile.Read(ref _search);
@@ -2544,21 +2418,19 @@ internal static partial class SolverController
             candidates,
             data.FairPlannerDeathPenalty,
             data.FairPlannerUnfinishedEnemyHpWeight,
-            data.FairPlannerEvaluationTimeFactor,
             data.FairPlannerCommitAgreement,
-            data.FairPlannerConsensusShare,
-            TieStandardErrors: data.FairPlannerTieStandardErrors,
-            TieMarginHp: data.FairPlannerTieMarginHp);
+            data.FairPlannerTieStandardErrors,
+            data.FairPlannerTieMarginHp);
         Stopwatch stopwatch = Stopwatch.StartNew();
+        long allocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
+        TimeSpan gcPauseAtStart = GC.GetTotalPauseDuration();
         FairDecision? decision = FairDecisionPlanner.Decide(
             samples,
             (root, prefix) => FairDecisionPlanner.Solve(root, displayNames, battleDamage, isolated, prefix, token),
             (root, action) => FairDecisionPlanner.RevealedVariants(root, displayNames, battleDamage, isolated, action, token),
+            (root, actions) => FairDecisionPlanner.RevealFreeLength(root, displayNames, battleDamage, isolated, actions, token),
             plannerSettings,
-            token,
-            data.FairPlannerSegments
-                ? (root, actions) => FairDecisionPlanner.RevealFreeLength(root, displayNames, battleDamage, isolated, actions, token)
-                : null);
+            token);
         SolverResult route = decision?.Route
             ?? FairDecisionPlanner.Solve(samples[0], displayNames, battleDamage, isolated, null, token);
         route.FairCommitActionLimit = decision?.CommitCount ?? 1;
@@ -2566,7 +2438,8 @@ internal static partial class SolverController
             $"[CombatSolver/Fair] MULTI_SAMPLE_DECISION generation={generation} samples={samples.Count} " +
             $"solves={decision?.Solves ?? 1} elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F0} " +
             $"own_phase_ms={decision?.OwnPhaseMilliseconds ?? 0} slowest_solve_ms={decision?.SlowestSolveMilliseconds ?? 0} " +
-            $"skipped_evaluations={decision?.SkippedEvaluations ?? 0} forced_end_turn={forcedEndTurn} " +
+            $"allocated_mb={(GC.GetTotalAllocatedBytes(precise: false) - allocatedAtStart) / (1024 * 1024)} " +
+            $"gc_pause_ms={(GC.GetTotalPauseDuration() - gcPauseAtStart).TotalMilliseconds:F0} forced_end_turn={forcedEndTurn} " +
             $"commit_actions={route.FairCommitActionLimit} safety_stops={decision?.SafetyStops ?? 0} " +
             $"chosen={(decision == null ? "-" : FairDecisionPlanner.Key(decision.Action))} candidates=" +
             string.Join(' ', decision?.Candidates.Select(score =>

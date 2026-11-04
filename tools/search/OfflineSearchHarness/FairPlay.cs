@@ -63,7 +63,7 @@ internal static class FairPlay
     }
 
     private sealed record DecisionRecord(int Turn, string Mode, double Milliseconds, int Solves, int Candidates,
-        string[] Committed, double? MeanUtility, double AllocatedMb, long OwnPhaseMs, long SlowestSolveMs, int Skipped,
+        string[] Committed, double? MeanUtility, double AllocatedMb, long OwnPhaseMs, long SlowestSolveMs,
         bool Forced, double CpuMs, int Gen0, int Gen1, int Gen2, string[]? Scores, int SafetyStops)
     {
         public double GcPauseMs { get; set; }
@@ -98,6 +98,8 @@ internal static class FairPlay
 
     internal static void Run(CombatState combat, HarnessOptions options, MainLoopContext loop, string mode)
     {
+        if (mode is not ("v2" or "clairvoyant"))
+            throw new ArgumentException($"OFFLINE_HARNESS_FAIR_PLAY must be v2 or clairvoyant, not {mode}.");
         InstallPlayBypasses();
         Player player = combat.Players.Single();
         FairPlannerSettings settings = new(
@@ -105,16 +107,10 @@ internal static class FairPlay
             int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_CANDIDATES") ?? "4"),
             double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DEATH_PENALTY") ?? "200"),
             double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_ENEMY_WEIGHT") ?? "0.25"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_EVAL_FACTOR") ?? "0"),
             double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_COMMIT_AGREEMENT") ?? "1"),
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_CONSENSUS") ?? "1"),
-            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DOP") ?? "0"),
             double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TIE_SE") ?? "1"),
-            Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_EVAL_PROPOSERS") == "1",
-            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TIE_MARGIN") ?? "1"));
-        bool forcedEndTurnShortcut = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_FORCED_END") != "0";
-        bool visibleSeeds = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_VISIBLE_SEED") != "0";
-        bool segments = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_SEGMENTS") != "0";
+            double.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TIE_MARGIN") ?? "1"),
+            int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DOP") ?? "0"));
         bool determinismCheck = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DETERMINISM") == "1";
         int determinismMismatches = 0;
         SolverSettingsSnapshot solverSettings = SolverSettings.Capture();
@@ -122,8 +118,6 @@ internal static class FairPlay
         {
             SoftTimeBudgetMilliseconds = options.BudgetMilliseconds,
         };
-        ulong samplerBase = (ulong)StableHash(options.Label + "|" + options.Scenario.Seed) << 20;
-        int sampleCounter = 0;
         BenchmarkSelector selector = new();
         using IDisposable selectorScope = CardSelectCmd.PushSelector(selector, localOnly: true);
 
@@ -171,10 +165,8 @@ internal static class FairPlay
             int[] collectionsAtStart = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
             Stopwatch watch = Stopwatch.StartNew();
             long ownPhaseMs = 0, slowestSolveMs = 0;
-            int skipped = 0;
             int safetyStops = 0;
             IReadOnlyList<PlanAction> route;
-            bool commitOne;
             bool forcedDecision = false;
             int solves = 1;
             int candidates = 1;
@@ -182,9 +174,8 @@ internal static class FairPlay
             string[]? scores = null;
             if (mode == "v2")
             {
-                ulong decisionSeed = visibleSeeds ? FairDecisionPlanner.VisibleSeed(combat, player) : samplerBase + (ulong)sampleCounter;
-                sampleCounter += settings.Samples;
-                bool forced = forcedEndTurnShortcut && FairDecisionPlanner.IsForcedEndTurn(player);
+                ulong decisionSeed = FairDecisionPlanner.VisibleSeed(combat, player);
+                bool forced = FairDecisionPlanner.IsForcedEndTurn(player);
                 CombatRootSnapshot[] roots = [.. Enumerable.Range(0, forced ? 1 : settings.Samples).Select(index =>
                     CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(decisionSeed + (ulong)index)))];
                 SearchPolicySnapshot decisionPolicy = forced ? FairDecisionPlanner.ForcedEndTurnPolicy(policy) : policy;
@@ -198,11 +189,9 @@ internal static class FairPlay
                             decisionRoots,
                             (root, prefix) => FairDecisionPlanner.Solve(root, names, damage, decisionPolicy, prefix, CancellationToken.None),
                             (root, action) => FairDecisionPlanner.RevealedVariants(root, names, damage, decisionPolicy, action, CancellationToken.None),
+                            (root, actions) => FairDecisionPlanner.RevealFreeLength(root, names, damage, decisionPolicy, actions, CancellationToken.None),
                             decisionSettings,
-                            CancellationToken.None,
-                            segments
-                                ? (root, actions) => FairDecisionPlanner.RevealFreeLength(root, names, damage, decisionPolicy, actions, CancellationToken.None)
-                                : null);
+                            CancellationToken.None);
                     });
                     loop.RunUntilCompleted(decide, TimeSpan.FromMinutes(10), "fair v2 decision");
                     return decide.GetAwaiter().GetResult();
@@ -213,7 +202,7 @@ internal static class FairPlay
                 safetyStops = decision?.SafetyStops ?? 0;
                 if (determinismCheck)
                 {
-                    ulong repeatSeed = visibleSeeds ? FairDecisionPlanner.VisibleSeed(combat, player) : decisionSeed;
+                    ulong repeatSeed = FairDecisionPlanner.VisibleSeed(combat, player);
                     CombatRootSnapshot[] repeatRoots = [.. Enumerable.Range(0, roots.Length).Select(index =>
                         CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(repeatSeed + (ulong)index)))];
                     FairDecision? repeat = RunDecide(repeatRoots, settings with { MaxParallelism = 3 });
@@ -234,21 +223,15 @@ internal static class FairPlay
                     + $"death={score.DeathRate:F2} sd={score.StandardDeviation:F1} proposals={score.Proposals} valid={score.ValidSamples}").ToArray();
                 ownPhaseMs = decision?.OwnPhaseMilliseconds ?? 0;
                 slowestSolveMs = decision?.SlowestSolveMilliseconds ?? 0;
-                skipped = decision?.SkippedEvaluations ?? 0;
-                commitOne = false;
                 forcedDecision = forced;
             }
             else
             {
-                FairObservation observation = mode == "clairvoyant"
-                    ? FairObservation.ClairvoyantForOfflineBenchmark(combat)
-                    : FairObservation.FromSeed(samplerBase + (ulong)sampleCounter++);
-                CombatRootSnapshot root = CombatRootSnapshot.Capture(combat, fair: observation);
+                CombatRootSnapshot root = CombatRootSnapshot.Capture(combat, fair: FairObservation.ClairvoyantForOfflineBenchmark(combat));
                 Task<SolverResult> solve = Task.Run(() =>
                     FairDecisionPlanner.Solve(root, names, damage, policy, null, CancellationToken.None));
                 loop.RunUntilCompleted(solve, TimeSpan.FromMinutes(10), "fair single solve");
                 route = solve.GetAwaiter().GetResult().BestNode.Actions;
-                commitOne = false;
             }
             watch.Stop();
             double allocatedMb = (GC.GetTotalAllocatedBytes(precise: false) - allocatedAtStart) / (1024d * 1024d);
@@ -265,7 +248,7 @@ internal static class FairPlay
                 if (!Execute(combat, player, action, selector, loop))
                     break;
                 committed.Add(action.Kind + ":" + action.CardId + action.PotionId + ">" + action.TargetCombatId);
-                if (action.Kind == PlanActionKind.EndTurn || commitOne || !CombatManager.Instance.IsInProgress)
+                if (action.Kind == PlanActionKind.EndTurn || !CombatManager.Instance.IsInProgress)
                     break;
                 if (FairObservation.DescribeReveal(cursor, combat, player) != null)
                     break;
@@ -285,7 +268,7 @@ internal static class FairPlay
                 stalls = 0;
             }
             decisions.Add(new DecisionRecord(turn, mode, watch.Elapsed.TotalMilliseconds, solves, candidates,
-                [.. committed], meanUtility, allocatedMb, ownPhaseMs, slowestSolveMs, skipped, forcedDecision, cpuMs,
+                [.. committed], meanUtility, allocatedMb, ownPhaseMs, slowestSolveMs, forcedDecision, cpuMs,
                 GC.CollectionCount(0) - collectionsAtStart[0], GC.CollectionCount(1) - collectionsAtStart[1],
                 GC.CollectionCount(2) - collectionsAtStart[2], scores, safetyStops));
         }
@@ -315,7 +298,6 @@ internal static class FairPlay
             totalSeconds = total.Elapsed.TotalSeconds,
             gcServer = System.Runtime.GCSettings.IsServerGC,
             gcLatency = System.Runtime.GCSettings.LatencyMode.ToString(),
-            noGcRegion = solverSettings.EnableNoGcRegion,
             gcPausesByGeneration = PauseMonitor.PausesByGeneration(),
             determinismChecked = determinismCheck,
             determinismMismatches,
@@ -499,13 +481,5 @@ internal static class FairPlay
             Console.WriteLine("[fair-play] " + message);
             Console.Out.Flush();
         }
-    }
-
-    private static uint StableHash(string text)
-    {
-        uint hash = 2166136261;
-        foreach (char character in text)
-            hash = (hash ^ character) * 16777619;
-        return hash;
     }
 }
