@@ -1,102 +1,26 @@
-# 战斗路线求解器 / Combat Solver
+# Combat Solver, fair fork
 
-> **Fair fork.** This branch (`fair-mode`, manifest version `0.50.1+fair.1`, mod id still `CombatSolver`) plans only from what a player can see. Upstream copies the live game's RNG streams, ordered draw pile and enemy AI rolls into every search root; this fork keeps the visible state and resamples everything else at each root (`src/Runtime/FairObservation.cs`).
->
-> - **Visible, kept:** hand, discard, exhaust, draw pile contents, draw pile positions the player saw being set (cards put on top/bottom, tracked by `src/Runtime/FairDrawPileKnowledge.cs` and forgotten on shuffles or random inserts), HP, block, energy, stars, gold, powers, orbs, relics and relic counters, potions, enemy displayed moves, enemy move history and the history-derived counters the AI uses.
-> - **Hidden, resampled from OS entropy:** all run RNG streams (shuffle, card/potion/orb generation, card selection, energy costs, targets, monster AI, niche, and the non-combat ones), the unknown part of the draw order, future enemy move rolls and the intent forecast.
-> - **Hidden, disabled:** potion reward forecast (reads the reward RNG and drop odds) and the Windows pre-combat forecast API.
-> - Deployment replans whenever an action rolled RNG or drew from the draw pile; turn-start route reuse is off because predicted hidden state never matches, and turn-start choices predicted by the previous turn's route are not replayed. A turn-start choice page (Gambling Chip, Toasty Mittens, Tools of the Trade, …) is planned from the pre-draw root whose simulated draws are forced to the cards that turn's draw already revealed, in draw order, including cards drawn after a reshuffle (`FairObservation.RevealedSetupDraws`, `CombatPredictionSimulator.RevealUpcomingDraws`; the fairness check below asserts the conditioned root draws the live hand with and without a reshuffle). If a revealed card did not end in the hand the page is left to the player (`TURN_SETUP_DRAW_UNCONDITIONED` in the log).
-> - Online statistics are off by default (new settings key `fairForkOnlineStatisticsEnabled`, so an old upstream opt-in is not inherited).
-> - Fairness check (Linux, no game window): build the mod and `tools/search/OfflineSearchHarness`, then run `OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS=1 dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll --character SILENT --encounter KNIGHTS_ELITE --milestone M1 --budget-ms 120000 --beam 20 --nodes 1500 --dop 1 --out .local/fair/check`. It builds a second hidden world (rotated draw order, new run seed string and run RNG streams, new player RNG streams and odds, new per-monster and encounter RNGs; displayed intents and move history unchanged), asserts the sanitized roots are bit-identical for the same sampler seed, asserts identical chosen routes across both worlds for every sampler seed, and asserts no search consumed any live RNG. `OFFLINE_HARNESS_FAIR_EXTRA_CARDS=TRUE_GRIT,STOKE,...` adds random-effect cards to the opening hand to cover more of the game's RNG call sites. It also asserts the multi-sample planner makes the identical decision (same action and same candidate scores) in both hidden worlds. It also runs a multi-sample decision whose inherited memory-pressure signal is set to an exhausted limit and asserts no in-search reclaim, no No-GC region and no forced collection happened.
-> - **Multi-sample planner.** The planner has one fixed decision path; the only setting is **Calculation speed** (`speed` in `combat_solver_settings.json`: `Fast`, `Normal` (default), `Thorough`; Settings > Performance). Older keys in that file (performance presets, custom budgets, parallelism, No-GC, potion/growth/relic/boss strategies, HP-loss stop, potion-reward foresight, `fairPlanner*`) are ignored on load and dropped on the next save. Speed sets the sample count, candidate count, per-sample beam width, node cap and per-solve safety budget: Fast 8 / 3 / 16 / 800 / 2.5 s, Normal 12 / 4 / 20 / 1500 / 5 s, Thorough 16 / 5 / 24 / 2500 / 10 s (`FairPlannerSettings.For`). The rest adapts to the position: a turn with no playable card and no potion is one beam-1 solve; when every sample proposes the same segment no candidate re-scoring runs; the committed prefix grows only while all samples agree; each solve is cancelled after 4× its budget (minimum 8 s). At each decision the samples are seeded from a hash of the sanitized, player-visible root (same visible state, same samples, same decision; the fairness check asserts the seed and the decision are identical across hidden worlds and across parallelism). Each sample's own best route is cut into a segment at the first action after which that sample's RNG streams or draw pile change (or at EndTurn, or before a generated-choice action); the most-proposed distinct segments are scored in every sample by re-planning with the segment fixed, and compared on paired differences over the samples where all candidates are valid (a solve that hits the safety limit counts as the worst utility seen in that sample, not as missing). Utility is −HP lost, −200 on death, −0.25×enemy HP if unfinished. Candidates within one standard error of the paired difference, or within 1 HP, are ties broken by lower death rate, lower enemy HP after the segment, more proposals, then candidate key. The whole segment is deployed, extended while every sample's route for the chosen segment agrees on the next same-turn action; deployment still stops at any reveal and replans. Every time-limited solve is counted as `safety_stops` in `MULTI_SAMPLE_DECISION`, which also logs `speed`, `allocated_mb` and `gc_pause_ms`. The portfolio, novelty and route-cache paths are not used in this mode. A candidate is eligible when valid in at least 3/4 of the samples. Choices among options the RNG generates on use (Discovery, Attack/Skill/Power/Colorless potions) are not part of the candidate: each sample scores the best of its own options, and at deployment the real screen is answered with the same card if offered, else the highest-rarity option, before replanning. Potions are always used by the Smart policy, Act 1–3 bosses use progression-first HP valuation, growth/relic allowances are zero and post-combat potion rewards are not foreseen; the strategy side panels and the theft-policy buttons are gone.
-> - **GC:** a fair decision runs its parallel sample solves under the ordinary collector: no No-GC region (the turn-start choice search keeps the fixed 16 GB No-GC region unless the server-GC profile is active) and no in-search memory checkpoints (`FairDecisionPlanner.EnterGcScope`, `IsolatedPolicy`). The upstream checkpoint projects every byte allocated since the search started as resident memory; twelve bounded sample solves allocate 1–10 GB of short-lived garbage per decision, so the projection crossed the 16 GB budget or the system-memory limit and every checkpoint forced a blocking collection, which made decisions randomly 5–20× slower in real play (and raced the shared No-GC region between parallel solves). The server-GC launch profile also writes `System.GC.DynamicAdaptationMode=0` (DATAS off; .NET 9 otherwise shrinks the heap count and runs ~9x more gen0/gen1 collections during fair decisions).
-> - Benchmark (offline, plays whole fights against the real hidden state): `python3 -B tools/search/OfflineSearchHarness/run_fair_benchmark.py --set bench --workers 4 --variant '{"name":"v2-normal","mode":"v2","env":{"OFFLINE_HARNESS_FAIR_SPEED":"Normal"}}'`. `OFFLINE_HARNESS_FAIR_SPEED` picks the same speed level as the game; the offline per-solve budget comes from `--budget-ms` (benchmark default 60 s) so results do not depend on host load. `OFFLINE_HARNESS_FAIR_DETERMINISM=1` repeats every decision at parallelism 3 and counts `determinismMismatches`. Modes: `v2` (the planner) and `clairvoyant` (upper bound, live RNG and draw order). Pass `--no-gc-region-budget-gigabytes 16` to match the game's default budget; adding `"DOTNET_GCHighMemPercent":"A"` to the variant env makes the host look memory-constrained, the condition under which the old in-search reclaim made decisions slow. The `bench` set is 5 characters × {Nibbits, Snapping Jaxfruit, Ruby Raiders, Bygone Effigy, Byrdonis, Phrog Parasite} × A0/A10 × 2 seeds with starter decks; results go to `.local/fair-bench/<set>/<variant>/summary.json`.
+This mod plans Slay the Spire 2 single-player fights using only what the player can see.
 
-Combat Solver 是一个面向《杀戮尖塔 2》单人模式的战斗路线求解器。进入战斗后，它会在后台模拟当前手牌、牌堆、敌人行动、药水、遗物、选牌和跨回合状态，并在预算范围内给出推荐路线、预计战损与关键行动。
+It is a fork of [Combat Solver](https://github.com/Torch1230/CombatSolver) (branch `fair-mode`, version `0.50.1+fair.1`, mod id still `CombatSolver`). Upstream copies the game's hidden RNG, draw order and enemy rolls into its search. This fork keeps the visible state and resamples everything hidden before each decision (`src/Runtime/FairObservation.cs`). The full upstream guide, in Chinese, is the README on `main`.
 
-玩家可以只查看建议，也可以让求解器执行当前回合，或连续接管整场战斗。搜索不会修改游戏 RNG，也不会在后台操作真实战斗状态。
+## What the solver sees
 
-**参与开发：** [社区任务入口](https://github.com/Torch1230/CombatSolver/issues/171)按每批五个主题发布故障修复与路线优化任务，每主题一至两个 0.47.x 代表包。[贡献指南](CONTRIBUTING.md)说明整批认领与 PR 流程，[夹具与脚手架指南](docs/community/testing-guide.md)说明差分、包回放与策略实验入口。
+- **Kept:** hand, discard, exhaust, draw pile contents, draw pile positions the player saw set (forgotten on a shuffle or random insert), HP, block, energy, stars, gold, powers, orbs, relics and their counters, potions, enemy intents and move history.
+- **Resampled each decision:** every RNG stream, the unknown part of the draw order, and future enemy moves.
+- **Turned off:** the potion reward forecast and the pre-combat forecast API.
 
-当前已发布版本为 **0.48.0**：包含社区修复、复杂战斗优化和原版回血剪枝。详见 [更新日志](docs/releases/0.48.0-RELEASE_NOTES.md)。
+After any action that rolls RNG or draws a card, the solver plans again from what is now visible.
 
-**English UI:** Set the game language to English and restart the game. CombatSolver provides a recommended route; use **Play turn** for one turn or **Auto: On** for continuous play. Configure potions, growth and search budgets in the overlay. **Settings > Reports > Upload report** submits a bug report. Logs, raw errors and some detailed diagnostics retain their original text. Single-player only.
+## How it decides
 
-界面跟随游戏语言：简体/繁体中文使用现有中文文案，其他语言使用英文。简化版不提供独立语言开关；卡牌胶囊、选牌和相关悬停说明支持运行中切换语言，其他既有窗口可通过重启统一刷新。
+Each decision draws several possible hidden worlds, plans in each, and plays the next few actions that score best across all of them. The samples are seeded from the visible state, so the same position always gives the same decision. Potions always use the Smart policy.
 
-## 主要功能
+## Install
 
-- **跨回合搜索**：继续预测抽牌、洗牌、敌人行动、持续状态和后续资源，而不是只计算眼前一回合。
-- **路线与战损展示**：按回合展示出牌、目标、选牌、药水、结束回合和关键遗物触发，并显示当前路线的预计整场战损。
-- **三种使用方式**：仅查看路线、执行本回合、连续全自动。搜索期间可以立即停止，并暂停本场后续自动搜索。
-- **原生选牌流程**：开局选牌、回合开始选牌以及抽弃牌等操作继续使用游戏原生页面和动画；求解器在页面出现后计算并展示计划。
-- **跨回合路线复用**：实机状态与预测一致时直接沿用既有路线，只有状态发生实际变化时才重新搜索。
-- **固定用药**：药水一律按智能策略使用，不再提供逐瓶强制或保护。
-- **局外成长**：不再提供成长、遗物计数与幕末 Boss 策略侧栏；成长额度固定为 0，同等战损下仍优先获取收益。
-- **计算速度**：唯一的计算量设置，分快速、标准（默认）、深入三档；样本数、候选数与每个样本的搜索量随档位与局面自动调整。
-- **界面与通知**：默认使用深色界面，可切换浅色模式并调整覆盖层透明度；搜索结束可按设置发送 Windows 系统通知和提示音。
-- **问题反馈**：可以从设置中直接上传问题包，也可以导出到本地后手动提交。问题描述会附带本场自动分类，便于定位更优路线、计划外重算、执行中止和搜索失败。
-- **在线统计**（公平分支默认关闭）：开启后每 30 秒向作者发送随机安装标识、昵称、角色、楼层、当前战斗、预计战损和版本，可在设置中关闭；不上传完整路线，离线后清除昵称和战斗详情，保留历史人数及安装标识对应的累计在线时长。详见 [统计字段与关闭方式](docs/ONLINE_STATISTICS.md)。
+Needs Slay the Spire 2 `0.111.0` or later and [RitsuLib](https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295) `0.6.0` or later. Put these files in the game's `mods/CombatSolver/`:
 
-## 工作方式
-
-1. 游戏完成发牌并进入稳定的玩家操作阶段后，Combat Solver 在主线程捕获一次战斗根状态。
-2. 后台搜索只操作该根状态派生出的独立模拟分支，推进卡牌、牌堆、RNG、怪物 AI、药水、遗物和跨回合效果。
-3. 搜索结果转换为只读路线快照并显示在覆盖层中，不会因为展示路线而操作真实战斗。
-4. 玩家选择执行后，Mod 通过游戏原生入口依次完成计划动作；实际状态偏离预测时停止复用并重新搜索。
-
-这一设计把“预测”和“实机执行”分开：后台线程不能读取持续变化的实机值，模拟分支也不能修改真实战斗。
-
-## 战前预测 API（面向 Mod 开发者）
-
-该接口从 `0.31.2` 起提供，当前公开 API 版本为 v6。v5 的确定预测与假设样本入口保持兼容；使用规划快照入口的伴生 Mod 应依赖包含 v6 的 CombatSolver 构建。
-
-`CombatSolver.Api.PreCombatForecastApi` 为地图信息类 Mod 提供公开的战前预测入口。调用方在游戏主线程提交当前单人跑局、已确定的 `EncounterModel`、目标楼层及房间/地图节点类型；API 返回预计整场战损、所选路线中的药水动作、搜索边界、可信度、结束回合和诊断日志位置。
-
-该入口不会在当前游戏进程中建立战斗。它先序列化完整跑局并生成不透明状态令牌，再启动 Combat Solver 独占的 Windows headless 游戏进程；子进程加载与主进程完全一致的 Mod 集合，在独立用户目录中精确恢复跑局、核对规范化快照、进入目标战斗并复用现有求解器。Combat Solver 会在主进程初始化期间用独立文件副本保存本次会话实际选择的 Mod 文件；Steam 在游戏运行中更新工坊目录时，worker 仍加载主进程已经载入的版本。API v6 会在每次请求完整回到主菜单且后台活动归零后复用同一进程；默认空闲两分钟后关闭，调用方也可把期限改为其他值、用 `null` 一直维持、调用 `StopWorkerAsync()` 立即关闭，或要求请求完成后自动关闭。调用方可以读取 PID、工作集和私有内存，手动重启/预热，并在 worker 已经待命时立即重设空闲期限。隔离设置会把主音量、BGM、音效与环境音强制为零。结果返回前，主进程再次比较活动跑局、战斗状态和完整令牌；任一状态或 RNG 变化都会返回 `LiveStateChanged`，不会发布过期结果。
-
-`SimulateAsync` 提供独立的纯模拟入口：调用方从当前幕原生遭遇池选择怪组并提供样本种子，worker 在精确恢复当前跑局之后，只在隔离进程中替换怪物组成/生命、开局洗牌、怪物行动和其他战斗相关 RNG。它使用当前牌组、遗物、药水与生命评估假设战斗，不代表尚未确定的远处战斗结果。
-
-`SimulatePlanningAsync` 用调用方提供的独立 `SerializableRun` 作为 worker 的实际跑局状态，同时用当前跑局只捕获 Mod/游戏环境并在返回前验证 live 状态未变化。这样地图规划可以把已计划的牌、生命、药水和地图修改带入战斗模拟；它接受问号点和原生事件战斗，并在主线程按目标坐标确定第二首领标记。规划存档必须属于同一幕、种子、角色和玩家身份，失败或过期结果不会写回主跑局。
-
-最小调用方式：
-
-```csharp
-if (PreCombatForecastApi.IsAvailable)
-{
-    PreCombatForecastResult result = await PreCombatForecastApi.ForecastAsync(
-        run,
-        encounter,
-        targetActFloor,
-        targetMapColumn,
-        PreCombatRoomKind.Normal,
-        PreCombatMapPointKind.Normal);
-}
 ```
-
-当前 API 版本为 `6`，仅支持 Windows、单人跑局和未处于战斗中的状态。首次请求需要建立隔离游戏镜像并启动进程，适合由地图信息类 Mod 异步调用。相同状态与目标的确定请求会复用运行中任务或已完成结果；显式假设样本和规划快照模拟不进入确定结果缓存。`SetWorkerIdleTimeoutAsync()` 与请求选项中的 `WorkerIdleTimeoutMilliseconds` 控制当前及后续 worker 的空闲期限，`null` 表示不自动关闭。
-
-确定预测的 `ForceRefresh=true` 同时绕过已完成结果缓存与正在运行的同参数任务；是否取消 worker 仍由 `CancelWorkerWhenCallerCancels` 独立控制。正在运行的请求仅在关闭标志与空闲期限一致时共享任务。已完成结果仍可跨生命周期选项复用，但缓存命中也会落实本次关闭/空闲设置；需要等待其他请求释放 worker 时，在安全空闲边界处理，不取消其他调用方的搜索。
-
-## 第三方角色适配
-
-主项目开发与社区任务面向原版游戏内容，不主动实现修改游戏内容的第三方 Mod 适配。已有登记入口供第三方作者维护自己的适配层。
-
-`0.31.3` 合入 PR #50–#55，提供第三方 Power 战略估值、药水玩家选择与牌堆可选弃牌入口，并补充未镜像可打出条件的覆盖提示。使用这些入口的适配 Mod 应将 CombatSolver 最低依赖设为 `0.31.3`。
-
-各角色的具体战斗效果由适配层实现与验证。登记方式、分支状态要求和验证方法见 [第三方 Mod 适配手册](docs/third-party/README.md)。
-
-## 安装与兼容性
-
-运行要求：
-
-- 《杀戮尖塔 2》`0.111.0`
-- [RitsuLib](https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295) `0.6.0` 或更高版本
-- 单人战斗模式
-
-推荐通过 Steam 创意工坊订阅。使用 GitHub Release 手动安装时，在游戏目录的 `mods/CombatSolver` 下放置以下文件：
-
-```text
 CombatSolver.dll
 CombatSolver.json
 CombatSolver.MemoryCleaner.exe
@@ -104,92 +28,62 @@ LICENSE
 THIRD_PARTY_NOTICES.md
 ```
 
-启用 RitsuLib 和 Combat Solver 后进入一场单人战斗。等待发牌和回合开始效果结算，路线面板会自动显示搜索进度和结果。
+Enable RitsuLib and Combat Solver, then start a single-player fight. The route panel appears once the turn starts. **Play turn** runs one turn; **Auto: On** plays the fight. The UI is in Chinese when the game is, English otherwise.
 
-## 操作与设置
+## Settings
 
-路线面板提供三个主要入口：
+Settings live in `combat_solver_settings.json` and in the in-game Settings panel. The one search setting is **Calculation speed** (`speed`):
 
-- **重新计算**：从当前实机状态开始一次新搜索，并恢复本场自动搜索。
-- **执行本回合**：只执行计划中的当前回合；进入下一回合选牌页面后将控制权交还玩家。
-- **全自动**：连续搜索、执行并结束回合，直到战斗结束、玩家停止或安全复核阻止继续执行。
+| Speed | Samples | Candidates | Beam | Nodes | Time per solve |
+|---|---:|---:|---:|---:|---:|
+| `Fast` | 8 | 3 | 16 | 800 | 2.5 s |
+| `Normal` (default) | 12 | 4 | 20 | 1,500 | 5 s |
+| `Thorough` | 16 | 5 | 24 | 2,500 | 10 s |
 
-搜索期间，“执行本回合”位置会变为红色的“停止计算”。停止后，后续回合不会主动搜索，直到玩家点击“重新计算”。
+Online statistics are off unless `fairForkOnlineStatisticsEnabled` is true. Older upstream keys (presets, budgets, parallelism, potion and growth strategies) are ignored and dropped on the next save.
 
-设置页分为三类：
+## Build
 
-| 分类 | 内容 |
-| --- | --- |
-| 常规 | 求解器开关、自动执行、搜索结束通知、深色/浅色主题、覆盖层透明度和出牌间隔 |
-| 性能 | 计算速度（快速、标准、深入） |
-| 反馈 | 诊断日志、联系方式、在线上传和本地导出 |
+Needs the .NET 9 SDK and the game installed through Steam.
 
-深色主题和 `100%` 透明度为默认设置。主题及透明度调整会立即应用，不需要重新进入战斗。
-
-## 计算速度
-
-公平分支只有一条固定决策路径，唯一的计算量设置是“计算速度”。档位决定每次决策的隐藏信息样本数、候选数，以及每个样本的 Beam 宽度、节点上限和单次求解的安全时间上限；其余预算按局面自动调整。
-
-| 档位 | 样本 | 候选 | Beam | 节点 | 单次求解上限 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 快速 | `8` | `3` | `16` | `800` | `2.5s` |
-| 标准（默认） | `12` | `4` | `20` | `1,500` | `5s` |
-| 深入 | `16` | `5` | `24` | `2,500` | `10s` |
-
-性能预设、自定义预算、并行度、NoGC 开关与预算、多核内存回收开关、药水/成长/遗物/幕末 Boss 策略、战损早停阈值和战后药水预知均已移除，旧配置文件中的这些键在读取时被忽略。回合开始选牌搜索固定使用原中档预算、按处理器数量选择的并行度和 `16 GB` NoGC 区域（多核内存回收生效时不建立区域）；[搜索内存优化启动配置](docs/archive/performance/server-gc-launch-profile-20260924.md)始终准备，下次从 Steam 启动生效，退订前不会自动恢复启动文件。
-
-## 求解目标与边界
-
-智能用药先建立无可选药水的路线作为基线，省血收益达到药水机会成本后才考虑使用。跨搜索成员的合规路线统一比较整场战略战损与可选药水成本之和，再比较成长、结束回合与消耗数量。必要获胜、保留复活资源、追回资源和明确强制用药按各自策略处理；药水保护继续限制可用动作。药水补搜与后续优化共享同一请求预算。
-
-Combat Solver 使用受时间、节点和内存预算约束的 Beam Search。它展示的是当前预算内找到的最佳路线，不承诺数学意义上的全局最优解。路线视野没有固定回合数或洗牌次数上限，但循环检测、状态合并和预算终止仍会限制实际搜索范围。
-
-当前目标是覆盖 `0.111.0` 的单人战斗内容。运行时遇到尚未支持的新版本或第三方战斗语义时，求解器会明确停止在不支持边界，不会把未完成模拟误报为胜利。多人模式、局外流程和第三方 Mod 的自定义战斗效果不在通用兼容范围内。
-
-详细覆盖情况见 [战斗 Hook 覆盖报告](docs/COMBAT_HOOK_COVERAGE.md) 与 [适配验证记录](docs/ADAPTATION_VERIFICATION.md)。
-
-## 开发
-
-项目使用 C#、.NET 9 和 Godot。Windows 构建命令：
-
-```powershell
-pwsh -NoProfile -File tools/build/build-local-stack.ps1 -Configuration Release
 ```
-
-Linux 构建命令：
-
-```bash
 ./tools/build/build-local-stack.sh --configuration Release
+pwsh -NoProfile -File tools/build/build-local-stack.ps1 -Configuration Release    # Windows
 ```
 
-构建脚本会探测常见 Steam 安装路径。自动探测不适用时，复制 `local.props.example` 为 `local.props` 并配置本机路径；不要提交个人绝对路径。
+The build finds Steam in its usual places. If it can't, copy `local.props.example` to `local.props` and set `SteamRoot`.
 
-开发前建议先阅读：
+## Check fairness
 
-- [文档总目录](docs/README.md)：当前指南、版本日志和各专题索引
-- [架构与职责地图](docs/ARCHITECTURE.md)
-- [开发记录](docs/DEVELOPMENT_NOTES.md)
-- [测试矩阵](docs/TEST_MATRIX.md)
-- [重构路线](docs/refactoring/refactor-roadmap.md)
+The offline harness plays fights without opening the game:
 
-Windows 和 Linux 的无人测试入口分别为 `tools/testing/run-unattended-test.ps1` 与 `tools/testing/run-unattended-test.sh`。测试会启动隔离的游戏 `--headless` 进程；涉及真实布局、动画、输入和性能的结论仍需在可见 Steam 会话中验证。
+```
+dotnet build CombatSolver.csproj -c Release -p:CopyModOnBuild=false
+dotnet build tools/search/OfflineSearchHarness/OfflineSearchHarness.csproj -c Release
+OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS=1 dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll \
+  --character SILENT --encounter KNIGHTS_ELITE --milestone M1 --budget-ms 120000 --beam 20 --nodes 1500 --dop 1 --out .local/fair/check
+```
 
-## 问题反馈
+It builds a second world with different hidden state and asserts that both give the same decisions and that no search touched the live RNG.
 
-遇到错误路线、计划外重算、自动执行异常或搜索失败时，请在设置的“反馈”页使用“上传问题包”。上传内容会附带 Combat Solver 版本和本场自动分类；服务器与后端由社区贡献者 [iRyougi](https://github.com/iRyougi) 提供支持。
+To benchmark whole fights against the real hidden state:
 
-也可以使用“导出问题包”将完整包保存到桌面的 `CombatSolver-BugReports`，再通过项目维护者提供的反馈渠道提交。问题包中的日志、战斗状态和自动分类通常比单张截图更适合复现搜索问题。
+```
+python3 -B tools/search/OfflineSearchHarness/run_fair_benchmark.py --set bench --workers 4 \
+  --variant '{"name":"v2-normal","mode":"v2","env":{"OFFLINE_HARNESS_FAIR_SPEED":"Normal"}}'
+```
 
-## 开源、许可与代码来源
+Results go to `.local/fair-bench/<set>/<variant>/summary.json`. Mode `clairvoyant` plays with the hidden state visible, as an upper bound.
 
-Combat Solver 的内置战斗模拟核心使用并改造了 Random Foreseer 的部分实现。Random Foreseer 由 **hotwords123** 创建，当前采用 MIT License。
+## Harness environment
 
-相关来源关系持续存在于当前版本，涉及战斗状态、牌堆、RNG、Fork、History 与 Mirror 等基础逻辑。Combat Solver 在此基础上持续重构并扩展了跨回合搜索、路线复用、自动执行、原生选牌流程和性能控制。Combat Solver 不加载或分发 Random Foreseer 程序集作为运行时依赖；运行时分离不改变上述代码来源关系。
+| Variable | Effect |
+|---|---|
+| `OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS=1` | run the fairness assertions |
+| `OFFLINE_HARNESS_FAIR_EXTRA_CARDS=A,B,...` | add random-effect cards to the opening hand |
+| `OFFLINE_HARNESS_FAIR_SPEED` | `Fast`, `Normal` or `Thorough` |
+| `OFFLINE_HARNESS_FAIR_DETERMINISM=1` | repeat each decision at parallelism 3 and count mismatches |
 
-- [Random Foreseer GitHub 仓库](https://github.com/hotwords123/StS2.RandomForeseer)
-- [Random Foreseer 创意工坊页面](https://steamcommunity.com/sharedfiles/filedetails/?id=3747531952)
-- [Combat Solver GitHub 仓库](https://github.com/Torch1230/CombatSolver)
+## License and credit
 
-感谢 hotwords123 与 Random Foreseer 所做的工作。来源关系、署名和早期书面许可记录见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，并随每个二进制发布包提供。
-
-Combat Solver 采用 [MIT License](LICENSE)。Random Foreseer 的版权署名及代码来源关系保留在 `LICENSE` 与 `THIRD_PARTY_NOTICES.md` 中。
+MIT ([LICENSE](LICENSE)). The combat simulation core adapts parts of [Random Foreseer](https://github.com/hotwords123/StS2.RandomForeseer) by hotwords123, also MIT; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which ships with every release.
