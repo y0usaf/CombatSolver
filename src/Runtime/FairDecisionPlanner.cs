@@ -286,11 +286,21 @@ internal static class FairDecisionPlanner
         if (proposals.Length > 1)
         {
             int[] extra = new int[sampleCount];
+            // The per-solve budget bounds one solve, but a decision runs the own pass plus up to
+            // (candidates-1) comparison solves per sample; on a loaded machine each solve can also
+            // overrun its soft budget, and the observed live decisions reached 16-18 s at Normal.
+            // Stop launching new comparisons once the decision has spent its solve budget and keep
+            // what the own pass proposed; an unevaluated pair stays unavailable rather than being
+            // replaced by a fabricated worst-case value.
+            Stopwatch comparisonClock = Stopwatch.StartNew();
+            long comparisonBudget = settings.SolveBudgetMilliseconds;
             Parallel.For(0, sampleCount, parallel, sample =>
             {
                 for (int candidate = 0; candidate < proposals.Length; candidate++)
                 {
                     if (string.Equals(ownKeys[sample], proposals[candidate].Key, StringComparison.Ordinal))
+                        continue;
+                    if (comparisonClock.ElapsedMilliseconds >= comparisonBudget)
                         continue;
                     PlanAction action = proposals[candidate].Action;
                     if (!HasRevealedChoice(action)
