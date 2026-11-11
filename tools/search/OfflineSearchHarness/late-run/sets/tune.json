@@ -1,0 +1,10 @@
+{
+  "set": "tune",
+  "note": "Tuning half of the late-run fixture: used to reproduce the slow decisions and to screen candidates. Not a held-out score.",
+  "positions": [
+    "late-ir-decmil-t1-a.json",
+    "late-ir-decmil-t1-b.json",
+    "late-ir-decmil-t2-a.json",
+    "late-ir-decmil-t2-b.json"
+  ]
+}

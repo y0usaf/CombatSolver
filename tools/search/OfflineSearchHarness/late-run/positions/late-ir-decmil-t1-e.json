@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "LATE-IR-DECMILLIPEDE-T1-E",
+  "characterId": "IRONCLAD",
+  "encounterId": "DECIMILLIPEDE_ELITE",
+  "seed": "LATE-IR-DECMILLIPEDE-T1-E",
+  "ascension": 10,
+  "actIndexForTest": 1,
+  "initialPlayerHp": 58,
+  "initialPlayerMaxHp": 90,
+  "initialPlayerBlock": 10,
+  "initialPlayerEnergy": 3,
+  "initialPlayerStars": 0,
+  "initialRoundNumber": 1,
+  "initialPlayerTurnNumber": 1,
+  "initialEnemyMaxHps": [
+    42,
+    40,
+    46
+  ],
+  "initialEnemyCurrentHps": [
+    32,
+    22,
+    30
+  ],
+  "initialEnemyBlocks": [
+    0,
+    0,
+    0
+  ],
+  "initialEnemyMoveIds": [
+    "CONSTRICT_MOVE",
+    "WRITHE_MOVE",
+    "BULK_MOVE"
+  ],
+  "clearPlayerHand": true,
+  "clearPlayerPiles": true,
+  "clearRunDeck": true,
+  "clearAllPowers": true,
+  "runCards": [
+    {
+      "cardId": "HAVOC",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "HAVOC",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "HELLRAISER",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "DEADLY_POISON",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "BASH",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "ANGER",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "FEEL_NO_PAIN",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "IMPATIENCE",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "AGGRESSION",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "RAGE",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "INFLAME",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "INFLAME",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "DARK_EMBRACE",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "POISONED_STAB",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "DEFEND_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "DEFEND_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "DEFEND_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "DEFEND_IRONCLAD",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "CLUMSY",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "PROWESS",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "PECK",
+      "upgradeLevels": 0
+    },
+    {
+      "cardId": "DOMINATE",
+      "upgradeLevels": 0
+    }
+  ],
+  "potions": [
+    {
+      "potionId": "EXPLOSIVE_AMPOULE"
+    }
+  ],
+  "cards": [
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "pile": "Hand"
+    },
+    {
+      "cardId": "ANGER",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "FEEL_NO_PAIN",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "IMPATIENCE",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "AGGRESSION",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "RAGE",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "INFLAME",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "DARK_EMBRACE",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "POISONED_STAB",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "DEFEND_IRONCLAD",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "DEFEND_IRONCLAD",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "CLUMSY",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "DEFEND_IRONCLAD",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "INFLAME",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "PROWESS",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "PECK",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "DOMINATE",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "HAVOC",
+      "pile": "Draw"
+    },
+    {
+      "cardId": "HAVOC",
+      "pile": "Discard"
+    },
+    {
+      "cardId": "HAVOC",
+      "pile": "Discard"
+    },
+    {
+      "cardId": "STRIKE_IRONCLAD",
+      "pile": "Discard"
+    },
+    {
+      "cardId": "DEADLY_POISON",
+      "pile": "Exhaust"
+    },
+    {
+      "cardId": "BASH",
+      "pile": "Exhaust"
+    }
+  ],
+  "powers": [
+    {
+      "powerId": "HELLRAISER_POWER",
+      "target": "Player",
+      "amount": 1
+    },
+    {
+      "powerId": "REATTACH_POWER",
+      "target": "Enemy",
+      "targetIndex": 0,
+      "amount": 25
+    },
+    {
+      "powerId": "POISON_POWER",
+      "target": "Enemy",
+      "targetIndex": 0,
+      "amount": 10
+    },
+    {
+      "powerId": "REATTACH_POWER",
+      "target": "Enemy",
+      "targetIndex": 1,
+      "amount": 25
+    },
+    {
+      "powerId": "VULNERABLE_POWER",
+      "target": "Enemy",
+      "targetIndex": 1,
+      "amount": 2
+    },
+    {
+      "powerId": "REATTACH_POWER",
+      "target": "Enemy",
+      "targetIndex": 2,
+      "amount": 25
+    }
+  ],
+  "timeoutSeconds": 900,
+  "potionPolicyForTest": "Smart",
+  "fixedSearchBudget": true,
+  "searchBudgetOverrideMilliseconds": 5000,
+  "deploymentFastModeForTest": "Instant",
+  "deploymentInterActionDelaySecondsForTest": 0,
+  "decisionTurns": 2,
+  "source": {
+    "log": "CombatSolver/17023-50f787e24bfc4ce5ad73240304a33826/combat-f9233ec8095640f2b20daa76a5752b72.jsonl",
+    "generation": 228
+  }
+}

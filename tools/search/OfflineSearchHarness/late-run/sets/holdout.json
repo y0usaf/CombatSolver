@@ -1,0 +1,11 @@
+{
+  "set": "holdout",
+  "note": "Held-out half of the late-run fixture: never used to choose candidates or settings. Only scored.",
+  "positions": [
+    "late-ir-decmil-t1-c.json",
+    "late-ir-decmil-t1-d.json",
+    "late-ir-decmil-t1-e.json",
+    "late-ir-decmil-t1-g.json",
+    "late-ir-decmil-t2-c.json"
+  ]
+}
