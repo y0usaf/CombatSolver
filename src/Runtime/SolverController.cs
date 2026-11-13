@@ -580,6 +580,7 @@ internal static partial class SolverController
             "combat_start",
             $"auto={_combat.FullAutoEnabled.ToString().ToLowerInvariant()} " +
             $"requested={SolverSettings.Current.AutoPlay.ToString().ToLowerInvariant()}");
+        SolverOverlay.RefreshControls();
         DeployedCardIdsForTesting.Clear();
         DeployedPotionIdsForTesting.Clear();
         LastDeployedActionStartedAtMillisecondsForTesting = 0;
