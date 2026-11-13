@@ -17,9 +17,23 @@ internal sealed partial class UnattendedTestRunner
 
         private IDisposable? BeginGeneratedSetupChoices()
         {
+            if (runner._request.GameMode != GameMode.Standard) return null;
             if (_generatedScenario == null) return null;
             _generatedChoices = new(_generatedScenario.Options.SetupChoices);
-            return CardSelectCmd.PushSelector(_generatedChoices, localOnly: true);
+            return NativeTestCardSelectors.Push(_generatedChoices, localOnly: true);
+        }
+
+        private IDisposable? BeginModeSetupChoices()
+        {
+            if (runner._request.GameMode == GameMode.Standard) return null;
+            var request = runner._request;
+            if (request.StopAfterInitialSetupAssertion || request.ExpectedInitialSetupChoiceCountAtLeast != null
+                || request.VerifyInitialSetupWaitsForUserStart || request.VerifyTurnSetupManualRecalculate
+                || request.VerifyTurnSetupManualRefresh || request.VerifyTurnSetupControlsDuringInitialSearch
+                || request.VerifyTurnSetupSceneExitCancellation || request.ScenarioId.StartsWith("TURN-SETUP-UI-", StringComparison.Ordinal))
+                return null;
+            _generatedChoices = new(_generatedScenario?.Options.SetupChoices);
+            return MegaCrit.Sts2.Core.CardSelection.CardSelectorStack.SetTestSelector(_generatedChoices);
         }
 
         private void PrepareGeneratedScenario()

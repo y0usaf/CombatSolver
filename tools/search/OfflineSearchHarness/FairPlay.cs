@@ -113,7 +113,7 @@ internal static class FairPlay
             SoftTimeBudgetMilliseconds = options.BudgetMilliseconds,
         };
         BenchmarkSelector selector = new();
-        using IDisposable selectorScope = CardSelectCmd.PushSelector(selector, localOnly: true);
+        using IDisposable selectorScope = MegaCrit.Sts2.Core.Runs.RunManager.Instance.CardSelectorStack.UseLocalSelector(selector);
 
         PrepareState(combat, player, loop);
         int stopTurn = int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_STOP_TURN") ?? "41");

@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Rngs;
+using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
@@ -54,9 +55,14 @@ internal sealed class FairObservation
     public void ApplyToRoot(CombatPredictionSimulator simulator)
     {
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
-        combat.ResampleRootRandomness(simulator, RunRng);
         if (_keepDrawOrder)
+        {
+            combat.ResampleRootRandomness(simulator, RunRng, null);
             return;
+        }
+        combat.ResampleRootRandomness(simulator, RunRng, simulator.State.Players.ToDictionary(
+            player => player,
+            player => new Rng(_sampler.NextUnsignedLong()).CaptureState()));
         foreach (Player player in simulator.State.Players)
         {
             PlayerCombatState live = player.PlayerCombatState
@@ -78,7 +84,7 @@ internal sealed class FairObservation
             .Take(unknownCount)
             .OrderBy(ObservableKey, StringComparer.Ordinal)
             .ToList();
-        _sampler.Shuffle(unknown);
+        unknown.UnstableShuffle(_sampler);
         pile.Reorder([
             .. cards.Take(knowledge.KnownTop),
             .. unknown,

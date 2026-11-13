@@ -27,7 +27,7 @@
 
 常规 GC 搜索的系统余量、分配限额和 Gen2 回收由 Runtime 作用域持有，Search 只在排空后的提交边界消费压力信号。常规检查点刷新请求限额；不可分割提交通过显式退出将分配交给 CLR，下一请求重新建立限额。Runtime 在限额和诊断成功后登记作用域，入口失败释放信号并传播原异常；退出时按作用域清理计数和信号。
 
-`SearchGcRuntimeInfo` 在 Runtime 一次探测按类型查询 GC 信息的能力。具备完整信息时保留后台回收与完成索引核对；Mono 等运行库使用同步完整回收和弱引用完成哨兵。暂停观测通过压力信号传递为可空值，Search 消费实际观测并保留其他工作量；检查点及回收日志明确标记不可用的暂停统计。
+`SearchGcRuntimeInfo` 在 Runtime 一次探测按类型查询 GC 信息的能力。具备完整信息时保留后台回收与完成索引核对；检查点重建 NoGC 时直接请求一次压缩完整回收，确认新的压缩完成信息及释放的弱哨兵后才重建。Mono 等运行库使用同步完整回收和弱引用完成哨兵，不因 NoGC 可用而读取不支持的详细信息。暂停观测通过压力信号传递为可空值，Search 消费实际观测并保留其他工作量；检查点及回收日志明确标记不可用的暂停统计。
 
 ## 3. Search
 
@@ -40,6 +40,7 @@
 | `FrontierContinuationScheduler` | 固定前缀成员派发与用途归因 |
 | `CombatBeamSolver.cs` / `.Models.cs` | 不可变根配置、策略接线、节点和运行上下文 |
 | `.Phases.cs` / `.Expansion.cs` | Solve 阶段和动作回放入口 |
+| `CombatSearchCoordinator.BossTempo.cs` / `CombatBeamSolver.BossTempo.cs` | 首领追加额度、首回合偏差侦察、纯值前缀与后续搜索 |
 | `.ParallelExpansion.cs` / `.AdmittedExpansion.cs` | 固定 worker lane、已准入作业及确定性提交 |
 | `.PrimaryChoiceReplay.cs` | 原预算必经的首层选择回放与暂存 |
 | `.BeamRetentionPolicy.cs` | 去重、Beam、多样性、选择保路、药水配额与 Pareto |
@@ -64,9 +65,15 @@
 
 预览路线的采用回放持有请求级取消令牌，单轮搜索结束与用户取消请求分别判断。强制结束回合的卡牌动作只消费自身选择，后续回合选择由AdvanceRound持有。固定前缀在仍进行的稳定父状态继续，药水统一沿正式候选政策准入。
 
-`StrategicHpRecoveryBound` 在根快照中冻结回复环境资格，由 `.Remaining` 维护已审计来源闭包和分支剩余上界，未知来源保持无限上界。`.KnownSources` 单独提供当前原版已知来源策略，忽略尚未生成的随机药水回复；该策略资格不构成严格闭包证书。已有完整合规胜利可以沿既有 Retention 和组合成员入口提供界；主搜索之前的计划安排仍只对严格认证根开放，其余根保留原阶段顺序。
+`StrategicHpRecoveryBound` 在根快照中冻结回复环境资格，由 `.Remaining` 维护已审计来源闭包和分支剩余上界，未知来源保持无限上界。`.KnownSources` 单独提供当前原版已知来源策略，忽略尚未生成的随机药水回复；该策略资格不构成严格闭包证书。已有完整合规胜利可以沿既有 Retention 和组合成员入口提供界；严格组件根的后续计划也消费当前完整胜利，调用者保留胜利并按原质量政策择优。主搜索之前的计划安排仍只对严格认证根开放，其余根保留原阶段顺序。
 
 `.Components` 组合逐项审查的卡牌、生成池、Power、遗物、药水和敌人证明，并锁定审计的原生 MVID。Runtime 在稳定根捕获证书及拒绝原因；模拟状态只提供已捕获的战斗、永久牌组和全局监听前缀，不读取 live。资格随根冻结，分支上界重新检查牌堆、待返回牌、层数和用药记录，未知来源不调用已知来源估计来收紧无限界。Smart 的精确用药层及开局用药后续搜索复用同一节血门槛；完整无药胜利基线经既有 continuation 请求传递，成长、遗物、强制用药、资源追回和保命资源门禁仍保留。证书是搜索元数据，不进入战斗指纹或续用文本。
+
+Smart 药水梯度在主成员耗尽时间时拥有一个独立成员时间：仅对无强制指令、无显式用药的完整搜索结果和可搜索药水启用，首个可选层使用软预算的 1/5（1–30 秒）及 1/6 收尾窗口。梯度显式限制层数；后置开局前缀仍按请求账本准入。该成员的工作进入原请求总账本。
+
+首领成员在原请求的主搜和后处理完成后运行，按 `EncounterRoomType.Boss` 准入。节点和软时间分别追加原配置的1/5，工作累计到同一个请求账本。侦察最多使用追加额度的1/3，允许3次排序偏差，以深度优先枚举首回合边界；独立转置键包含完整状态与剩余偏差，六维支配标签沿原实现。边界回调只复制动作、状态键、消灭敌人数、用药数和中途排名，按用药档最多保留24个纯值前缀。有强制用药指令时，已兑现全部指令的前缀优先；随后按消灭敌人数、用药量及排名选取至多两个前缀，固定回放后由原Beam搜索完成后续，所有成员共享追加余量及纯值资源桶界。中途HP单次计价，侦察及后验均保留等损续路；最后只接纳安全完整胜利，沿既有结果政策取优。`Phases` 提供内存预约、进度、取消与接管边界，待处理快照由侦察成员释放。
+
+请求完成与中途接管的预算报告由 `SearchBudgetLedger.Capture` 持有，写入 `SolverResult.RequestBudget`。UI 用请求累计节点和预算边界生成统计与上限提示；各成员的节点数、停止原因和路线继续保留原诊断语义。该快照只属展示与诊断，搜索准入和结果比较沿原账本执行。
 
 ## 4. 模拟与 Prediction
 
@@ -79,6 +86,14 @@
 
 每项战斗语义只有一个权威结算实现。可变值由根快照、影子状态、克隆 Model 或 `PredictionStateStore` 持有。一次 Fork 共用 `PredictionForkContext`，引用随同一上下文重映射；COW 取得可写所有者后再写。
 
+`SteamEruptionPower.AfterDeath` 通过死亡 Hook 将洪流巨人切入无限生命阶段；复活个体在 Hook 完成后清理死亡 Power，攻击尾部继续插箭和施加减益。外层死亡清扫消费该阶段的结果。手动选牌续接在复制战斗状态前调用 `PrepareExecutionCardPlay`，使正在执行卡牌、`CardPlay` 与 Power 内引用沿同一个 Fork context 重映射。
+
+`CombatRulesSnapshot` 在根捕获冻结游戏模式、原生进阶集合及领域身份。生成池、变牌、怪物效果、缓存和续用消费同一快照。原生怪物的同步初始化与静态参数采集用 `NativeCombatRulesScope` 暂时提供该根的进阶查询；作用域按线程嵌套恢复，运行时补丁仅在该作用域内返回冻结值。领域和 RunModel 按原生顺序进入克隆监听表，战斗中可变状态沿现有 Power／StateStore 所有权维护。
+
+怪物受击效果通过 `ICombatPredictionMonsterStateSink.GetMonsterStaticInt` 消费同一份静态参数快照；模式相关数值由根捕获和召唤初始化提供，镜像沿既有 Power 施加、眩晕和移除顺序结算。
+
+`BeforeHandDrawMirrors` 与 `AfterCreatureAddedMirrors` 分别拥有抽牌前和生物入场的精确类型登记。Hook facade 冻结有序监听者并调用原有单项效果；抽牌前挂起选择通过既有执行帧恢复。知识诅咒的共用效果体由首领与领域分别提供候选、伤害和时机；敌方回合选择与玩家准备选择按 `PlanChoiceTiming` 区分。
+
 Fork 发生在动作、选牌、Power、死亡和出牌事务允许复制的稳定边界。玩家记录的卡牌/药水嵌套效果作用域由引擎持有；选牌检查点保存不可变身份序列，恢复建立分支独占列表。最外层效果结束后再检查手空。稳定根及跨回合状态的该作用域为空，普通 Fork 要求为空。
 
 未知 gameplay subscriber 显式拒绝；已支持来源在主线程捕获，并在分支中消费隔离状态。登记合同与封闭入口见 [第三方适配手册](third-party/README.md)。
@@ -87,7 +102,17 @@ Fork 发生在动作、选牌、Power、死亡和出牌事务允许复制的稳�
 
 回合末自动出牌先于 BeforeSideTurnEndEarly，PAELS_EYE 的手牌消耗由该 Hook 镜像拥有；额外回合资格在阶段结算后判断。部署会话区分动作、玩家结束／敌方阶段与下一玩家回合；最后一个结束阶段选择确认前解除旧会话归属。UI 的步骤和完成回调核对所属回合及当前路线快照。
 
-额外回合的判断与后置效果由 `ExtraTurnMirrors` 登记原版和第三方单项语义，`HookMirrors` 按原生监听顺序派发。后置回调使用固定成员快照，选牌暂停沿动作重放恢复；分支 Power 与帕尔之眼使用状态继续由 `SimulatedCombatState` 持有。
+额外回合的提前判断、普通判断与后置效果由 `ExtraTurnMirrors` 登记。`HookMirrors` 先遍历 Early，再遍历普通阶段；首个命中来源持有本次资格，后置仅调用该来源。选牌暂停沿动作重放恢复；分支 Power 与帕尔之眼使用状态由 `SimulatedCombatState` 持有。
+
+`RunModels` 在主线程根捕获时克隆，按原生顺序进入监听前缀，Fork 保持分支所有权。九条战斗 RNG 与每名玩家的 `NonCombatGeneration` 共用完整状态快照及惰性物化合同。`CombatCardOrdering` 按新版原生顺序比较逐实例状态，费用经分支 Hook 解析；模拟洗牌和搜索投影共用此入口。
+
+箭槽由 `SimPlayerCombatState` 持有；`ImpaledPower` 的有序箭引用经同一个 Fork context 重映射。`CombatPredictionSimulator.Arrows` 负责射击、插入、拔出和销毁，`ArrowMirrors` 派发原生箭 Hook。旋律 Started／Finished 计数和首次 CardPlay 身份由 `SimulatedCombatState.Melodies` 持有。`AimPowerMirrors` 保存攻击后仍有效的来源身份；`SimulatedCombatState.ShowOff` 保存成长 Power 对卡实例的引用。玩法 Dupe 持有分支原牌，包含离开牌堆的来源；Clone 与 Fork 分别保留原生玩法语义和分支隔离。
+
+`CardChoiceSupport.GetPotentialEffect` 提供开局选择类型；候选在实际出牌时构建并消费历史与 RNG。动态保留由 `CombatPredictedCardExtensions.ShouldRetainThisTurn` 合并分支关键词与逐实例单回合标记；指纹保存后者及已存在的关键词／Power 状态。回合准备的原版快捷路径与扩展 registry 共用 `TurnStartPowerSupport.ApplyBeforeSideTurnStartPower`，包含 Yah/Lullaby 复位；测试使用相同 Hook facade。
+
+监听参与位的 `AdditionalCallbacks` 汇集箭、额外回合及新伤害回调，按类型保守保留成员；各方法仍由精确 registry 或原有推断入口执行。`SolverDisplayNames` 和 UI 共用 `DingyDaggerDisplayNames` 的原生名称段，根冻结本地化规则后按实际等级格式化。
+
+伤害命令先修正伤害并触发伤害前 Hook，再经过 `ModifyPreBlockDamageTargetMirrors`、格挡及奥斯提转移。战宠生命、最大生命、格挡和关联遗物计数进入状态键与续用；战宠死亡后是否保留阵容由分支死亡语义判断。
 
 金币命令由 `GoldGainSupport` 串联标准镜像：修改使用跑局前缀和战斗监听表，获得后的回调使用原生 null-child 跑局作用域。`SimulatedCombatState.GoldHooks` 在主线程冻结活动成员与已克隆全局来源，Fork 只读共享；遗物、药水、金币和 HP 仍从所属分支读取。未知金币 override 显式拒绝。监听参与位图为三个金币方法共用一位，只形成保守成员超集，精确方法仍由 registry 区分；不溢出或复用其他 Hook 位。`CombatPredictionSimulator.GainMaxHp` 单独实现实际封顶增量与后续 Heal，Feed、FruitJuice 和 DragonFruit 共用这一权威入口。
 

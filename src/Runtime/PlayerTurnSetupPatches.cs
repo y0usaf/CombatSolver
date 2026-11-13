@@ -252,7 +252,7 @@ internal static class PlayerTurnSetupCoordinator
             || !ReferenceEquals(LocalContext.GetMe(manager.DebugOnlyGetState()), player)
             || player.PlayerCombatState == null
             || player.PlayerCombatState.Phase != PlayerTurnPhase.Start
-            || CardSelectCmd.Selector != null)
+            || MegaCrit.Sts2.Core.Runs.RunManager.Instance.CardSelectorStack.GetSelector(player) != null)
         {
             return false;
         }
@@ -1305,6 +1305,9 @@ internal static class PlayerTurnSetupCoordinator
     private static bool RequiresSolverChoice(Player player)
     {
         int turn = player.PlayerCombatState?.TurnNumber ?? 0;
+        if (turn <= 1 && player.Creature.CombatState is CombatState
+            { Dominion: MegaCrit.Sts2.Core.Models.Dread.Dominions.KnowledgeDemonDominion })
+            return true;
         if (player.Relics.Any(relic => !relic.IsMelted
                 && (relic is ToastyMittens
                     || turn <= 1 && relic is Toolbox or ChoicesParadox or GamblingChip)))

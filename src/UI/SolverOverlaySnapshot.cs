@@ -300,7 +300,7 @@ internal sealed record SolverOverlaySnapshot(
             turns,
             BuildDetails(result, startTurnNumber, alreadyLost, unmirrored, compensated, unexpectedReplan),
             hasRisk,
-            BuildSearchLimitWarning(result.BoundaryReason))
+            BuildSearchLimitWarning(SearchBoundaryForDisplay(result)))
         {
             PendingTurnSetup = pendingTurnSetup,
             RewardOutcomeText = RewardOutcome(result),
@@ -481,7 +481,7 @@ internal sealed record SolverOverlaySnapshot(
     }
 
     private static IReadOnlyList<string> FormatTurnStartChoices(IEnumerable<PlanCardChoice> choices)
-        => choices.Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
+        => choices.Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse || choice.Timing != PlanChoiceTiming.EnemyTurn)
             .Select(FormatTurnStartChoice)
             .ToArray();
 
@@ -511,6 +511,7 @@ internal sealed record SolverOverlaySnapshot(
             "TOASTY_MITTENS" => ModelDb.Relic<ToastyMittens>().Title.GetFormattedText(),
             "CHOICES_PARADOX" => ModelDb.Relic<ChoicesParadox>().Title.GetFormattedText(),
             "TOOLBOX" => ModelDb.Relic<Toolbox>().Title.GetFormattedText(),
+            "KNOWLEDGE_DEMON_DOMINION" => SolverText.Get("知识恶魔领域"),
             "GAMBLING_CHIP" => ModelDb.Relic<GamblingChip>().Title.GetFormattedText(),
             _ => ResolveDynamicChoiceSourceTitle(sourceId),
         };
@@ -545,7 +546,7 @@ internal sealed record SolverOverlaySnapshot(
             PlanChoiceEffect.Exhaust => SolverText.Get("耗尽"),
             PlanChoiceEffect.Transform => SolverText.Get("变换"),
             PlanChoiceEffect.MoveToHand or PlanChoiceEffect.MoveToHandFreeThisTurn => SolverText.Get("选择"),
-            PlanChoiceEffect.GenerateToHand or PlanChoiceEffect.ModDefined => SolverText.Get("选择"),
+            PlanChoiceEffect.GenerateToHand or PlanChoiceEffect.ModDefined or PlanChoiceEffect.ApplyKnowledgeCurse => SolverText.Get("选择"),
             PlanChoiceEffect.Upgrade => SolverText.Get("升级"),
             PlanChoiceEffect.Duplicate => SolverText.Get("复制"),
             _ => choice.Effect.ToString(),
@@ -568,7 +569,7 @@ internal sealed record SolverOverlaySnapshot(
             ? SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]搜索[/color]  战斗状态一致，恢复已记录路线  │  本次 0 节点")
             : result.WasReused
             ? SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]搜索[/color]  跨回合状态一致，复用既有路线  │  本回合 0 节点")
-            : SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]搜索[/color]  {result.ExpandedNodes} 节点  │  置换剪枝 {result.TranspositionBranchesPruned}  │  {result.TotalSearchElapsed.TotalMilliseconds:F0} ms");
+            : SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]搜索[/color]  {result.RequestBudget?.ExpandedNodes ?? (result.TotalExpandedNodes > 0 ? result.TotalExpandedNodes : result.ExpandedNodes)} 节点  │  {result.TotalSearchElapsed.TotalMilliseconds:F0} ms");
         List<string> detailLines =
         [
             searchDetails,
@@ -576,7 +577,7 @@ internal sealed record SolverOverlaySnapshot(
             SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]战损[/color]  本局已发生 {alreadyLost}  │  路线未来卖血 {result.FutureSoldHp}  │  本局累计卖血 {result.SoldHp}"),
             SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]药水[/color]  本局已喝 {result.BattlePotionsUsedSoFar} 瓶  │  路线还要用 {result.PotionCount} 瓶  │  预计省血 {result.PotionHpSaved}/{result.PotionHpRequired} HP  │  门槛淘汰 {result.PotionBranchesRejected}"),
             SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]防守[/color]  本回合最高可起防 {result.MaxBlockByTurn.GetValueOrDefault(displayedTurn)}  │  路线实际起防 {result.ActualBlockByTurn.GetValueOrDefault(displayedTurn)}  │  卖血 {result.SoldHpByTurn.GetValueOrDefault(displayedTurn)}"),
-            SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]边界[/color]  {BoundaryText(result.BoundaryReason)}  │  停止洗牌分支 {result.ShuffleBranchesPruned}  │  不可避免战损 {result.UnavoidableHpLost}"),
+            SolverText.Format($"[color={SolverUiTokens.Palette.TextMutedHex}]边界[/color]  {BoundaryText(SearchBoundaryForDisplay(result))}  │  停止洗牌分支 {result.ShuffleBranchesPruned}  │  不可避免战损 {result.UnavoidableHpLost}"),
         ];
         if (result.TheftPolicy is { } theftPolicy)
         {
@@ -624,6 +625,18 @@ internal sealed record SolverOverlaySnapshot(
         return result.Forecast.IsExactForModeledDamage ? SolverText.Get("高可信度") : SolverText.Get("中等可信度");
     }
 
+    internal static SearchBoundaryReason SearchBoundaryForDisplay(SolverResult result)
+    {
+        if (result.BoundaryReason is SearchBoundaryReason.None or SearchBoundaryReason.NodeLimit or SearchBoundaryReason.TimeLimit)
+        {
+            // Reuse and cache restoration perform no new search and have no request budget.
+            if (result.WasReused || result.WasRestoredFromCache)
+                return SearchBoundaryReason.None;
+            return result.RequestBudget?.LimitReason ?? result.BoundaryReason;
+        }
+        return result.BoundaryReason;
+    }
+
     internal static string? BuildSearchLimitWarning(SearchBoundaryReason reason) => reason switch
     {
         SearchBoundaryReason.TimeLimit
@@ -644,7 +657,7 @@ internal sealed record SolverOverlaySnapshot(
         SearchBoundaryReason.NodeLimit => SolverText.Get("节点上限"),
         SearchBoundaryReason.TurnLimit => SolverText.Get("回合上限"),
         SearchBoundaryReason.TimeLimit => SolverText.Get("时间预算"),
-        _ => SolverText.Get("战斗结束"),
+        _ => SolverText.Get("搜索完成"),
     };
 
     private static string JoinCoverage(IReadOnlyList<string> entries)

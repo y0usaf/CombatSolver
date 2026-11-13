@@ -42,9 +42,12 @@ internal sealed partial class UnattendedTestRunner
         // FromRun includes piles only after CombatManager.IsInProgress becomes true.
         // Compare at the exporter's actual opening boundary, after this injection seam.
         string expectedOpening = RequiredString(root, "exactContinuationState");
+        JsonElement openingReplay = root.Clone();
         void VerifyOpening(CombatState state)
         {
             string actualOpening = ContinuationStamp.CaptureLive(state).StateText;
+            actualOpening = CompareReplayRulesFromSave(openingReplay, expectedOpening, actualOpening, state,
+                request.RunSnapshotPath ?? throw new InvalidDataException("legacy_opening_missing_run_save"));
             if (!expectedOpening.Contains("/baselib=", StringComparison.Ordinal))
                 actualOpening = actualOpening.Replace("/baselib=-", "", StringComparison.Ordinal);
             if (!ReplayContinuationMatches(expectedOpening, actualOpening))
@@ -150,6 +153,7 @@ internal sealed partial class UnattendedTestRunner
 
         string expectedState = RequiredString(root, "exactContinuationState");
         string actualState = ContinuationStamp.CaptureLive(combatState).StateText;
+        actualState = CompareReplayRulesFromSave(root, expectedState, actualState, combatState, runSnapshotPath);
         if (!expectedState.Contains("/baselib=", StringComparison.Ordinal))
             actualState = actualState.Replace("/baselib=-", "", StringComparison.Ordinal);
         ContinuationStamp expected = new(expectedState);
@@ -493,13 +497,24 @@ internal sealed partial class UnattendedTestRunner
         string actual,
         bool allowLegacyZeroCounter = false,
         IReadOnlyDictionary<char, IReadOnlyList<string>>? legacyCardKeywords = null,
-        IReadOnlyDictionary<char, IReadOnlyList<string>>? legacyCardCosts = null)
+        IReadOnlyDictionary<char, IReadOnlyList<string>>? legacyCardCosts = null,
+        bool allowLegacyDefaultHandLimit = false)
     {
         if (string.Equals(expected, actual, StringComparison.Ordinal))
             return true;
 
         string[] expectedFields = expected.Split(';');
         string[] actualFields = actual.Split(';');
+        // Old vanilla reports omitted the default hand limit. The caller must
+        // first verify the complete native checkpoint; non-default, explicit,
+        // duplicate, and non-canonical fields still compare strictly.
+        if (allowLegacyDefaultHandLimit
+            && !expectedFields.Any(field => field.StartsWith("max_hand_size=", StringComparison.Ordinal))
+            && actualFields.Length > 0 && actualFields[^1] == "max_hand_size=10"
+            && actualFields.Count(field => field.StartsWith("max_hand_size=", StringComparison.Ordinal)) == 1)
+        {
+            actualFields = actualFields[..^1];
+        }
         if (allowLegacyZeroCounter)
         {
             int historyIndex = Array.FindIndex(expectedFields, field => field.StartsWith("Y=", StringComparison.Ordinal));

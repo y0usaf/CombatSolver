@@ -70,6 +70,7 @@ add_option pre-combat-intervening-map-points-json "" string none
 add_option replay-state-path "" string none
 add_option checkpoint-archive-path "" string raw_string
 add_option checkpoint-selector "start" string raw_string
+add_option recorded-plan-retention-step-for-test -1 int nonnegative_int
 add_option replay-mode "RestoreOnly" string raw_string "Preflight|RestoreOnly|ReplayRecorded|SearchOnly|DeploySolver|SessionStart"
 add_option replay-policy-override-path "" string raw_string
 add_option development-strategy-assembly-path "" string optional_string
@@ -82,6 +83,9 @@ add_option preserve-native-combat-state-for-test 0 switch bool
 add_option progress-snapshot-path "" string none
 add_option generated-scenario-path "" string optional_string
 add_option ascension 0 int raw_int
+add_option game-mode Standard string raw_string "Standard|Dread|Blitz"
+add_option dread-boss-encounter-id "" string optional_string
+add_option dominion-ids-for-test "" string csv
 add_option act-index-for-test 0 int raw_int
 add_option mark-encounter-as-second-boss-for-test 0 switch bool
 add_option enemy-current-hp 1 int raw_int
@@ -481,10 +485,14 @@ else
     combat_solver_manifest="$repo_root/CombatSolver.json"
 fi
 ritsu_workshop_root="$(realpath -m -- "${option_value[ritsu-workshop-root]}")"
-ritsu_legacy_dll="$ritsu_workshop_root/lib/0.111.0/STS2-RitsuLib.dll"
+game_version=''
+if ((option_value[stop-instance] == 0 && option_value[reuse-only] == 0)); then
+    game_version="$(jq -er '.version | sub("^v"; "") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' "$source_game_root/release_info.json")" || runtime_error 'invalid game release version'
+fi
+ritsu_legacy_dll="$ritsu_workshop_root/lib/$game_version/STS2-RitsuLib.dll"
 ritsu_bundle_dll="$ritsu_workshop_root/STS2-RitsuLib.dll"
 ritsu_bundle_index="$ritsu_workshop_root/ritsulib-variants.manifest"
-ritsu_bundle_runtime="$ritsu_workshop_root/compat/0.111.0/STS2-RitsuLib.Runtime.dll"
+ritsu_bundle_runtime="$ritsu_workshop_root/compat/$game_version/STS2-RitsuLib.Runtime.dll"
 ritsu_bundle_shared="$ritsu_workshop_root/shared/STS2-RitsuLib.Shared.dll"
 ritsu_manifest_source="$ritsu_workshop_root/mod_manifest.json"
 if [[ -f $ritsu_bundle_dll && -f $ritsu_bundle_index && -f $ritsu_bundle_runtime && -f $ritsu_bundle_shared ]]; then
@@ -829,6 +837,7 @@ request="$(jq -cn \
     def blank: test("^\\s*$");
     def convert($value; $kind):
         if $kind == "raw_string" then $value
+        elif $kind == "csv" then ($value | split(",") | map(select(length > 0)))
         elif $kind == "raw_int" then ($value | tonumber)
         elif $kind == "bool" then ($value == "1")
         elif $kind == "optional_string" then

@@ -387,7 +387,7 @@ internal sealed partial class CombatBeamSolver
         for (int cardIndex = 0; cardIndex < handCards.Count; cardIndex++)
         {
             PredictedCard card = handCards[cardIndex];
-            if (card.Preview.ShouldRetainThisTurn)
+            if (card.ShouldRetainThisTurn(simulator.State))
                 retainedHandValue = checked(retainedHandValue + Math.Max(
                     1,
                     (int)Math.Ceiling(CardChoiceSupport.CardValue(card.Preview) * 2d)));
@@ -520,7 +520,7 @@ internal sealed partial class CombatBeamSolver
             if (use.Automatic)
                 automaticPotionUseCount = checked(automaticPotionUseCount + 1);
         }
-        (int reachableHandValue, int zeroCostPlayableCount) =
+        (int reachableHandValue, int zeroCostPlayableCount, int playableAttackCount) =
             CalculateReachableHandPotential(simulator, combat, playerState);
         StateFingerprint potionInventoryKey = BuildPotionInventoryKey(combat);
         StateFingerprint cycleShapeKey = BuildCycleShapeKey(
@@ -619,6 +619,7 @@ internal sealed partial class CombatBeamSolver
             DeathSavePotionHpRestored = deathSavePotionHpRestored,
             DeathSaveUseCount = combat.DeathSaveUseCount,
             ProjectedDeathSaveUseCount = combat.DeathSaveUseCount + threat.DeathSaveUseCount,
+            PlayableAttackCount = playableAttackCount,
         };
     }
 
@@ -703,7 +704,7 @@ internal sealed partial class CombatBeamSolver
         return key.Finish();
     }
 
-    private static (int Value, int ZeroCostPlayableCount) CalculateReachableHandPotential(
+    private static (int Value, int ZeroCostPlayableCount, int PlayableAttackCount) CalculateReachableHandPotential(
         CombatPredictionSimulator simulator,
         SimulatedCombatState combat,
         SimPlayerCombatState playerState)
@@ -714,6 +715,7 @@ internal sealed partial class CombatBeamSolver
             : new (int, int, int)[handCount];
         int playableCount = 0;
         int zeroCostPlayableCount = 0;
+        int playableAttackCount = 0;
         foreach (PredictedCard card in playerState.Hand)
         {
             if (!combat.CanPlayCard(simulator, card, out int energyCost, out int starCost))
@@ -724,6 +726,8 @@ internal sealed partial class CombatBeamSolver
                 * (1 + Math.Max(0, card.Preview.GetEnchantedReplayCount()));
             int value = Math.Max(1, (int)Math.Ceiling(cardValue));
             playable[playableCount++] = (energyCost, starCost, value);
+            if (card.Preview.Type == CardType.Attack)
+                playableAttackCount++;
             if (energyCost == 0
                 && starCost == 0
                 && !card.Preview.EnergyCost.CostsX
@@ -734,7 +738,7 @@ internal sealed partial class CombatBeamSolver
         }
 
         return (ReachableHandValue.Calculate(playable[..playableCount], playerState.Energy, playerState.Stars),
-            zeroCostPlayableCount);
+            zeroCostPlayableCount, playableAttackCount);
     }
 
     /// <summary>
@@ -905,7 +909,7 @@ internal sealed partial class CombatBeamSolver
         // to the snapshot, so performing the same sort and shuffle in place avoids
         // another deck-sized backing array without changing RNG consumption or ordering.
         var shuffleRng = simulator.Rng.ShuffleState.ToRng();
-        StableShuffleProjection(cards, shuffleRng);
+        StableShuffleProjection(cards, shuffleRng, simulator);
 
         StateFingerprintBuilder key = new();
         key.Add(simulator.Rng.ShuffleState.Counter);
@@ -924,10 +928,10 @@ internal sealed partial class CombatBeamSolver
 
     internal static void StableShuffleProjection(
         List<PredictedCard> cards,
-        MegaCrit.Sts2.Core.Random.Rng rng)
+        MegaCrit.Sts2.Core.Random.Rng rng,
+        CombatPredictionSimulator simulator)
     {
-        cards.Sort();
-        cards.UnstableShuffle(rng);
+        cards.StableShuffle(rng, simulator);
     }
 
     // The static choice value omits CalculatedDamage. Use only registered branch-local
@@ -1066,7 +1070,7 @@ internal sealed partial class CombatBeamSolver
                 {
                     int maxHandSize = simulator.GetMaxHandSize(player);
                     int retainedCards = playerState.Hand.Cards.Count(card =>
-                        card.Preview.ShouldRetainThisTurn);
+                        card.ShouldRetainThisTurn(simulator.State));
                     int firstTurnSpace = Math.Max(0, maxHandSize - retainedCards);
                     int firstTurnBonusSpace = Math.Max(
                         0,
@@ -1144,7 +1148,7 @@ internal sealed partial class CombatBeamSolver
                 0L, (long)demesneAmount * futureTurns);
             int baseDraw = Math.Max(0, PersistentPowerSupport.GetModifiedHandDraw(
                 combat, player, CombatManager.baseHandDrawCount) - demesneAmount);
-            int retained = playerState.Hand.Cards.Count(card => card.Preview.ShouldRetainThisTurn);
+            int retained = playerState.Hand.Cards.Count(card => card.ShouldRetainThisTurn(simulator.State));
             int firstSpace = Math.Max(0, simulator.GetMaxHandSize(player) - retained - baseDraw);
             int laterSpace = Math.Max(0, simulator.GetMaxHandSize(player) - baseDraw);
             demesneDrawGain = (int)Math.Min((long)liveCards.Count * 2,
@@ -1655,6 +1659,16 @@ internal sealed partial class CombatBeamSolver
             key.Add(false);
         }
         IReadOnlyList<Creature> knownEnemies = simulatedCombat.KnownEnemies;
+        foreach (Creature pet in simulatedCombat.Allies.Where(creature => creature.PetOwner == _player
+            && creature != simulatedCombat.GetOsty(_player)))
+        {
+            SimCreatureState petState = simulator.State.GetCreature(pet);
+            key.Add(pet.CombatId ?? uint.MaxValue);
+            key.Add(pet.Monster!.Id.Entry);
+            key.Add(petState.CurrentHp);
+            key.Add(petState.MaxHp);
+            key.Add(petState.Block);
+        }
         for (int enemyIndex = 0; enemyIndex < knownEnemies.Count; enemyIndex++)
         {
             Creature enemy = knownEnemies[enemyIndex];
@@ -1672,6 +1686,9 @@ internal sealed partial class CombatBeamSolver
         AppendPile(ref key, playerState.DiscardPile, 'C');
         AppendPile(ref key, playerState.ExhaustPile, 'X');
         AppendOrbs(ref key, simulator, playerState.OrbQueue);
+        simulatedCombat.AddMelodyFingerprint(ref key, _player);
+        FoolStateSupport.AddFingerprint(ref key, _player, playerState.Arrows, simulatedCombat.EffectivePowers(), simulator);
+        simulatedCombat.AddShowOffFingerprint(ref key, _player, simulator);
         _run.Performance.End(SearchMetricPhase.PileFingerprint, pileFingerprintMeasurement);
         AppendRngState(ref key, simulator.Rng.ShuffleState);
         AppendRngState(ref key, simulator.Rng.CombatCardGenerationState);
@@ -1682,6 +1699,7 @@ internal sealed partial class CombatBeamSolver
         AppendRngState(ref key, simulator.Rng.CombatOrbGenerationState);
         AppendRngState(ref key, simulator.Rng.MonsterAiState);
         AppendRngState(ref key, simulator.Rng.NicheState);
+        AppendRngState(ref key, simulator.Rng.NonCombatGenerationState(_player));
         ulong deathsFirst = 0;
         ulong deathsSecond = 0;
         foreach (uint combatId in processedEnemyDeaths)
@@ -1777,9 +1795,16 @@ internal sealed partial class CombatBeamSolver
         key.Add(preview.CurrentStarCost);
         CardCostStateSupport.Append(ref key, preview);
         key.Add(preview.BaseReplayCount);
+        key.Add(preview.ExtraReplayThisTurn);
+        key.Add(preview.IsDupe);
+        if (preview.IsDupe) key.Add(CardChoiceSupport.ChoiceCardKey(card.GameplayCloneSource));
+        foreach (var keyword in preview._keywordsAddedFromOutside.Order()) key.Add((int)keyword);
+        key.Add(-1);
+        foreach (var keyword in preview._keywordsRemovedFromOutside.Order()) key.Add((int)keyword);
+        key.Add(-1);
         key.Add(preview.ExhaustOnNextPlay);
         key.Add(preview.IsSlyThisTurn);
-        key.Add(preview.ShouldRetainThisTurn);
+        key.Add(preview._hasSingleTurnRetain);
         AppendLocalCardKeywords(ref key, preview);
         key.Add(preview.DeckVersion != null);
         key.Add(preview.HasBeenRemovedFromState);
@@ -1789,6 +1814,13 @@ internal sealed partial class CombatBeamSolver
         AppendDynamicVars(ref key, preview, preview.DynamicVars);
         switch (preview)
         {
+            case TheShot shot:
+                key.Add(shot._cardsExhaustedByFlorescence);
+                break;
+            case ShowOff showOff:
+                key.Add(showOff.CurrentAim);
+                key.Add(showOff.IncreasedAim);
+                break;
             case Claw claw:
                 key.Add(claw.ExtraDamageFromClawPlays);
                 break;

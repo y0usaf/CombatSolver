@@ -21,6 +21,7 @@ internal static class AfterDeathMirrors
         [
             typeof(PlayerChoiceContext),
             typeof(Creature),
+            typeof(CardModel),
             typeof(bool),
             typeof(float)
         ]);
@@ -35,6 +36,29 @@ internal static class AfterDeathMirrors
     private static Registry CreateRegistry()
     {
         var registry = new Registry(AfterDeath);
+        registry.Register<SteamEruptionPower>((power, c) =>
+        {
+            if (c.Creature == power.Owner && !c.WasRemovalPrevented)
+                ((SimulatedCombatState)c.CombatState).TryTriggerSteamEruptionDeath(c.Simulator, c.Creature);
+        });
+        registry.Register<ShowOffPower>((power, c) =>
+        {
+            var combat = (SimulatedCombatState)c.CombatState;
+            if (c.Creature.Side == power.Owner.Side || combat.EffectivePowers()
+                .Any(effect => effect.Owner == c.Creature && !effect.ShouldOwnerDeathTriggerFatal())) return;
+            combat.GrowShowOff(power);
+            combat.SetPowerAmount(power, 0);
+        });
+        registry.Register<ImpaledPower>((power, context) =>
+        {
+            if (context.Creature != power.Owner || context.State.GetCreature(power.Applier!).IsDead) return;
+            while (power.Arrows.Count > 0)
+            {
+                context.Simulator.DislodgeArrow(power, context.Source);
+                if (context.Simulator.HasPendingChoice) return;
+            }
+            context.Simulator.RemoveEmptyImpaled(power);
+        });
 
         registry.RegisterIgnored<Aeonglass>();
         registry.RegisterIgnored<DecimillipedeSegment>();
@@ -52,8 +76,17 @@ internal static class AfterDeathMirrors
         registry.Register<StockPower>(HandleStock);
         registry.Register<CrabRagePower>(HandleCrabRage);
         registry.Register<DampenPower>(HandleDampen);
+        registry.Register<ExplosivePower>(HandleExplosive);
 
         return registry;
+    }
+
+    private static void HandleExplosive(ExplosivePower power, AfterDeathMirrorContext context)
+    {
+        if (context.Creature != power.Owner || context.WasRemovalPrevented) return;
+        Creature[] targets = context.State.PlayerCreatures
+            .Where(creature => context.State.GetCreature(creature).IsAlive).ToArray();
+        context.Simulator.Damage(targets, power.Amount, ValueProp.Unpowered | ValueProp.SkipHurtAnim, null);
     }
 
     private static void HandleDampen(DampenPower power, AfterDeathMirrorContext context)
@@ -127,4 +160,5 @@ internal sealed class AfterDeathMirrorContext : CombatMirrorContext
     public required Creature Creature { get; init; }
 
     public required bool WasRemovalPrevented { get; init; }
+    public PredictedCard? Source { get; init; }
 }

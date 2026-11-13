@@ -253,6 +253,61 @@ internal sealed partial class UnattendedTestRunner
                 await runner.AssertCardCloneIdentityContractAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
+            if (request.ScenarioId == "DUPE-CLONE-CONTRACT")
+            {
+                await runner.AssertDupeCloneContractAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "DREAD-DOMINION-HOOKS")
+            {
+                await runner.AssertDominionHooksAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "DREAD-KNOWLEDGE-CURSE")
+            {
+                await runner.AssertDreadKnowledgeCurseAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "BLITZ-REWARD-OUTLOOK")
+            {
+                await runner.AssertBlitzRewardOutlookAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "MODE-RULES-ISOLATION")
+            {
+                await runner.AssertModeRulesIsolationAsync(combatState);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "AIM-ATTACK-RETENTION")
+            {
+                await runner.AssertAimRetentionAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "NATIVE-CARD-ORDERING")
+            {
+                await runner.AssertNativeCardOrderingAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId is "FOOL-BRANCH-STATE" or "FOOL-TURN-LIFECYCLE")
+            {
+                await runner.AssertFoolBranchStateAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "CROSS-CHARACTER-ARROW")
+            {
+                await runner.AssertCrossCharacterArrowAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "DINGY-DAGGER-NAMES")
+            {
+                runner.AssertDingyDaggerNames(combatState);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "CHOICE-SHAPE-INSPECTION")
+            {
+                await runner.AssertChoiceShapeInspectionAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
             if (request.ScenarioId == "ORB-VALUE-NATIVE-HOOK-ESCAPE")
             {
                 await runner.AssertOrbValueStaysOffNativeHookAsync(combatState, player);
@@ -321,6 +376,27 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "RELIC-MAX-HP-HEALING-BOUNDS")
             {
                 await runner.AssertRelicMaxHpHealingBoundsAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "BATH-TOWEL-HEALING")
+            {
+                await runner.AssertBathTowelHealingAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "BETA-RELIC-PREPARATION")
+            {
+                await runner.AssertBetaRelicPreparationAsync(combatState, player,
+                    "BATH_TOWEL", "EXERCISE_MAT", "OCARINA", "BIZARRE_LAMP", "FERTILIZER", "WHITTLING_KNIFE");
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "INFUSED-CORE-PREPARATION")
+            {
+                await runner.AssertBetaRelicPreparationAsync(combatState, player, "INFUSED_CORE");
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "TORMENTOUS-COLLAR-PREPARATION")
+            {
+                await runner.AssertBetaRelicPreparationAsync(combatState, player, "TORMENTOUS_COLLAR");
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId == "NIGHTMARE-CAPTURED-ROOT")
@@ -574,7 +650,7 @@ internal sealed partial class UnattendedTestRunner
                 await AssertCardChoiceSearchAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
-            if (request.ScenarioId == "CARD-CONTINUATION-CONTRACT")
+            if (request.ScenarioId is "CARD-CONTINUATION-CONTRACT" or "CARD-CONTINUATION-ENCORE")
             {
                 await runner.RunCardContinuationContractAsync(combatState, player);
                 return Observation(combatEnded: false);
@@ -605,6 +681,11 @@ internal sealed partial class UnattendedTestRunner
                 if (MegaCrit.Sts2.Core.Nodes.NGame.Instance!.GetNodeOrNull("CombatSolverRunStatistics") != null)
                     throw new InvalidOperationException("Headless statistics must remain inactive.");
                 await runner.AssertUiLocalizationAsync(combatState);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "REQUEST-BUDGET-DISPLAY")
+            {
+                await runner.AssertRequestBudgetDisplayAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId == "COMBAT-DIAGNOSTIC-LOG")
@@ -982,6 +1063,11 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "NATIVE-CHOOSE-OPEN-GATE")
             {
                 await runner.AssertNativeChooseOpenGateAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "SMART-POTION-AUDIT-BUDGET")
+            {
+                await runner.AssertSmartPotionAuditBudgetAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId is "SMART-OPENING-POTION-ADMISSION" or "SMART-OPENING-POTION-VALUE")

@@ -40,6 +40,7 @@ param(
     [ValidateSet("Preflight", "RestoreOnly", "ReplayRecorded", "SearchOnly", "DeploySolver", "SessionStart")]
     [string]$ReplayMode = "RestoreOnly",
     [string]$ReplayPolicyOverridePath = "",
+    [int]$RecordedPlanRetentionStepForTest = -1,
     [string]$DevelopmentStrategyAssemblyPath = "",
     [string]$DevelopmentStrategyParametersPath = "",
     [string]$DevelopmentStrategyScriptHash = "",
@@ -50,6 +51,10 @@ param(
     [string]$ProgressSnapshotPath = "",
     [ValidateRange(0, 10)]
     [int]$Ascension = 0,
+    [ValidateSet('Standard', 'Dread', 'Blitz')]
+    [string]$GameMode = 'Standard',
+    [string]$DreadBossEncounterId = '',
+    [string[]]$DominionIdsForTest = @(),
     [int]$ActIndexForTest = 0,
     [switch]$MarkEncounterAsSecondBossForTest,
     [int]$EnemyCurrentHp = 1,
@@ -387,10 +392,16 @@ $memoryCleaner = if ([string]::IsNullOrWhiteSpace($CombatSolverBuildDir)) {
     Join-Path $repositoryRoot '.local\tool-build\CombatSolver.MemoryCleaner\bin\Release\net48\CombatSolver.MemoryCleaner.exe'
 } else { Join-Path $buildDirectory 'CombatSolver.MemoryCleaner.exe' }
 $resolvedRitsuWorkshopRoot = [IO.Path]::GetFullPath($RitsuWorkshopRoot)
-$ritsuLegacyDll = Join-Path $resolvedRitsuWorkshopRoot "lib\0.111.0\STS2-RitsuLib.dll"
+$gameVersion = ''
+if (-not $StopInstance -and -not $ReuseOnly) {
+    $releaseInfo = Get-Content -LiteralPath (Join-Path $sourceGameRoot 'release_info.json') -Raw | ConvertFrom-Json
+    $gameVersion = ([string]$releaseInfo.version) -replace '^v', ''
+    if ($gameVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid game release version: $($releaseInfo.version)" }
+}
+$ritsuLegacyDll = Join-Path $resolvedRitsuWorkshopRoot "lib\$gameVersion\STS2-RitsuLib.dll"
 $ritsuBundleDll = Join-Path $resolvedRitsuWorkshopRoot "STS2-RitsuLib.dll"
 $ritsuBundleIndex = Join-Path $resolvedRitsuWorkshopRoot "ritsulib-variants.manifest"
-$ritsuBundleRuntime = Join-Path $resolvedRitsuWorkshopRoot "compat\0.111.0\STS2-RitsuLib.Runtime.dll"
+$ritsuBundleRuntime = Join-Path $resolvedRitsuWorkshopRoot "compat\$gameVersion\STS2-RitsuLib.Runtime.dll"
 $ritsuBundleShared = Join-Path $resolvedRitsuWorkshopRoot "shared\STS2-RitsuLib.Shared.dll"
 $ritsuManifestSource = Join-Path $resolvedRitsuWorkshopRoot "mod_manifest.json"
 $headlessDependencyDir = Join-Path $gameModsRoot ".combatsolver-headless-ritsulib"
@@ -793,6 +804,7 @@ $request = [ordered]@{
     checkpointArchivePath = if ($CheckpointArchivePath) { $CheckpointArchivePath } else { $null }
     evidenceDirectory = if ($EvidenceDirectory) { $EvidenceDirectory } else { $null }
     checkpointSelector = $CheckpointSelector
+    recordedPlanRetentionStepForTest = if ($RecordedPlanRetentionStepForTest -ge 0) { $RecordedPlanRetentionStepForTest } else { $null }
     replayMode = $ReplayMode
     replayPolicyOverridePath = if ($ReplayPolicyOverridePath) { (Resolve-Path -LiteralPath $ReplayPolicyOverridePath).Path } else { $null }
     developmentStrategyAssemblyPath = if ($DevelopmentStrategyAssemblyPath) { (Resolve-Path -LiteralPath $DevelopmentStrategyAssemblyPath).Path } else { $null }
@@ -802,6 +814,9 @@ $request = [ordered]@{
     developmentMonitorStatePath = if ($DevelopmentMonitorStatePath) { [IO.Path]::GetFullPath($DevelopmentMonitorStatePath) } else { $null }
     preserveNativeCombatStateForTest = $PreserveNativeCombatStateForTest.IsPresent
     ascension = $Ascension
+    gameMode = $GameMode
+    dominionIdsForTest = @($DominionIdsForTest)
+    dreadBossEncounterId = $(if ($DreadBossEncounterId) { $DreadBossEncounterId } else { $null })
     actIndexForTest = $ActIndexForTest
     markEncounterAsSecondBossForTest = $MarkEncounterAsSecondBossForTest.IsPresent
     seed = $Seed

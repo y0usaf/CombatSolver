@@ -324,11 +324,14 @@ internal static partial class TurnStartChoiceSupport
             }
             return false;
         }
-        IReadOnlyList<PredictedCard> selected = request.Effect is PlanChoiceEffect.GenerateToHand or PlanChoiceEffect.DiscardAndDraw
+        IReadOnlyList<PredictedCard> selected = request.Effect is PlanChoiceEffect.GenerateToHand or PlanChoiceEffect.DiscardAndDraw or PlanChoiceEffect.ApplyKnowledgeCurse
             ? ResolveTokens(choice!, spec.Options, spec.MinCount, spec.MaxCount)
             : CardChoiceSupport.ResolveStandaloneChoice(simulator, choice!, spec.Options, request.Count, request.SourcePile);
         switch (request.Effect)
         {
+            case PlanChoiceEffect.ApplyKnowledgeCurse:
+                KnowledgeDemonChoiceSupport.ApplyCurse(combat, player.Creature, selected.Single().Preview.Id.Entry, 0);
+                break;
             case PlanChoiceEffect.GenerateToHand:
                 simulator.AddGeneratedCardsToCombat(selected, PileType.Hand, player,
                     CardPilePosition.Bottom, CardGenerationResultKind.Random);
@@ -346,7 +349,7 @@ internal static partial class TurnStartChoiceSupport
                 foreach (PredictedCard card in selected)
                 {
                     CardModel replacement = simulator.CreateRandomCardForTransform(
-                        card.Preview, isInCombat: true, simulator.Rng.CombatCardSelection);
+                        card.Preview, isInCombat: true, simulator.Rng.CombatCardGeneration);
                     CardChoiceSupport.TransformCardToGeneratedReplacement(simulator, card, replacement);
                     if (combat.HasPendingChoice)
                     {

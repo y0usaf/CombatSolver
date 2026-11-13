@@ -51,6 +51,7 @@ CombatRootSnapshot.Capture（主线程根）
 - Beam 保路、最终排序与预算不是语义修复位置。
 - live 部署和 UI 不反向修正预测结果。
 - 补货在 `AfterDeath` 内、旧个体移出阵容前生成替补，使随机生命判重与原版使用相同候选集合。死亡清理继续处理生命周期，生成动作由该 Hook 镜像独占。
+- 死亡 Hook 内复活或转阶段的个体须在攻击尾部前恢复生命；Hook 结束后清理死亡 Power，再结算插箭等后续效果。SteamEruptionPower 采用该入口。手动选牌 Fork 先准备活动 CardPlay 的卡牌映射，再复制包含活动卡引用的 Power。
 - 温柔等逐次出牌完成效果在对应 `AfterCardPlayed` 镜像内结算；外层效果的历史范围包含内层自动牌，按范围扫描逐牌效果会重复处理内层事件。保留原有分支计数、Fork 与回合末恢复所有权。
 - 历史敏感倍率使用冻结的根历史与当前分支新增事件。验证应让实机在根捕获后推进同类事件，再检查父分支、Fork 与跨回合结果，覆盖回合准备根早于实机抽牌的时间窗口。
 - 出牌限制先对照原版事件口径：CardPlayStarted 包含仍在执行的外层卡牌及重放，不能换成已完成次数或手动动作数。凡庸的权威入口是 ShouldPlay mirror，手动与自动打牌共用分支手牌/开始计数；只在候选枚举入口拦截会漏掉倾泻等嵌套自动牌。
@@ -68,7 +69,7 @@ CombatRootSnapshot.Capture（主线程根）
 
 `AfterSideTurnEndLate` 的扩展使用 `AfterSideTurnEndLateMirrors.Register<TModel>`，在根捕获前完成登记；玩家和敌方共用 Hook facade，DisintegrationPower 不得恢复到独立晚期补偿。新增其他阶段时逐一核对原版顺序、选择暂停和状态所有权，不能把晚期入口当作所有回合事件的通用回调。
 
-额外回合的 `ShouldTakeExtraTurn` / `AfterTakingExtraTurn` 由 `ExtraTurnMirrors` 登记原版及第三方单项效果。判断按原生顺序短路，后置回调先固定成员再依次结算；选择暂停沿原动作重放。状态读写使用分支 Power 和遗物记录；原生顺序、完整状态和 Fork 隔离用 `EXTRA-TURN-MIRROR-ORDER` 验证。
+额外回合的 `ShouldTakeExtraTurnEarly` / `ShouldTakeExtraTurn` / `AfterTakingExtraTurn` 由 `ExtraTurnMirrors` 登记原版及第三方单项效果。先遍历 Early，再遍历普通判断，首个命中来源获得资格，后置仅消费该来源；选择暂停沿原动作重放。状态读写使用分支 Power 和遗物记录；原生顺序、完整状态和 Fork 隔离用 `EXTRA-TURN-MIRROR-ORDER` 验证。
 
 ## 3. 状态所有权清单
 
@@ -152,3 +153,5 @@ writeLive 和 writePredicted，复用 store 的 Fork context。状态描述按�
 - 金币 Modify/AfterModify 使用带 combat child 的跑局监听表，AfterGoldGained 使用 null-child 跑局序列。只在主线程冻结根成员，资源与 HP 消费分支状态；未知 override 不能依 manifest 的 Ignored 分类放行。最大生命增加后只回复实际封顶差值，并经过通用 Heal 的 HP 回调；原生严格差分覆盖小数、金币修正顺序、owner、熔化、封顶和成长/长期资源记录。
 
 - Hook 参与位图的金币方法族共用一位时，只允许保守保留更多监听成员；精确 dispatch 仍按方法查表。不得用超过 ulong 位宽的移位产生别名，也不得借共用位跳过有回调的成员。
+
+- 箭、额外回合与新伤害回调共用 `AdditionalCallbacks` 参与位，精确派发分别由所属 registry 持有。新增 Hook 同步参与元数据；回合准备的纯原版快捷路径与扩展路径共用单项结算体，最小合同通过正式 Hook facade 验证。

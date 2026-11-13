@@ -20,6 +20,7 @@ internal sealed partial class CombatPredictionSimulator
 {
     private readonly PredictionTrace _trace;
     private CombatDamageSource? _damageSource;
+    private Dictionary<PredictedCard, PredictedCard>? _transformedCardResults;
 
     public CombatPredictionState State { get; }
 
@@ -183,6 +184,8 @@ internal sealed partial class CombatPredictionSimulator
 
     internal void AssertForkable()
     {
+        if (_transformedCardResults is { Count: > 0 })
+            throw new InvalidOperationException("A transformed card is awaiting its result pile.");
         // 只是判断有没有活动作用域，不需要把帧物化出来。
         if (_trace.HasCurrentFrame)
             throw new InvalidOperationException("Combat prediction can only be forked between completed actions.");

@@ -838,7 +838,8 @@ forbid_fixed "$repository_root/src/Runtime/SearchGcPolicy.Recovery.cs" \
     'CollectGeneration2' 'NoGC recovery must not enter the reclaim chain:'
 for gc_chain_rule in \
     'return WaitForReclaimChainAsync(_reclaimTask)' \
-    'CollectGeneration2ForAutomaticReclaimAsync(inSearchCheckpoint: true)' \
+    'CollectGeneration2ForAutomaticReclaimAsync(' \
+    'compactSmallObjectHeap: restartNoGcRegion' \
     '_inSearchManualReclaimTask = manualCompletion.Task' \
     'failure == null && (_regionExitRequired || _reclaimRequired)'; do
     require_fixed "$search_gc_policy_path" "$gc_chain_rule" 'missing serialized reclaim-chain rule'
@@ -860,7 +861,7 @@ src/Search/CombatBeamSolver.ParallelExpansion.cs	new(_run.ExpansionBatchPool)
 src/Search/CombatBeamSolver.Phases.cs	SearchWaveMemoryPolicy.ParentWaveCapacity(
 src/Engine/InCombat/Simulation/CombatPredictionRngSet.cs	private sealed class FrozenStream(PredictionRngState state)
 src/Engine/InCombat/Simulation/CombatPredictionRngSet.cs	new FrozenStream(_mutable.CaptureState())
-src/Testing/Host/UnattendedTestRunner.Assertions.cs	AssertLazyRngFork(scenario.CombatState.RunState.Rng)
+src/Testing/Host/UnattendedTestRunner.Assertions.cs	AssertLazyRngFork(scenario.CombatState.RunState.Rng, scenario.Player)
 src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.ShuffleState);
 src/Runtime/ContinuationStamp.cs	simulator.Rng.ShuffleState
 src/Search/CombatBeamSolver.StateEvaluation.cs	AppendRngState(ref key, simulator.Rng.CombatCardGenerationState);
@@ -972,6 +973,7 @@ expected_beam_files=(
     CombatBeamSolver.FinalPlanOrdering.cs
     CombatBeamSolver.Models.cs
     CombatBeamSolver.NoveltySearch.cs
+    CombatBeamSolver.BossTempo.cs
     CombatBeamSolver.Transpositions.cs
     CombatBeamSolver.OrderedMutationRetention.cs
     CombatBeamSolver.ParallelExpansion.cs
@@ -1240,7 +1242,7 @@ require_fixed "$repository_root/src/Search/StrategicHpRecoveryBound.KnownSources
 beam_phases_path="$search_root/CombatBeamSolver.Phases.cs"
 require_fixed "$beam_retention_facade_path" '_strictHpBoundWithRelicTargets = CanUseStrictHpRelicBound(root, policy)' 'missing common relic healing bound:'
 require_fixed "$beam_retention_facade_path" 'targets.All(target => target.HpAllowance == 0)' 'missing zero-allowance objective gate:'
-require_fixed "$beam_retention_facade_path" 'allowTurnTieBound: !_strictHpBoundWithRelicTargets' 'equal-HP counter routes must keep later turns:'
+require_fixed "$beam_retention_facade_path" 'allowTurnTieBound: policy.BossTempoSearch == null && !_strictHpBoundWithRelicTargets' 'equal-HP counter routes must keep later turns:'
 require_fixed "$search_root/CombatSearchCoordinator.cs" '!CombatBeamSolver.CanUseStrictHpRelicBound(root, policy)' 'shared incumbent must retain objective eligibility:'
 require_fixed "$search_root/CombatSearchCoordinator.PlanSearch.cs" 'if (!root.CanCertifyRemainingHealing' 'speculative early plans require the existing certified-root schedule:'
 require_fixed \
@@ -1299,9 +1301,14 @@ src/Search/CombatPlan.cs	public CombatTerminalStamp? TerminalStamp { get; } = te
 src/Search/CombatBeamSolver.Terminal.cs	combatEndedTurn = node.Snapshot.CombatEndedTurn;
 src/Search/SimulatedCombatState.cs	.Select(PredictionUtils.CloneModelForSimulation)
 src/Engine/InCombat/Mirrors/Hooks/Card/AfterCardGeneratedForCombatMirrors.cs	GetAeonglassWitherUpgradeCount(monster.Creature)
-src/Prediction/MonsterSpawnSupport.cs	.SelectMany(combat.RelicsOf)
+src/Prediction/MonsterSpawnSupport.cs	HookMirrors.AfterCreatureAddedToCombat(simulator, creature)
+src/Search/SimulatedCombatState.CardLifecycle.cs	HookMirrors.BeforeHandDraw(simulator, player, choices)
+src/Search/SimulatedCombatState.cs	Rules = source.Rules
+src/Prediction/DominionPredictionSupport.cs	Run.SetValue(clone, null)
+src/Prediction/NativeCombatRulesScope.cs	[ThreadStatic] private static CombatRulesSnapshot? _current
 src/Search/SimulatedCombatState.cs	foreach (BadgeModel badge in inner.BadgeModels)
-src/Search/SimulatedCombatState.cs	MultiplayerScalingRunStateField.SetValue(detachedMultiplayerScaling, null)
+src/Search/SimulatedCombatState.cs	RunModelRunStateField.SetValue(detached, null)
+src/Search/SimulatedCombatState.cs	RunModelCombatStateField.SetValue(detached, null)
 src/Engine/InCombat/Mirrors/Hooks/Block/ModifyBlockMultiplicativeMirrors.cs	registry.Register<MultiplayerScalingModel>(HandleMultiplayerScaling)
 src/Prediction/PredictionModHookSubscriberCapture.cs	ModHelper.IterateAllRunStateSubscribers(runState)
 src/Engine/Common/PredictionUtils.cs	PredictionModModelSupport.CloneCardAttachedModels(source, clone)
@@ -1679,7 +1686,7 @@ while IFS=$'\t' read -r relative_path text; do
     require_fixed "$repository_root/$relative_path" "$text" 'missing card continuation ownership boundary'
 done <<'EOF'
 src/Engine/InCombat/Simulation/CombatPredictionSimulator.cs	GuardOrdinaryCardContinuationFork();
-src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardContinuation.cs	context.Register(source.Play, play);
+src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardContinuation.cs	PrepareExecutionCardPlay(source.Card, source.Play, context);
 src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardContinuation.cs	StateStore.SupportsManualCardChoiceContinuation
 src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardContinuation.cs	DetachPendingManualCardChoice();
 src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardContinuation.cs	source.Choice.Fork(context)
@@ -1754,7 +1761,7 @@ for member in 'private sealed record KnownRoutePrefix(' 'private static MoveStat
 done
 
 extra_turn_registry="$repository_root/src/Engine/InCombat/Mirrors/Hooks/TurnEnd/ExtraTurnMirrors.cs"
-for registration in 'ShouldRegistry.Register<AmbergrisPower>' 'ShouldRegistry.Register<PaelsEye>' 'AfterRegistry.Register<AmbergrisPower>' 'AfterRegistry.Register<PaelsEye>'; do
+for registration in 'ShouldRegistry.Register<ExtraTurnPower>' 'EarlyRegistry.Register<PaelsEye>' 'AfterRegistry.Register<ExtraTurnPower>' 'AfterRegistry.Register<PaelsEye>'; do
     require_fixed "$extra_turn_registry" "$registration" 'extra-turn native effects must use the shared registry'
 done
 for legacy in 'ShouldTakeExtraPlayerTurn(' 'ConsumeExtraTurnSources('; do

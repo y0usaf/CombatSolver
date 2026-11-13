@@ -159,6 +159,7 @@ internal sealed partial class UnattendedTestRunner
             };
         SerializableRun save = JsonSerializer.Deserialize(await File.ReadAllTextAsync(RootPath("runSavePath")),
             JsonSerializationUtility.GetTypeInfo<SerializableRun>())!;
+        _recordedRunSave = save;
         if (save.Players.Count != 1) throw new InvalidDataException("B015 requires a single-player original run.");
         RunState state = RunState.FromSerializable(save);
         await RunManager.Instance.SetUpSavedSingleplayer(state, save);
@@ -174,7 +175,7 @@ internal sealed partial class UnattendedTestRunner
         Player player = state.Players.Single();
         EncounterModel encounter = ResolveUnique(ModelDb.All.OfType<EncounterModel>(), _request.EncounterId, "遭遇");
         B015OpeningSelector selector = new(player, choices[0]);
-        IDisposable selectorScope = CardSelectCmd.PushSelector(selector, localOnly: true);
+        IDisposable selectorScope = NativeTestCardSelectors.Push(selector, localOnly: true);
         List<RecordedCombatEvent> observedEvents = [];
         CombatReplayRecording.TestObserver = observedEvents.Add;
         bool openingVerified = false;

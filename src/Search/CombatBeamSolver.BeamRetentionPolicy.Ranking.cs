@@ -180,6 +180,28 @@ internal sealed partial class CombatBeamSolver
                         || candidate.Snapshot.ProjectedPlayerHp == current.Snapshot.ProjectedPlayerHp
                             && candidate.Score > current.Score);
 
+        private static SearchNode? FindBestDamagingContinuation(IEnumerable<SearchNode> nodes)
+        {
+            SearchNode? best = null;
+            foreach (SearchNode node in nodes)
+            {
+                // Preserve a shield-breaking step with a legal follow-up attack
+                // when the exposed enemies fit within the frozen reachable hand value.
+                // This is a finishing-route heuristic; the simulator resolves the attacks.
+                if (node.IsTerminal || node.Parent == null
+                    || node.Action is not { Kind: PlanActionKind.PlayCard, EndsPlayerTurn: false }
+                    || node.Snapshot.EnemyBlock >= node.Parent.Snapshot.EnemyBlock
+                    || node.Snapshot.EnemyHp > node.Snapshot.ReachableHandValue
+                    || (long)node.Snapshot.EnemyHp + node.Snapshot.EnemyBlock
+                        >= (long)node.Parent.Snapshot.EnemyHp + node.Parent.Snapshot.EnemyBlock
+                    || node.Snapshot.PlayableAttackCount <= 0)
+                    continue;
+                if (IsBetterOffensive(node, best))
+                    best = node;
+            }
+            return best;
+        }
+
         private static SearchNode? FindBestEnemyStrengthControl(IEnumerable<SearchNode> nodes)
             => nodes.Aggregate(
                 (SearchNode?)null,
@@ -684,6 +706,28 @@ internal sealed partial class CombatBeamSolver
                 .Take(limit)
                 .ToList();
 
+            if (trait == SearchRouteTraits.Control)
+            {
+                // Static incoming damage ignores some delayed kills. Reserve one of
+                // the existing probes for a possible finish, then let the exact
+                // stand-pat rollout decide; the frozen estimate is not lethal proof.
+                SearchNode? delayedFinish = nodes
+                    .Where(node => !node.IsTerminal && node.Traits.HasFlag(trait)
+                        && node.Snapshot.EnemyHp > 0
+                        && node.Snapshot.DelayedDamageValue >= node.Snapshot.EnemyHp)
+                    .OrderBy(node => node.Snapshot.CumulativePlayerHpLost)
+                    .ThenByDescending(node => node.Snapshot.PlayerHp)
+                    .ThenBy(node => node.Snapshot.EnemyHp)
+                    .ThenByDescending(node => node.Score)
+                    .FirstOrDefault();
+                if (delayedFinish != null && !ContainsReference(probes, delayedFinish))
+                {
+                    if (probes.Count == limit)
+                        probes.RemoveAt(limit - 1);
+                    probes.Add(delayedFinish);
+                }
+            }
+
             _prepareStandPat?.Invoke(probes);
             SearchNode? best = null;
             StandPatEvaluation bestEvaluation = default;
@@ -845,25 +889,32 @@ internal sealed partial class CombatBeamSolver
         private static bool UsesPotion(SearchNode node)
             => node.PotionCount > 0;
 
+        internal double IntermediateScore(SearchNode node) => BeamRankScore(node);
+
         private double BeamRankScore(SearchNode node)
         {
             // 基础分成员（见 SolverSearchProfile.BaseScoreOnly）：中途排序只用基础分；未置位时下面逐位不变。
             if (_profile.BaseScoreOnly)
                 return _developmentStrategy?.Rank(node, node.Score) ?? node.Score;
-            int persistentBuffCap = _isActEndingBoss
+            bool bossFeatures = _isActEndingBoss || _profile.BossTempoHpPricing;
+            int persistentBuffCap = bossFeatures
                 ? SolverWeights.PersistentBuffDeltaBeamCap
                 : SolverWeights.StandardPersistentBuffDeltaBeamCap;
-            double persistentBuffValue = _isActEndingBoss
+            double persistentBuffValue = bossFeatures
                 ? SolverWeights.PersistentBuffDeltaBeamValue
                 : SolverWeights.StandardPersistentBuffDeltaBeamValue;
-            bool useLatentSetup = _isActEndingBoss || _initialEnemyCount > 1;
-            int strengthSuppressionHorizon = _isActEndingBoss
+            bool useLatentSetup = bossFeatures || _initialEnemyCount > 1;
+            int strengthSuppressionHorizon = bossFeatures
                 ? SolverWeights.BossEnemyStrengthSuppressionHorizon
                 : SolverWeights.StandardEnemyStrengthSuppressionHorizon;
-            int weakExpectedHpSaved = _isActEndingBoss
+            int weakExpectedHpSaved = bossFeatures
                 ? SolverWeights.BossEnemyWeakExpectedHpSaved
                 : SolverWeights.StandardEnemyWeakExpectedHpSaved;
             double baseScore = node.Score;
+            if (_profile.BossTempoHpPricing && !node.IsTerminal)
+                baseScore = BossTempoSearchOptions.RankBase(baseScore,
+                    node.Snapshot.CumulativePlayerHpLost, node.FutureSoldHp,
+                    node.Snapshot.ProjectedPlayerHp, node.Snapshot.PlayerDead);
             if (_profile.ContinuousThreatRanking && !node.IsTerminal
                 && node.Action is { Kind: PlanActionKind.EndTurn }
                 && !node.Snapshot.PlayerDead && node.Snapshot.ProjectedPlayerHp <= 0
@@ -886,7 +937,7 @@ internal sealed partial class CombatBeamSolver
                     ? Math.Min(SolverWeights.LatentSetupBeamCap, node.Snapshot.LatentSetupValue)
                         * SolverWeights.LatentSetupBeamValue
                     : 0d)
-                + (_isActEndingBoss
+                + (bossFeatures
                     ? node.Snapshot.FutureResourceValue * SolverWeights.FutureResourceBeamValue
                     : 0d)
                 + Math.Min(

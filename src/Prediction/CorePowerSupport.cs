@@ -619,11 +619,6 @@ internal static class CorePowerSupport
                 processedDeaths.Add(combatId);
                 continue;
             }
-            bool steamEruptionTriggered = combat.TryTriggerSteamEruptionDeath(simulator, enemy);
-            if (simulator.HasPendingChoice)
-                return false;
-            if (steamEruptionTriggered)
-                continue;
             (newlyDead ??= []).Add(enemy);
         }
         if (newlyDead != null)
@@ -685,7 +680,7 @@ internal static class CorePowerSupport
         {
             foreach (PredictedCard card in playerState.Hand)
             {
-                if (!card.Preview.ShouldRetainThisTurn)
+                if (!card.ShouldRetainThisTurn(simulator.State))
                     (toFlush ??= []).Add(card);
             }
         }

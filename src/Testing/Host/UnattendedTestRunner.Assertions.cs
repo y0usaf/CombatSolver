@@ -235,7 +235,7 @@ internal sealed partial class UnattendedTestRunner
             {
                 runner.SetStage("lazy_rng_fork");
                 string before = ContinuationStamp.CaptureLive(scenario.CombatState).StateText;
-                runner._completedChecks.Add(AssertLazyRngFork(scenario.CombatState.RunState.Rng));
+                runner._completedChecks.Add(AssertLazyRngFork(scenario.CombatState.RunState.Rng, scenario.Player));
                 if (ContinuationStamp.CaptureLive(scenario.CombatState).StateText != before)
                     throw new InvalidOperationException("RNG Fork contract changed live combat.");
             }
@@ -360,7 +360,9 @@ internal sealed partial class UnattendedTestRunner
             if (request.ExportBugReportAfterSetup)
             {
                 runner.SetStage("export_bug_report");
-                string directory = ProjectSettings.GlobalizePath("user://combat-solver-test-bug-reports");
+                string directory = request.EvidenceDirectory is { Length: > 0 } evidence
+                    ? Path.Combine(evidence, "bug-reports")
+                    : ProjectSettings.GlobalizePath("user://combat-solver-test-bug-reports");
                 string archivePath = await CombatBugReportExporter.ExportCurrentAsync(directory);
                 using ZipArchive archive = ZipFile.OpenRead(archivePath);
                 AssertBugReportArchive(archive, "current", request.ExpectedBugReportControlMode);
