@@ -50,9 +50,9 @@ internal static partial class SolverController
     private static int _nextSearchGeneration;
     private static int _combatLifecycleGeneration;
     private static bool _solverDisabled;
-    private static bool _stopFullAutoOnCombatEnd = true;
-    private static bool _stopFullAutoOnDeathTurn = true;
-    private static bool _stopFullAutoOnWorseRecalculation = true;
+    private static bool _stopFullAutoOnCombatEnd;
+    private static bool _stopFullAutoOnDeathTurn;
+    private static bool _stopFullAutoOnWorseRecalculation;
     private static readonly SearchFramePressureSignal FramePressureSignal = new();
     private static readonly HashSet<string> DeployedCardIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> DeployedPotionIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
@@ -129,6 +129,8 @@ internal static partial class SolverController
         => RunManager.Instance.IsInProgress && RunManager.Instance.NetService.Type.IsMultiplayer();
 
     public static bool FullAutoEnabled => _combat.FullAutoEnabled;
+    public static bool AutoRequested => !_solverDisabled && SolverSettings.Current.AutoPlay;
+    public static SolverAutoStatusSnapshot AutoStatus => SolverAutoStatus.Capture(FullAutoEnabled);
     public static bool RouteFrozen => _combat.RouteFrozen;
     public static bool HasRetainedRoute => _combat.LatestResult != null || _combat.ContinuationSource != null;
     public static bool AutomaticSearchPaused => _combat.AutomaticSearchPaused;
@@ -146,6 +148,7 @@ internal static partial class SolverController
         if (frozen)
         {
             _combat.FullAutoEnabled = false;
+            SolverAutoStatus.Record("stop", "route_frozen");
             CancelDeferredSearch();
         }
         else if (FullAutoEnabled
@@ -569,10 +572,14 @@ internal static partial class SolverController
     {
         AssertMainThread();
         ResetCore("combat_starting");
-        if (state is CombatState contentState)
+        SolverAutoStatus.ResetCombat();
         _combat.FullAutoEnabled = !_solverDisabled
             && state is CombatState { Players.Count: 1 }
             && SolverSettings.Current.AutoPlay;
+        SolverAutoStatus.Record(
+            "combat_start",
+            $"auto={_combat.FullAutoEnabled.ToString().ToLowerInvariant()} " +
+            $"requested={SolverSettings.Current.AutoPlay.ToString().ToLowerInvariant()}");
         DeployedCardIdsForTesting.Clear();
         DeployedPotionIdsForTesting.Clear();
         LastDeployedActionStartedAtMillisecondsForTesting = 0;
@@ -951,8 +958,10 @@ internal static partial class SolverController
         }
         else if (_combat.AutomaticSearchPaused)
         {
-            _combat.FullAutoEnabled = false;
-            Entry.Logger.Info($"[CombatSolver/Test] SEARCH_REJECT reason=user_stopped request={reason}");
+            SolverAutoStatus.Record(
+                "skip",
+                $"automatic_search_paused request={reason} turn={searchTurn?.ToString() ?? "-"}");
+            Entry.Logger.Info($"[CombatSolver/Test] SEARCH_REJECT reason=automatic_search_paused request={reason}");
             SolverOverlay.RefreshControls();
             return;
         }
@@ -1286,6 +1295,7 @@ internal static partial class SolverController
         {
             _combat.FullAutoEnabled = false;
             CancelDeployment();
+            SolverAutoStatus.Record("stop", "user_toggle_off");
             Entry.Logger.Info("[CombatSolver/Test] FULL_AUTO enabled=false reason=user");
             SolverOverlay.RefreshControls();
             return;
@@ -1326,7 +1336,10 @@ internal static partial class SolverController
 
         if (!CanSolve(state, out string rejection))
         {
+            _combat.FullAutoEnabled = true;
+            SolverAutoStatus.Record("skip", $"cannot_solve reason={rejection}");
             Entry.Logger.Info($"[CombatSolver/Test] FULL_AUTO_REJECT reason={rejection}");
+            SolverOverlay.RefreshControls();
             return;
         }
 
@@ -1339,6 +1352,7 @@ internal static partial class SolverController
             $"[CombatSolver/Test] FULL_AUTO enabled=true stop_on_combat_end={_stopFullAutoOnCombatEnd} " +
             $"stop_on_death_turn={_stopFullAutoOnDeathTurn} " +
             $"stop_on_worse_recalculation={_stopFullAutoOnWorseRecalculation}");
+        SolverAutoStatus.Record("start", "user_toggle_on");
         SolverOverlay.RefreshControls();
 
         LiveCombatStamp current = LiveCombatStamp.Capture(state);
@@ -1389,6 +1403,7 @@ internal static partial class SolverController
             CancelSearch();
             CancelDeployment();
             _combat.FullAutoEnabled = false;
+            SolverAutoStatus.Record("stop", "solver_disabled");
             _combat.State = null;
             _combat.LatestResult = null;
             _combat.LatestStamp = null;
@@ -1413,6 +1428,7 @@ internal static partial class SolverController
         bool controllerSearchCanceled = _search != null || _deferredSearchCts != null;
         int? generation = _search?.Generation;
         _combat.FullAutoEnabled = false;
+        SolverAutoStatus.Record("stop", $"user_stop_search generation={generation?.ToString() ?? "-"}");
         _combat.AutomaticSearchPaused = true;
         _combat.AutomaticSearchPausedTurn = LocalContext.GetMe(
             CombatManager.Instance.DebugOnlyGetState())?.PlayerCombatState?.TurnNumber;
@@ -1442,6 +1458,7 @@ internal static partial class SolverController
         _combat.AutomaticSearchPaused = false;
         _combat.AutomaticSearchPausedTurn = null;
         _combat.FullAutoEnabled = false;
+        SolverAutoStatus.Record("stop", "user_applied_current_turn");
         if (_search is not { } search)
         {
             PlayerTurnSetupCoordinator.ApplyCurrentTurn();
@@ -1621,7 +1638,7 @@ internal static partial class SolverController
         LastFullAutoStoppedAtLiveRiskForTesting = false;
         LastSearchFailureForTesting = null;
         BattleDamageTracker.Reset();
-        SolverOverlay.Hide();
+        SolverOverlay.RefreshControls();
         bool unattendedRequestActive = UnattendedAsyncActivityTracker.IsRequestActive;
         Task regionExit = unattendedRequestActive
             ? Task.CompletedTask
@@ -1978,11 +1995,8 @@ internal static partial class SolverController
             Exception ex = task.Exception?.GetBaseException() ?? new InvalidOperationException("后台搜索失败但没有异常对象。");
             _combat.BugReportIssues.RecordFailure(CombatBugReportIssueKind.SearchFailure, ex);
             LastSearchFailureForTesting = ex;
-            if (ex is PotionPolicyUnsatisfiedException)
-            {
-                _combat.FullAutoEnabled = false;
-                SolverOverlay.RefreshControls();
-            }
+            SolverAutoStatus.RecordError("search_failure", SolverAutoStatus.Describe(ex));
+            SolverOverlay.RefreshControls();
             Entry.Logger.Error($"[CombatSolver/Test] SEARCH_FAILURE generation={generation} exception={ex}");
             return;
         }
@@ -2135,6 +2149,7 @@ internal static partial class SolverController
         _combat.ContinuationSource = result;
         _combat.AutomaticSearchPaused = false;
         _combat.FullAutoEnabled = false;
+        SolverAutoStatus.Record("stop", "showcase_route_accepted");
         BattleDamageTracker.RegisterPlan(state, result);
         SolverOverlay.RefreshControls();
         Entry.Logger.Info($"[CombatSolver/Showcase] ROUTE_ACCEPTED turn={result.StartTurnNumber} end_turn={result.CombatEndedTurn} local_searches=0");
@@ -2143,6 +2158,7 @@ internal static partial class SolverController
     private static void StopShowcaseRoute(NGame host, string message)
     {
         _combat.FullAutoEnabled = false;
+        SolverAutoStatus.Record("stop", $"showcase_route_mismatch message={message}");
         _combat.AutomaticSearchPaused = true;
         _combat.LatestResult = null;
         _combat.LatestStamp = null;
@@ -2153,41 +2169,61 @@ internal static partial class SolverController
 
     private static void StartFullAutoDeployment(NGame host, CombatState state, SolverResult result)
     {
-        if (_stopFullAutoOnWorseRecalculation
-            && !result.WasReused
-            && result.ProjectedBattleHpLossIncrease > 0)
+        if (!result.WasReused && result.ProjectedBattleHpLossIncrease > 0)
         {
-            _combat.BugReportIssues.Record(
-                CombatBugReportIssueKind.FullAutoStoppedAfterWorseRecalculation,
-                $"第 {result.StartTurnNumber} 回合，预计战损 {result.PreviousProjectedBattleHpLost} → {result.ProjectedBattleHpLost}");
-            _combat.FullAutoEnabled = false;
-            LastFullAutoStoppedForWorseRecalculationForTesting = true;
-            SolverOverlay.RefreshControls();
-            Entry.Logger.Info(
-                $"[CombatSolver/Test] FULL_AUTO_STOP reason=worse_recalculation " +
-                $"turn={result.StartTurnNumber} increase={result.ProjectedBattleHpLossIncrease}");
-            return;
+            SolverAutoStatus.Record(
+                "worse_recalculation",
+                $"turn={result.StartTurnNumber} previous_hp_lost={result.PreviousProjectedBattleHpLost} " +
+                $"hp_lost={result.ProjectedBattleHpLost} increase={result.ProjectedBattleHpLossIncrease} " +
+                $"continuing={(!_stopFullAutoOnWorseRecalculation).ToString().ToLowerInvariant()}");
+            if (_stopFullAutoOnWorseRecalculation)
+            {
+                _combat.BugReportIssues.Record(
+                    CombatBugReportIssueKind.FullAutoStoppedAfterWorseRecalculation,
+                    $"第 {result.StartTurnNumber} 回合，预计战损 {result.PreviousProjectedBattleHpLost} → {result.ProjectedBattleHpLost}");
+                LastFullAutoStoppedForWorseRecalculationForTesting = true;
+                StopFullAutoForTestOverride("worse_recalculation", result.StartTurnNumber);
+                return;
+            }
         }
-        if (_stopFullAutoOnCombatEnd && result.CombatEndedTurn == result.StartTurnNumber)
+        if (result.CombatEndedTurn == result.StartTurnNumber)
         {
-            _combat.FullAutoEnabled = false;
-            SolverOverlay.RefreshControls();
-            Entry.Logger.Info($"[CombatSolver/Test] FULL_AUTO_STOP reason=combat_end_turn turn={result.StartTurnNumber}");
-            return;
+            SolverAutoStatus.Record(
+                "plan",
+                $"turn={result.StartTurnNumber} predicted_combat_end=true " +
+                $"continuing={(!_stopFullAutoOnCombatEnd).ToString().ToLowerInvariant()}");
+            if (_stopFullAutoOnCombatEnd)
+            {
+                StopFullAutoForTestOverride("combat_end_turn", result.StartTurnNumber);
+                return;
+            }
         }
-        if (_stopFullAutoOnDeathTurn && result.DeathTurn == result.StartTurnNumber)
+        if (result.DeathTurn == result.StartTurnNumber)
         {
-            _combat.BugReportIssues.Record(
-                CombatBugReportIssueKind.FullAutoStoppedAtDeathTurn,
-                $"第 {result.StartTurnNumber} 回合");
-            _combat.FullAutoEnabled = false;
-            SolverOverlay.RefreshControls();
-            Entry.Logger.Info($"[CombatSolver/Test] FULL_AUTO_STOP reason=death_turn turn={result.StartTurnNumber}");
-            return;
+            SolverAutoStatus.Record(
+                "plan",
+                $"turn={result.StartTurnNumber} predicted_player_death=true " +
+                $"continuing={(!_stopFullAutoOnDeathTurn).ToString().ToLowerInvariant()}");
+            if (_stopFullAutoOnDeathTurn)
+            {
+                _combat.BugReportIssues.Record(
+                    CombatBugReportIssueKind.FullAutoStoppedAtDeathTurn,
+                    $"第 {result.StartTurnNumber} 回合");
+                StopFullAutoForTestOverride("death_turn", result.StartTurnNumber);
+                return;
+            }
         }
 
         Entry.Logger.Info($"[CombatSolver/Test] FULL_AUTO_DEPLOY turn={result.StartTurnNumber}");
         StartDeployment(host, state, result);
+    }
+
+    private static void StopFullAutoForTestOverride(string reason, int turn)
+    {
+        _combat.FullAutoEnabled = false;
+        SolverAutoStatus.Record("stop", $"reason={reason} turn={turn} source=test_override");
+        SolverOverlay.RefreshControls();
+        Entry.Logger.Info($"[CombatSolver/Test] FULL_AUTO_STOP reason={reason} turn={turn} source=test_override");
     }
 
     private static void StartDeployment(NGame host, CombatState state, SolverResult result)
@@ -2210,6 +2246,13 @@ internal static partial class SolverController
 
         _combat.LatestResult = null;
         _combat.LatestStamp = null;
+        SolverAutoStatus.RecordDecision(
+            result.StartTurnNumber,
+            result.TotalSearchElapsed,
+            result.ExpandedNodes,
+            result.ProjectedBattleHpLost,
+            result.PotionUses.Count,
+            result.WasReused);
         CancelDeployment();
         SolverDeploymentSession deployment = new() { State = state, StartTurnNumber = result.StartTurnNumber };
         _deployment = deployment;
@@ -2492,8 +2535,7 @@ internal static partial class SolverController
                     return;
                 }
                 Player player = LocalContext.GetMe(state)!;
-                if (_combat.FullAutoEnabled
-                    && (_stopFullAutoOnDeathTurn || _stopFullAutoOnWorseRecalculation))
+                if (_combat.FullAutoEnabled)
                 {
                     await UnattendedTestRunner.ApplyScheduledPreEndTurnDriftAsync(state, turn);
                     LiveEndTurnRiskProjection liveRisk = LiveEndTurnRiskEvaluator.EvaluateFair(
@@ -2501,24 +2543,34 @@ internal static partial class SolverController
                         plannedEndTurn.TurnStartChoices,
                         FairPlannerSettings.For(SolverSettings.Capture().Speed).Samples);
                     int plannedHpLoss = result.RequireHpLostForTurn(turn);
-                    bool worsened = false;
-                    if ((_stopFullAutoOnDeathTurn && liveRisk.PlayerDead)
-                        || (_stopFullAutoOnWorseRecalculation && worsened))
+                    if (liveRisk.PlayerDead)
                     {
                         _combat.BugReportIssues.Record(
-                            liveRisk.PlayerDead
-                                ? CombatBugReportIssueKind.FullAutoStoppedAtLiveRiskDeath
-                                : CombatBugReportIssueKind.FullAutoStoppedAtLiveRiskWorsening,
+                            CombatBugReportIssueKind.FullAutoStoppedAtLiveRiskDeath,
                             $"第 {turn} 回合，路线预计 {plannedHpLoss} HP，实机复核 {liveRisk.HpLost} HP");
-                        _combat.FullAutoEnabled = false;
-                        LastFullAutoStoppedAtLiveRiskForTesting = true;
                         _combat.ContinuationSource = null;
+                        SolverAutoStatus.RecordError(
+                            "live_end_turn_risk",
+                            $"turn={turn} planned_hp_lost={plannedHpLoss} live_hp_lost={liveRisk.HpLost} " +
+                            $"hp_before={liveRisk.HpBefore} hp_after={liveRisk.HpAfter} " +
+                            $"moves={liveRisk.MonsterMoves} handed_back_turn=true");
+                        if (_stopFullAutoOnDeathTurn)
+                        {
+                            LastFullAutoStoppedAtLiveRiskForTesting = true;
+                            _combat.FullAutoEnabled = false;
+                        }
+                        else
+                        {
+                            _combat.AutomaticSearchPaused = true;
+                            _combat.AutomaticSearchPausedTurn = turn;
+                        }
                         SolverOverlay.RefreshControls();
                         Entry.Logger.Warn(
-                            $"[CombatSolver/Test] FULL_AUTO_STOP reason=live_end_turn_risk turn={turn} " +
+                            $"[CombatSolver/Test] FULL_AUTO_HAND_BACK reason=live_end_turn_risk turn={turn} " +
                             $"planned_hp_lost={plannedHpLoss} live_hp_lost={liveRisk.HpLost} " +
                             $"hp_before={liveRisk.HpBefore} hp_after={liveRisk.HpAfter} " +
-                            $"player_dead={liveRisk.PlayerDead} moves={liveRisk.MonsterMoves}");
+                            $"player_dead={liveRisk.PlayerDead} moves={liveRisk.MonsterMoves} " +
+                            $"full_auto_stopped={_stopFullAutoOnDeathTurn.ToString().ToLowerInvariant()}");
                         return;
                     }
                 }
@@ -2628,10 +2680,12 @@ internal static partial class SolverController
         catch (Exception ex)
         {
             _combat.ContinuationSource = null;
-            _combat.FullAutoEnabled = false;
             _combat.AutomaticSearchPaused = true;
             _combat.AutomaticSearchPausedTurn = turn;
             _combat.BugReportIssues.RecordFailure(CombatBugReportIssueKind.DeploymentFailure, ex);
+            SolverAutoStatus.RecordError(
+                "deployment_failure",
+                $"turn={turn} {SolverAutoStatus.Describe(ex)} handed_back_turn=true");
             SolverOverlay.RefreshControls();
             Entry.Logger.Error($"[CombatSolver/Test] DEPLOY_FAILURE turn={turn} exception={ex}");
         }
@@ -2664,10 +2718,12 @@ internal static partial class SolverController
     private static void PauseAfterNativeChoiceFailure(NGame host, SolverDeploymentSession deployment, int turn, Exception failure)
     {
         _combat.ContinuationSource = null;
-        _combat.FullAutoEnabled = false;
         _combat.AutomaticSearchPaused = true;
         _combat.AutomaticSearchPausedTurn = turn;
         _combat.BugReportIssues.RecordFailure(CombatBugReportIssueKind.DeploymentFailure, failure);
+        SolverAutoStatus.RecordError(
+            "native_choice_failure",
+            $"turn={turn} {SolverAutoStatus.Describe(failure)} handed_back_turn=true");
         CompleteDeployment(deployment);
         SolverOverlay.RefreshControls();
         Entry.Logger.Error($"[CombatSolver/Test] DEPLOY_CHOICE_PAUSED turn={turn} exception={failure}");

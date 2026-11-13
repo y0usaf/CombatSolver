@@ -118,9 +118,11 @@ Fork 发生在动作、选牌、Power、死亡和出牌事务允许复制的稳�
 
 ## 5. UI
 
-界面只有战斗内的自动开关：`SolverOverlay` 在战斗进行中创建一个 `SolverAutoToggle`，按原生 End Turn 按钮的位置摆在右下角；开关只调用 `SolverController.SetFullAuto` 并把 `autoPlay` 写回设置，不读取搜索分支、快照或 `ModelDb`。
+界面只有自动开关与只读状态面板：`SolverOverlay` 把 `SolverAutoToggle` 插进原生顶部栏，紧挨 Map 按钮左侧，纹理与字体取自原生 End Turn 按钮；开关只调用 `SolverController.SetFullAuto` 并把 `autoPlay` 写回设置，不读取搜索分支、快照或 `ModelDb`。关闭为蓝、开启为绿、开启且求解器出错或未能行动为红。
 
-路线、摘要、设置页与内存条已移除；所有策略值固定在 `SolverSettings.Capture`，控制器只负责政策冻结和续用失效。开关文案中英同时维护。
+`SolverOverlayHost` 独占 Ctrl+F9（切换自动）与 Ctrl+F10（状态面板）两个热键，并在原生顶部栏出现后接入开关。`SolverStatusPanel` 消费 `SolverController.AutoStatus` 的只读快照（当前状态、上次决策与耗时、最近事件）。事件来源 `SolverAutoStatus` 归 Runtime 所有：它只记录状态、跳过、出错与停止的原因，同一行同时写入游戏日志前缀 `[CombatSolver/Auto]`。
+
+路线、摘要、设置页与内存条已移除；所有策略值固定在 `SolverSettings.Capture`，控制器只负责政策冻结和续用失效。自动开关只由玩家关闭：预测胜利回合、预测死亡回合、重算战损上升、搜索或部署异常、实机收尾风险都不再关闭开关，而是跳过该回合、把回合交回玩家并记录原因；停止开关的旧开关只保留给无人测试显式启用。开关与面板文案中英同时维护。
 
 ## 6. Testing
 
