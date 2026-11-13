@@ -122,7 +122,6 @@ internal static class ModRuntime
         SolverSettings.ApplyForTesting(new SolverSettingsData
         {
             OnlineStatisticsEnabled = false,
-            SearchCompletionNotificationsEnabled = false,
         });
         SolverSettings.OverrideSnapshotForTesting(current => current with
         {

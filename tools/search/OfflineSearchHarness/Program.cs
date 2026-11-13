@@ -79,10 +79,6 @@ internal static class Program
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_PROBE_STATICS") is { Length: > 0 } filter)
                 Step(steps, "P 静态构造探针", () => $"types={GameBootstrap.ProbeStaticConstructors(filter)}");
             GeneratedScenarioSetup? generated = null;
-            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_MEMORY_DISPLAY_CHECKS") == "1")
-                MemoryDisplayChecks.Run();
-            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_MEMORY_DISPLAY_CHECKS") == "baseline")
-                MemoryDisplayChecks.ReproduceOldCapacity();
             UnattendedTestRunner.OfflineScenarioSession? session = null;
             CombatState? combat = null;
 
