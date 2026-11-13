@@ -131,11 +131,6 @@ internal sealed partial class UnattendedTestRunner
                 await runner.RunNoveltySearchBenchmarkAsync(combatState, player);
                 return Observation(combatEnded: !CombatManager.Instance.IsInProgress);
             }
-            if (request.ScenarioId == "DISPLAY-NAME-SUMMON")
-            {
-                await runner.AssertDisplayNameSummonAsync(combatState, player);
-                return Observation(combatEnded: false);
-            }
             if (request.ScenarioId == "PREDICTED-MONSTER-SCALING")
             {
                 runner.AssertPredictedMonsterScalingBoundary(combatState);
@@ -159,16 +154,6 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "LOOP-DEFENSIVE-VALUE")
             {
                 await runner.AssertLoopDefensiveValueAsync(combatState, player);
-                return Observation(combatEnded: false);
-            }
-            if (request.ScenarioId == "ROUTE-ROW-REUSE")
-            {
-                await runner.AssertRouteRowReuseAndMeasureAsync();
-                return Observation(combatEnded: false);
-            }
-            if (request.ScenarioId == "DEPLOYMENT-PRESENTATION-TURN")
-            {
-                runner.AssertDeploymentPresentationTurn();
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId is "ORBIT-SEARCH-QUALITY" or "ORBIT-SEARCH-QUALITY-SHORT" or "ORBIT-SEARCH-QUALITY-DEPLOY"
@@ -296,11 +281,6 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "CROSS-CHARACTER-ARROW")
             {
                 await runner.AssertCrossCharacterArrowAsync(combatState, player);
-                return Observation(combatEnded: false);
-            }
-            if (request.ScenarioId == "DINGY-DAGGER-NAMES")
-            {
-                runner.AssertDingyDaggerNames(combatState);
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId == "CHOICE-SHAPE-INSPECTION")
@@ -454,11 +434,6 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "GROWTH-ANCIENT-POLICY")
             {
                 await runner.AssertAncientGrowthPolicyAsync(combatState, player);
-                return Observation(combatEnded: false);
-            }
-            if (request.ScenarioId == "UI-COMPACT-QOL")
-            {
-                await SolverOverlay.ExerciseCompactQolForTesting(combatState);
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId == "PROCESS-DIAGNOSTICS")
@@ -660,11 +635,6 @@ internal sealed partial class UnattendedTestRunner
                 await runner.AssertNativeHandChoiceReplayAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
-            if (request.ScenarioId == "UI-PRIORITY-FEEDBACK")
-            {
-                await SolverOverlay.ExercisePriorityUiForTesting(combatState);
-                return Observation(combatEnded: false);
-            }
             if (request.ScenarioId is "NORMALITY-AUTOPLAY" or "NORMALITY-AUTOPLAY-REPLAY")
             {
                 await runner.AssertNormalityAutoPlayAsync(combatState, player);
@@ -673,19 +643,6 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "NOVELTY-PORTFOLIO-SETTINGS")
             {
                 runner.AssertSearchPortfolioSettings(combatState);
-                return Observation(combatEnded: false);
-            }
-            if (request.ScenarioId == "UI-LOCALIZATION")
-            {
-                RunStatistics.Start(MegaCrit.Sts2.Core.Nodes.NGame.Instance!);
-                if (MegaCrit.Sts2.Core.Nodes.NGame.Instance!.GetNodeOrNull("CombatSolverRunStatistics") != null)
-                    throw new InvalidOperationException("Headless statistics must remain inactive.");
-                await runner.AssertUiLocalizationAsync(combatState);
-                return Observation(combatEnded: false);
-            }
-            if (request.ScenarioId == "REQUEST-BUDGET-DISPLAY")
-            {
-                await runner.AssertRequestBudgetDisplayAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId == "COMBAT-DIAGNOSTIC-LOG")
@@ -1542,16 +1499,14 @@ internal sealed partial class UnattendedTestRunner
                 await runner.PrepareRecordedPlanDeploymentAsync(combatState);
             if (request.TheftPolicyForTest is { } theftPolicy)
                 SolverController.SetTheftPolicyForTesting(combatState, theftPolicy);
-            SolverController.SetStopFullAutoOnCombatEnd(false, persist: false);
+            SolverController.SetStopFullAutoOnCombatEnd(false);
             SolverController.SetStopFullAutoOnDeathTurn(
                 request.ExpectedFullAutoPausedAtDeathTurn
-                    || request.ExpectedFullAutoPausedAtLiveRisk,
-                persist: false);
+                    || request.ExpectedFullAutoPausedAtLiveRisk);
             SolverController.SetStopFullAutoOnWorseRecalculation(
                 request.EnableStopOnWorseRecalculationForTest
                     || request.ExpectedFullAutoPausedAfterWorseRecalculation
-                    || request.ExpectedFullAutoPausedAtLiveRisk,
-                persist: false);
+                    || request.ExpectedFullAutoPausedAtLiveRisk);
             runner._protocolHost.EnableAutomaticTurnSearch();
             bool manualMemoryReleaseContract = request.ScenarioId == "MANUAL-MEMORY-RELEASE-AUTO-CONTRACT";
             if (request.HoldAfterInitialSearch
@@ -1614,42 +1569,14 @@ internal sealed partial class UnattendedTestRunner
                             && trace.Stage == "Selected");
                         if (solverSelected)
                             throw new InvalidOperationException("单步执行越过边界并替玩家完成了下一回合选牌。");
-                        if (SolverOverlay.CurrentSnapshotTurnForTesting != expectedTurn)
-                        {
-                            throw new InvalidOperationException(
-                                $"下一回合选牌页已显示，但路线 UI 仍停在第 " +
-                                $"{SolverOverlay.CurrentSnapshotTurnForTesting?.ToString() ?? "-"} 回合；" +
-                                $"预期第 {expectedTurn} 回合。");
-                        }
                         runner._completedChecks.Add(
-                            $"SingleStepBoundary:Turn={expectedTurn}:Surface=Hand:Selected=0:UiTurn={expectedTurn}");
+                            $"SingleStepBoundary:Turn={expectedTurn}:Surface=Hand:Selected=0");
                         Entry.Logger.Info(
                             $"[CombatSolver/Test] SINGLE_STEP_BOUNDARY turn={expectedTurn} " +
-                            $"surface=Hand waiting_for_player=true solver_selected=false ui_turn={expectedTurn}");
+                            "surface=Hand waiting_for_player=true solver_selected=false");
                         if (request.ScenarioId is "TOASTY-QOL-MANUAL-SAME" or "TOASTY-QOL-MANUAL-DIFFERENT"
                             or "TOASTY-QOL-FROZEN-SAME" or "TOASTY-QOL-FROZEN-DIFFERENT")
                         {
-                            if (request.ScenarioId == "TOASTY-QOL-MANUAL-SAME")
-                            {
-                                SolverResult source = SolverController.LastCompletedResultForTesting
-                                    ?? throw new InvalidOperationException("原生选牌预览缺少首轮路线。");
-                                BattleDamageSnapshot observed = new(7, 0, 0, [], 2);
-                                SolverOverlaySnapshot pending = SolverOverlaySnapshot.CapturePendingTurnSetup(
-                                    source, observed, expectedTurn, unexpectedReplan: false);
-                                int futureLoss = source.HpLostByTurn
-                                    .Where(item => item.Key >= expectedTurn).Sum(item => item.Value);
-                                int futureRecovery = source.HpRecoveredByTurn
-                                    .Where(item => item.Key >= expectedTurn).Sum(item => item.Value);
-                                if (pending.ProjectedBattleHpLost != 7 + futureLoss
-                                    || pending.RouteHpRecovered != 2 + futureRecovery
-                                    || !pending.HpOutcomeText.Contains($"已 7    预计 {7 + futureLoss} HP",
-                                        StringComparison.Ordinal)
-                                    || !pending.DetailsText.Contains("本局已发生 7", StringComparison.Ordinal))
-                                {
-                                    throw new InvalidOperationException("原生选牌预览丢失本场已受伤或已回血前缀。");
-                                }
-                                runner._completedChecks.Add("PendingTurnSetup:ObservedLoss=7:ObservedRecovery=2");
-                            }
                             bool different = request.ScenarioId.EndsWith("DIFFERENT", StringComparison.Ordinal);
                             bool frozen = request.ScenarioId.Contains("FROZEN", StringComparison.Ordinal);
                             int searchesBeforeChoice = SolverController.SearchesStartedForTesting;
@@ -1720,27 +1647,19 @@ internal sealed partial class UnattendedTestRunner
                                 runner.EnsureWithinDeadline();
                                 await runner.NextFrameAsync();
                             }
-                            if (!SolverController.CanExecuteCurrentTurn
-                                || SolverOverlay.ExecuteButtonDisabledForTesting)
+                            if (!SolverController.CanExecuteCurrentTurn)
                             {
                                 throw new InvalidOperationException(
-                                    "回合开始选牌页已有可接管路线，但‘执行本回合’按钮仍不可用：" +
+                                    "回合开始选牌页已有可接管路线，但没有可执行路线：" +
                                     PlayerTurnSetupCoordinator.DescribeControlsForTesting());
                             }
-                        }
-
-                        if (request.ScenarioId == "TOASTY-QOL-AUTO-OFF-FULLAUTO")
-                        {
-                            SolverController.SetAutomaticCalculationEnabled(false, persist: true);
-                            if (SolverController.AutomaticCalculationEnabled)
-                                throw new InvalidOperationException("自动计算未关闭。");
                         }
 
                         long previousDeploymentStartedAt =
                             SolverController.LastDeployedActionStartedAtMillisecondsForTesting;
                         int searchesBeforeTakeover = SolverController.SearchesStartedForTesting;
                         if (request.ScenarioId == "TOASTY-QOL-SINGLE-STEP-EXECUTE")
-                            SolverOverlay.PressExecuteButtonForTesting();
+                            SolverController.RequestDeploy(runner._host, combatState);
                         else if (resumeMode == SingleStepResumeMode.ExecuteCurrentTurn)
                             SolverController.RequestDeploy(runner._host, combatState);
                         else
@@ -1789,10 +1708,6 @@ internal sealed partial class UnattendedTestRunner
                             throw new InvalidOperationException(
                                 "执行本回合的原生选牌接管触发了额外搜索或开启全自动。");
                         }
-                        if (request.ScenarioId == "TOASTY-QOL-AUTO-OFF-FULLAUTO"
-                            && (!SolverController.FullAutoEnabled
-                                || SolverController.AutomaticCalculationEnabled))
-                            throw new InvalidOperationException("关闭自动计算后全自动续执行状态错误。");
                         runner._completedChecks.Add(
                             $"SingleStepTakeover:Mode={resumeMode}:Turn={expectedTurn}:" +
                             $"DelayMs={actualDelay}:Reused=true:UnexpectedReplans=0");
@@ -1867,11 +1782,6 @@ internal sealed partial class UnattendedTestRunner
                     && request.ExpectedUnexpectedReplansAtLeast is { } minimumUnexpectedReplans
                     && maximumUnexpectedReplans >= minimumUnexpectedReplans)
                 {
-                    if (request.ExpectedUnexpectedReplanWarning
-                        && !SolverOverlay.UnexpectedReplanWarningVisibleForTesting)
-                    {
-                        throw new InvalidOperationException("已发生计划外重算，但标题右侧没有显示反馈告警。");
-                    }
                     if (request.ExportBugReportAfterUnexpectedReplan)
                     {
                         string directory = ProjectSettings.GlobalizePath("user://combat-solver-test-bug-reports");
@@ -2014,13 +1924,6 @@ internal sealed partial class UnattendedTestRunner
             {
                 throw new InvalidOperationException(
                     $"战斗只出现 {maximumUnexpectedReplans} 次非预期重算，低于预期下限 {minimumReplans}。");
-            }
-            if (request.ExpectedUnexpectedReplanWarning
-                && maximumUnexpectedReplans > 0
-                && !stoppedAfterExpectedUnexpectedReplan
-                && !SolverOverlay.UnexpectedReplanWarningVisibleForTesting)
-            {
-                throw new InvalidOperationException("已发生计划外重算，但标题右侧没有显示反馈告警。");
             }
 
             if (!stoppedAfterExpectedReuse

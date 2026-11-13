@@ -50,8 +50,6 @@ internal sealed partial class UnattendedTestRunner
         var driver = new CombatBeamSolver(CombatRootSnapshot.Capture(combat), SolverDisplayNames.Capture(combat),
             BattleDamageTracker.Observe(combat), policy);
         var snapshot = setup ? driver.ReplayTurnSetupForTesting() : driver.ReplayEndTurnForTesting();
-        var settings = SolverSettings.Current;
-        SolverSettings.ApplyForTesting(settings with { AutomaticCalculationEnabled = false });
         try
         {
             var expected = CaptureSimulated(snapshot.Simulator, (SimulatedCombatState)snapshot.Simulator.State.CombatState, player, combat.Enemies[0]);
@@ -79,7 +77,7 @@ internal sealed partial class UnattendedTestRunner
             }
             AssertSnapshotEqual(expected, CaptureActual(combat, player, combat.Enemies[0]), _request.ScenarioId, "NativeBoundary");
         }
-        finally { SolverSettings.ApplyForTesting(settings); snapshot.ReleaseSimulator(); }
+        finally { snapshot.ReleaseSimulator(); }
         _completedChecks.Add(_request.ScenarioId + ":FullState:Native:Fork");
     }
 
@@ -211,8 +209,6 @@ internal sealed partial class UnattendedTestRunner
             if (deploymentResult.BestNode.Actions.First().CardId != "VOID_FORM")
                 throw new InvalidOperationException("Forced deployment fixture lost its required action.");
         }
-        var originalSettings = SolverSettings.Current;
-        SolverSettings.ApplyForTesting(originalSettings with { AutomaticCalculationEnabled = false });
         try
         {
             var expected = CaptureSimulated(snapshot.Simulator, (SimulatedCombatState)snapshot.Simulator.State.CombatState,
@@ -261,7 +257,7 @@ internal sealed partial class UnattendedTestRunner
             }
             AssertSnapshotEqual(expected, CaptureActual(combat, player, combat.Enemies[0]), "VoidForm", "NextTurnChoices");
         }
-        finally { SolverSettings.ApplyForTesting(originalSettings); snapshot.ReleaseSimulator(); }
+        finally { snapshot.ReleaseSimulator(); }
         _completedChecks.Add("VoidForm:ForcedTurn:Tyranny:Stratagem:FullReplay:ExecutionContinuation:Native");
     }
 

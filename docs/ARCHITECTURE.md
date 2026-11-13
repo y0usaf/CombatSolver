@@ -118,13 +118,13 @@ Fork 发生在动作、选牌、Power、死亡和出牌事务允许复制的稳�
 
 ## 5. UI
 
-`SolverOverlaySnapshot.Capture` 是结果到展示的唯一投影边界，可读取 `SolverResult` 与显示元数据。`SolverOverlay`、`SolverRouteRow`、`SolverActionPill` 只渲染只读 snapshot。
+界面只有战斗内的自动开关：`SolverOverlay` 在战斗进行中创建一个 `SolverAutoToggle`，按原生 End Turn 按钮的位置摆在右下角；开关只调用 `SolverController.SetFullAuto` 并把 `autoPlay` 写回设置，不读取搜索分支、快照或 `ModelDb`。
 
-路线身份、选择、目标与显示值由主线程投影；UI 不持有搜索分支或从 `ModelDb` 重新解释路线。设置输入由相应面板持有，Controller 负责政策冻结和续用失效。中英文本同时维护。
+路线、摘要、设置页与内存条已移除；所有策略值固定在 `SolverSettings.Capture`，控制器只负责政策冻结和续用失效。开关文案中英同时维护。
 
 ## 6. Testing
 
-源码按 [Testing 入口](../src/Testing/README.md) 收纳：Host 持有编排与协议，Support 持有共享差分辅助，Replay 持有恢复；Contracts 按 Combat/Search/Runtime/UI/ThirdParty 分组，Regressions 保存社区和报告回归。各目录沿用原程序集与 partial 类型。
+源码按 [Testing 入口](../src/Testing/README.md) 收纳：Host 持有编排与协议，Support 持有共享差分辅助，Replay 持有恢复；Contracts 按 Combat/Search/Runtime/ThirdParty 分组，Regressions 保存社区和报告回归。各目录沿用原程序集与 partial 类型。
 
 组件剩余回复上界和 Smart 用药资格合同位于 `Contracts/Search`；根状态与完整原生差分仍由既有 Support/Runtime 合同提供，不改变 partial 方法、请求路由或状态所有权。
 

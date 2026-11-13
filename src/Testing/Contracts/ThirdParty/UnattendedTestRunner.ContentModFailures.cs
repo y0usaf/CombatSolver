@@ -116,7 +116,6 @@ internal sealed partial class UnattendedTestRunner
             catch (IncompatibleGameplayModException failure)
             {
                 if (failure.ModId != "TestContentMod") throw new InvalidOperationException("Content source was lost.", failure);
-                AssertContentFailurePresentation(failure);
             }
         }
     }
@@ -181,7 +180,6 @@ internal sealed partial class UnattendedTestRunner
                     if (failure.ModId != "TestContentMod"
                         || !failure.Subject.Contains(typeof(UnadaptedContentModel).FullName!, StringComparison.Ordinal))
                         throw new InvalidOperationException("Content failure lost its model and mod source.", failure);
-                    AssertContentFailurePresentation(failure);
                 }
             }
             if (model.Calls != 0)
@@ -196,7 +194,11 @@ internal sealed partial class UnattendedTestRunner
                 computed.InvokeCalculate(simulator, card, combat.Enemies[0]);
                 throw new InvalidOperationException("Unadapted computed variable was accepted.");
             }
-            catch (IncompatibleGameplayModException failure) { AssertContentFailurePresentation(failure); }
+            catch (IncompatibleGameplayModException failure)
+            {
+                if (failure.ModId != "TestContentMod")
+                    throw new InvalidOperationException("Content source was lost.", failure);
+            }
             if (computed.CalculateCalled)
                 throw new InvalidOperationException("Unadapted native variable evaluator was executed.");
 
@@ -219,9 +221,7 @@ internal sealed partial class UnattendedTestRunner
             {
                 var ledger = new CombatBugReportIssueLedger();
                 ledger.RecordFailure(CombatBugReportIssueKind.SearchFailure, new InvalidOperationException("wrapper", failure));
-                if (failure is IncompatibleGameplayModException || !ledger.RequiresPlayerUpload
-                    || !SolverController.FormatSearchFailureForTesting(failure, false)
-                        .Contains(SolverUiTokens.BugReportUploadInstruction, StringComparison.Ordinal))
+                if (failure is IncompatibleGameplayModException || !ledger.RequiresPlayerUpload)
                     throw new InvalidOperationException("Native or runtime failure must retain its diagnostic upload prompt.");
                 if (failure is PlatformNotSupportedException
                     && ledger.Snapshot().Any(issue => issue.Kind == CombatBugReportIssueKind.UnsupportedCombatSemantic))
@@ -233,37 +233,6 @@ internal sealed partial class UnattendedTestRunner
         {
             LocManager.Instance.SetLanguage(previousLanguage);
             AssemblyInfo.MockTypes = previousMocks;
-        }
-        AssertUploadGuidance(combat, player);
-    }
-
-    private static void AssertContentFailurePresentation(IncompatibleGameplayModException failure)
-    {
-        var wrapped = new InvalidOperationException("search wrapper", failure);
-        foreach (string language in new[] { "eng", "zhs", "zht" })
-        {
-            LocManager.Instance.SetLanguage(language);
-            string expected = language == "eng"
-                ? "The solver does not yet support this content mod: Content ［Test］（TestContentMod）. This combat cannot be solved."
-                : "求解器暂未适配此内容性 Mod：Content ［Test］（TestContentMod），无法求解。";
-            foreach (string text in new[]
-            {
-                SolverController.FormatSearchSetupFailure(wrapped),
-                SolverController.FormatSearchFailureForTesting(wrapped, true),
-            })
-                if (!text.Contains(expected, StringComparison.Ordinal)
-                    || text.Contains(SolverUiTokens.BugReportUploadInstruction, StringComparison.Ordinal)
-                    || text.Contains(SolverUiTokens.ParallelSearchFailureInstruction, StringComparison.Ordinal)
-                    || text.Contains(failure.Subject, StringComparison.Ordinal))
-                    throw new InvalidOperationException($"Content mod prompt is incorrect: {language}.");
-        }
-        foreach (var primary in new[] { CombatBugReportIssueKind.SearchSetupFailure, CombatBugReportIssueKind.SearchFailure,
-            CombatBugReportIssueKind.DeploymentFailure, CombatBugReportIssueKind.TurnSetupFailure })
-        {
-            var ledger = new CombatBugReportIssueLedger();
-            ledger.RecordFailure(primary, wrapped);
-            if (ledger.RequiresPlayerUpload || ledger.Snapshot().Single().Kind != CombatBugReportIssueKind.IncompatibleGameplayMod)
-                throw new InvalidOperationException("Content failure requested a bug report.");
         }
     }
 }

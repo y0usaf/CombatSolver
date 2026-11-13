@@ -38,9 +38,9 @@ internal sealed partial class UnattendedTestRunner
                 SearchMaxDegreeOfParallelism = 1,
             });
             SolverController.BeginCombat(combat);
-            SolverController.SetStopFullAutoOnCombatEnd(false, persist: false);
-            SolverController.SetStopFullAutoOnDeathTurn(false, persist: false);
-            SolverController.SetStopFullAutoOnWorseRecalculation(false, persist: false);
+            SolverController.SetStopFullAutoOnCombatEnd(false);
+            SolverController.SetStopFullAutoOnDeathTurn(false);
+            SolverController.SetStopFullAutoOnWorseRecalculation(false);
             _protocolHost.EnableAutomaticTurnSearch();
             SolverController.SetFullAuto(_host, combat, true);
             while (CombatManager.Instance.IsInProgress)

@@ -36,7 +36,6 @@ internal sealed partial class UnattendedTestRunner
                 SetRelicStateMember(relic, member, entry.Period - 1);
             }
             var rules = RelicCounterCatalog.All.Where(entry => entry.Id != RelicCounterId.MeatOnTheBone).Select(entry => new RelicCounterRule(entry.Id, true, entry.Period - 1, entry.Period - 1, 2)).ToArray();
-            SolverSettings.ApplyForTesting(original with { AutomaticCalculationEnabled = false });
             SolverSettings.OverrideSnapshotForTesting(current => current with { RelicStrategyEnabled = true, RelicCounterRules = rules });
             var targets = RelicCounterCatalog.Capture(combat, true, rules);
             Check(targets.Count == 10 && RelicCounterCatalog.Capture(combat, false, rules).Count == 0, "master switch");

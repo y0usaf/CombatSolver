@@ -27,7 +27,7 @@ internal static partial class SolverController
         _combat.ReplanCounts[ReplanCause.InitialSearch] = 1;
         LastCompletedResultForTesting = result;
         BattleDamageTracker.RegisterPlan(state, result);
-        SolverOverlay.ShowResult(host, SolverOverlaySnapshot.Capture(result, unexpectedReplan: false));
+        SolverOverlay.RefreshControls();
         StartFullAutoDeployment(host, state, result);
     }
 }

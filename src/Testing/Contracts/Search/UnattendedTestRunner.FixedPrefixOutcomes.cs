@@ -408,9 +408,6 @@ internal sealed partial class UnattendedTestRunner
             Check(result.TryCreateContinuation(actual, player.Creature.CurrentHp,
                 BattleDamageTracker.Observe(combat), out SolverResult? continuation), "native route reuse");
             Check(continuation!.RequireHpLostForTurn(turn + 1) == result.RequireHpLostForTurn(turn + 1), "reuse retains prefix outcomes");
-            var display = SolverOverlaySnapshot.BattleHpTotalsForDisplay(0, 0, result.HpLostByTurn,
-                result.HpRecoveredByTurn, firstTurn);
-            Check(display.ProjectedLoss == result.Snapshot.CumulativePlayerHpLost, "display includes prefix loss");
         }
         _completedChecks.Add("FixedPrefixOutcomes:NativeThreeTurnContinuation:LiveEndTurnRiskMatches:ReuseAndDisplayTotals");
         await AssertLongFixedPrefixContinuationsAsync(combat, player);

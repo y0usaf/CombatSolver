@@ -87,10 +87,8 @@ description: 重构 CombatSolver 的 Search、Runtime 会话、UI snapshot、无
 - `RoutingChoiceNodes` 只持有本次 RankBest 的有序组和派生统计；分组完成后冻结排名摘要，在本次排名赋值前消费完毕，不把可变父排名放入跨调用缓存。监听分段属于 `SimulatedCombatState` 的分支派生视图；前段/后段均以不可变形式发布，完整路径保留无锚点与不透明 CardModifier 语义。 有效/活动前段与 Power 投影的保留只适用于卡牌/球失效，完整失效清空全部派生段；前段独立存活时仍由同一 Fork 上下文重映射。
 - controller 状态属于 combat/search/deployment session，不回退为并列静态字段。
 - 跨 SL 路线记录由 Runtime 的 `SolvedRouteCache` 持有磁盘协议；在普通根捕获和回合开始选择根捕获后按状态与策略匹配。结果中的 Forecast 从新根重新绑定，磁盘和跨会话所有者均不得保留旧 Creature/MoveState。Search 不读取路线文件。
-- UI renderer 只消费 `SolverOverlay*Snapshot`；结果到 snapshot 的复制发生在主线程边界。
-- `SolverActionBar` 只消费布局状态及已有控件，不读取 Controller 或战斗对象；命令绑定和能力判断仍由 Overlay 接入既有 Runtime 入口。
-- 改动 UI 文案及投影时读取 `../ui-localization/SKILL.md`：保留中英模板和胶囊/tooltip 的统一来源；名称与语言在主线程捕获，worker 使用冻结显示表。不要把日志 Describe 重新接回玩家界面或把本地化带入 Search。
-- 设置页自身驱动的后台任务使用控件所有者的完成邮箱收口；问题包上传的成功、失败和取消由 `SolverSettingsPanel._Process` 消费，不借用搜索生命周期的 `SolverDispatcher`。
+- UI 只有战斗内自动开关：`SolverOverlay` 负责创建与定位 `SolverAutoToggle`，开关只调用 `SolverController.SetFullAuto` 并写回 `autoPlay`；不读取搜索分支、结果快照或 `ModelDb`。
+- 改动开关文案时读取 `../ui-localization/SKILL.md`：中英同时维护，不把本地化带入 Search。不要把日志 Describe 重新接回玩家界面。
 - 问题包 `CombatBugReportMetadata` 在主线程冻结战斗/角色/怪物与比较标量；Uploader 读取归档中的同一份 report.json，发送前核对身份和玩家描述。新包按 report.json、diagnostics/、replay/ 组织，CheckpointArchive 兼容旧包路径，禁止后台重新采样 live 元数据。
 - unattended 的协议、建局、执行、断言和结果写入分别属于 ProtocolHost、ScenarioBuilder、Executor、Assertions、Writer。GeneratedCombatScenario只解析原版目录与独立种子流；ScenarioBuilder执行生成配置并独占临时开局选择器，Writer保存完整配置/装备/开局证据。批量脚本不得把生成随机流写入游戏战斗RNG或把选择器延长到正式部署。
 - `src/Replay` 只依赖标准库：包校验、顺序事件临时文件；Runtime 冻结原生输入，Testing 重放和对账，CheckpointTool 负责批量调度与结果口径。跨平台脚本只承担本平台启动与进程所有权。

@@ -553,7 +553,7 @@ internal sealed partial class UnattendedTestRunner
             {
                 SolverSettings.ApplyForTesting(settingsBefore with
                 {
-                    Speed = settingsBefore.Speed == SolverSpeed.Fast ? SolverSpeed.Normal : SolverSpeed.Fast,
+                    AutoPlay = !settingsBefore.AutoPlay,
                 });
                 if (before == PreCombatForecastApi.CaptureLiveStateToken(runState))
                     throw new InvalidOperationException("求解设置变化没有使战前缓存令牌失效。");

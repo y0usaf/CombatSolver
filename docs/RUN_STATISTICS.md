@@ -22,13 +22,13 @@ RunManager 的新局/Launch 与 SaveManager.SaveRunHistory 补丁只采样主线
 
 续档沿用档案＋原生开局时间＋种子派生的匿名跑局 ID。首次初始化安装标识使用共享 Lazy，在线心跳与战绩使用同一个标识。worker 只读取自己已跟踪跑局的原生 `.run` 结算文件，补回异常退出时未写完的结算，不用历史包猜求解器参与。
 
-开启多人、无头或无人测试不启动跑局统计采集。设置说明有中英文。原生 UI 操作、长时间帧率和真实结算尚需可见游戏验收；自动合同不替代这些项目。
+开启多人、无头或无人测试不启动跑局统计采集。原生 UI 操作、长时间帧率和真实结算尚需可见游戏验收；自动合同不替代这些项目。
 
 ## 客户端接口与验证
 
 匿名事件发送至 `POST /v1/runs`（`{sessionId,run}`），首次历史快照发送至 `POST /v1/run-history`（`{sessionId,historical}`）。问题包 report.json 的可选 runStatistics 是提交时快照，后续成绩变化不改旧报告。
 
 - `dotnet run --project tools/testing/checks/RunStatisticsTests -c Release`：连胜、放弃、缺口、持久化、去重、补传收据、历史隔离和原生结算恢复。
-- `UI-LOCALIZATION`：中英设置与 headless 统计节点隔离。
+- `PROCESS-DIAGNOSTICS`：headless 统计节点保持不启动。
 
 服务存储、管理筛选及 Node 测试在独立私有仓库 [combatsolver-presence-service](https://github.com/Torch1230/combatsolver-presence-service/blob/main/docs/RUN_STATISTICS.md) 维护。

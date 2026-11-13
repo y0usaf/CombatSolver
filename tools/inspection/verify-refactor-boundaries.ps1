@@ -18,10 +18,7 @@ $forbiddenSearchReferences = @(
     "SolverController",
     "SolverOverlay",
     "SolverText",
-    "SolverRelicEffectText",
     "SolverUiModelNames",
-    "SolverActionTextIdentity",
-    "SolverLocaleRefresh",
     "SolvedRouteCache",
     "RunStatistics",
     "UnattendedTestRunner"
@@ -1861,26 +1858,18 @@ foreach ($executorImplementation in @(
     }
 }
 
-$overlaySnapshotPath = Join-Path $repositoryRoot "src\UI\SolverOverlaySnapshot.cs"
-$overlayRendererPaths = @(
-    (Join-Path $repositoryRoot "src\UI\SolverOverlay.cs"),
-    (Join-Path $repositoryRoot "src\UI\SolverRouteRow.cs"),
-    (Join-Path $repositoryRoot "src\UI\SolverActionPill.cs"),
-    (Join-Path $repositoryRoot "src\UI\SolverActionBar.cs")
-)
+$overlayPath = Join-Path $repositoryRoot "src\UI\SolverOverlay.cs"
+$togglePath = Join-Path $repositoryRoot "src\UI\SolverAutoToggle.cs"
 foreach ($check in @(
-    @{ Path = $overlaySnapshotPath; Text = "internal sealed record SolverOverlaySnapshot(" },
-    @{ Path = $overlaySnapshotPath; Text = "public static SolverOverlaySnapshot Capture(SolverResult result, bool unexpectedReplan)" },
-    @{ Path = Join-Path $repositoryRoot "src\UI\SolverOverlay.cs"; Text = "public static void ShowResult(Node host, SolverOverlaySnapshot snapshot)" },
-    @{ Path = Join-Path $repositoryRoot "src\UI\SolverRouteRow.cs"; Text = "public void Populate(SolverOverlayTurnSnapshot turn)" },
-    @{ Path = Join-Path $repositoryRoot "src\UI\SolverActionPill.cs"; Text = "public static Control Create(SolverOverlayActionSnapshot action)" },
-    @{ Path = Join-Path $repositoryRoot "src\Runtime\SolverController.cs"; Text = "SolverOverlaySnapshot.CaptureWithReviewedWorldlines(" })) {
+    @{ Path = $overlayPath; Text = "FindEndTurnButton" },
+    @{ Path = $togglePath; Text = "SolverController.SetFullAuto(" },
+    @{ Path = $togglePath; Text = "AutoPlay =" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
-        $violations.Add("$($check.Path): missing overlay snapshot boundary '$($check.Text)'")
+        $violations.Add("$($check.Path): missing auto toggle boundary '$($check.Text)'")
     }
 }
-foreach ($rendererPath in $overlayRendererPaths) {
-    foreach ($mutableSearchType in @("SolverResult", "PlanAction", "PlanCardChoice", "ModelDb")) {
+foreach ($rendererPath in @($overlayPath, $togglePath)) {
+    foreach ($mutableSearchType in @("SolverResult", "PlanAction", "PlanCardChoice", "ModelDb", "SolverOverlaySnapshot")) {
         foreach ($match in Select-String -LiteralPath $rendererPath -SimpleMatch $mutableSearchType) {
             $violations.Add("${rendererPath}:$($match.LineNumber): mutable search type '$mutableSearchType' returned to renderer")
         }
@@ -1890,11 +1879,6 @@ foreach ($rendererPath in $overlayRendererPaths) {
 $bugReportExporterPath = Join-Path $repositoryRoot "src\Runtime\CombatBugReportExporter.cs"
 $diagnosticJournalPath = Join-Path $repositoryRoot "src\Runtime\CombatDiagnosticJournal.cs"
 $bugReportUploaderPath = Join-Path $repositoryRoot "src\Runtime\CombatBugReportUploader.cs"
-$solverSettingsPanelPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.cs"
-$solverSettingsGeneralPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.General.cs"
-$solverSettingsPerformancePath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.Performance.cs"
-$solverSettingsBugReportsPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.BugReports.cs"
-$solverSettingsControlsPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.Controls.cs"
 foreach ($check in @(
     @{ Path = $diagnosticJournalPath; Text = "AppendOnlyEventLog<CombatLogEntry>" },
     @{ Path = $diagnosticJournalPath; Text = "_session?.Log.CaptureAsync()" },
@@ -1911,12 +1895,7 @@ foreach ($check in @(
     @{ Path = $bugReportUploaderPath; Text = "HttpCompletionOption.ResponseHeadersRead" },
     @{ Path = $bugReportUploaderPath; Text = "CancellationToken requestCancellationToken" },
     @{ Path = $bugReportUploaderPath; Text = "ReadServerReceipt(body)" },
-    @{ Path = $bugReportUploaderPath; Text = "UseProxy = false" },
-    @{ Path = $solverSettingsBugReportsPath; Text = "private ProgressBar _uploadProgress = null!;" },
-    @{ Path = $solverSettingsBugReportsPath; Text = "private volatile bool _uploadInProgress;" },
-    @{ Path = $solverSettingsBugReportsPath; Text = "Interlocked.Exchange(ref _uploadCompletion, completion)" },
-    @{ Path = $solverSettingsBugReportsPath; Text = "TryApplyUploadCompletion()" },
-    @{ Path = $solverSettingsBugReportsPath; Text = "等待服务器确认" })) {
+    @{ Path = $bugReportUploaderPath; Text = "UseProxy = false" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing bug-report ownership boundary '$($check.Text)'")
     }
@@ -1927,34 +1906,6 @@ if (Select-String -LiteralPath $bugReportUploaderPath -SimpleMatch "using Godot"
 foreach ($legacyLogRead in @("AddFileTail(", "CaptureLogStarts(", '"*.log"')) {
     if (Select-String -LiteralPath $bugReportExporterPath -SimpleMatch $legacyLogRead -Quiet) {
         $violations.Add("${bugReportExporterPath}: global log collection must stay out of report exports")
-    }
-}
-
-$searchCompletionNotifierPath = Join-Path $repositoryRoot "src\Runtime\SearchCompletionNotifier.cs"
-foreach ($check in @(
-    @{ Path = $searchCompletionNotifierPath; Text = "if (!OperatingSystem.IsWindows())" },
-    @{ Path = $searchCompletionNotifierPath; Text = "DisplayServer.GetName()" },
-    @{ Path = $searchCompletionNotifierPath; Text = 'EntryPoint = "Shell_NotifyIconW"' },
-    @{ Path = $searchCompletionNotifierPath; Text = 'EntryPoint = "LoadIconW"' },
-    @{ Path = $searchCompletionNotifierPath; Text = "GetWindowThreadProcessId(foreground, out uint processId)" },
-    @{ Path = $searchCompletionNotifierPath; Text = "ShellNotifyIcon(NotifyIconDelete, ref data)" },
-    @{ Path = $controllerPath; Text = "SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)" },
-    @{ Path = $turnSetupPath; Text = "SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed)" },
-    @{ Path = $solverSettingsGeneralPath; Text = "CreateSearchCompletionNotificationPolicyInput()" })) {
-    if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
-        $violations.Add("$($check.Path): missing search completion notification boundary '$($check.Text)'")
-    }
-}
-
-foreach ($check in @(
-    @{ Path = $solverSettingsPanelPath; Text = "TrySelectPage(SettingsPage page)" },
-    @{ Path = $solverSettingsPanelPath; Text = "CommitPending()" },
-    @{ Path = $solverSettingsGeneralPath; Text = "CreateGeneralPage()" },
-    @{ Path = $solverSettingsPerformancePath; Text = "CreatePerformancePage()" },
-    @{ Path = $solverSettingsBugReportsPath; Text = "CreateBugReportsPage()" },
-    @{ Path = $solverSettingsControlsPath; Text = "CreatePageScroll(Control content)" })) {
-    if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
-        $violations.Add("$($check.Path): missing settings panel ownership boundary '$($check.Text)'")
     }
 }
 

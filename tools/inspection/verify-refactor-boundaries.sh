@@ -1461,25 +1461,21 @@ for executor_implementation in \
     forbid_fixed "$unattended_entry_path" "$executor_implementation" 'unattended executor implementation returned outside Executor:'
 done
 
-overlay_snapshot_path="$repository_root/src/UI/SolverOverlaySnapshot.cs"
-while IFS=$'\t' read -r relative_path text; do
-    require_fixed "$repository_root/$relative_path" "$text" 'missing overlay snapshot boundary'
-done <<'EOF'
-src/UI/SolverOverlaySnapshot.cs	internal sealed record SolverOverlaySnapshot(
-src/UI/SolverOverlaySnapshot.cs	public static SolverOverlaySnapshot Capture(SolverResult result, bool unexpectedReplan)
-src/UI/SolverOverlay.cs	public static void ShowResult(Node host, SolverOverlaySnapshot snapshot)
-src/UI/SolverRouteRow.cs	public void Populate(SolverOverlayTurnSnapshot turn)
-src/UI/SolverActionPill.cs	public static Control Create(SolverOverlayActionSnapshot action)
-src/Runtime/SolverController.cs	SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-EOF
-overlay_renderer_paths=(
-    "$repository_root/src/UI/SolverOverlay.cs"
-    "$repository_root/src/UI/SolverRouteRow.cs"
-    "$repository_root/src/UI/SolverActionPill.cs"
-    "$repository_root/src/UI/SolverActionBar.cs"
-)
-for renderer_path in "${overlay_renderer_paths[@]}"; do
-    for mutable_search_type in SolverResult PlanAction PlanCardChoice ModelDb; do
+overlay_path="$repository_root/src/UI/SolverOverlay.cs"
+toggle_path="$repository_root/src/UI/SolverAutoToggle.cs"
+for required in \
+    'FindEndTurnButton' \
+    'SolverAutoToggle'; do
+    require_fixed "$overlay_path" "$required" 'missing auto toggle boundary:'
+done
+for required in \
+    'SolverController.SetFullAuto(' \
+    'SolverSettings.Update(' \
+    'AutoPlay ='; do
+    require_fixed "$toggle_path" "$required" 'missing auto toggle command boundary:'
+done
+for renderer_path in "$overlay_path" "$toggle_path"; do
+    for mutable_search_type in SolverResult PlanAction PlanCardChoice ModelDb SolverOverlaySnapshot; do
         forbid_fixed "$renderer_path" "$mutable_search_type" 'mutable search type returned to renderer:'
     done
 done
@@ -1487,11 +1483,6 @@ done
 bug_report_exporter_path="$repository_root/src/Runtime/CombatBugReportExporter.cs"
 diagnostic_journal_path="$repository_root/src/Runtime/CombatDiagnosticJournal.cs"
 bug_report_uploader_path="$repository_root/src/Runtime/CombatBugReportUploader.cs"
-solver_settings_panel_path="$repository_root/src/UI/SolverSettingsPanel.cs"
-solver_settings_general_path="$repository_root/src/UI/SolverSettingsPanel.General.cs"
-solver_settings_performance_path="$repository_root/src/UI/SolverSettingsPanel.Performance.cs"
-solver_settings_bug_reports_path="$repository_root/src/UI/SolverSettingsPanel.BugReports.cs"
-solver_settings_controls_path="$repository_root/src/UI/SolverSettingsPanel.Controls.cs"
 while IFS=$'\t' read -r path text; do
     require_fixed "$path" "$text" 'missing bug-report ownership boundary'
 done <<EOF
@@ -1511,42 +1502,11 @@ $bug_report_uploader_path	HttpCompletionOption.ResponseHeadersRead
 $bug_report_uploader_path	CancellationToken requestCancellationToken
 $bug_report_uploader_path	ReadServerReceipt(body)
 $bug_report_uploader_path	UseProxy = false
-$solver_settings_bug_reports_path	private ProgressBar _uploadProgress = null!;
-$solver_settings_bug_reports_path	private volatile bool _uploadInProgress;
-$solver_settings_bug_reports_path	Interlocked.Exchange(ref _uploadCompletion, completion)
-$solver_settings_bug_reports_path	TryApplyUploadCompletion()
-$solver_settings_bug_reports_path	等待服务器确认
 EOF
 forbid_fixed "$bug_report_uploader_path" 'using Godot' 'uploader must not own Godot UI state:'
 for legacy_log_read in 'AddFileTail(' 'CaptureLogStarts(' '"*.log"'; do
     forbid_fixed "$bug_report_exporter_path" "$legacy_log_read" 'global log collection must stay out of report exports:'
 done
-
-search_completion_notifier_path="$repository_root/src/Runtime/SearchCompletionNotifier.cs"
-while IFS=$'\t' read -r path text; do
-    require_fixed "$path" "$text" 'missing search completion notification boundary'
-done <<EOF
-$search_completion_notifier_path	if (!OperatingSystem.IsWindows())
-$search_completion_notifier_path	DisplayServer.GetName()
-$search_completion_notifier_path	EntryPoint = "Shell_NotifyIconW"
-$search_completion_notifier_path	EntryPoint = "LoadIconW"
-$search_completion_notifier_path	GetWindowThreadProcessId(foreground, out uint processId)
-$search_completion_notifier_path	ShellNotifyIcon(NotifyIconDelete, ref data)
-$repository_root/src/Runtime/SolverController.cs	SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)
-$repository_root/src/Runtime/PlayerTurnSetupPatches.cs	SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed)
-$solver_settings_general_path	CreateSearchCompletionNotificationPolicyInput()
-EOF
-
-while IFS=$'\t' read -r path text; do
-    require_fixed "$path" "$text" 'missing settings panel ownership boundary'
-done <<EOF
-$solver_settings_panel_path	TrySelectPage(SettingsPage page)
-$solver_settings_panel_path	CommitPending()
-$solver_settings_general_path	CreateGeneralPage()
-$solver_settings_performance_path	CreatePerformancePage()
-$solver_settings_bug_reports_path	CreateBugReportsPage()
-$solver_settings_controls_path	CreatePageScroll(Control content)
-EOF
 
 mirror_registry_path="$repository_root/src/Engine/Common/Mirrors/MethodMirrorRegistry.cs"
 mirror_descriptor_path="$repository_root/src/Engine/Common/Mirrors/MethodMirrorRegistryDescriptor.cs"

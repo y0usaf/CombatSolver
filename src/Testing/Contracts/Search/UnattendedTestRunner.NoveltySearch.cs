@@ -126,9 +126,9 @@ internal sealed partial class UnattendedTestRunner
                 if (!result.Snapshot.AllEnemiesDead || result.Snapshot.PlayerDead || result.Snapshot.HasRisk)
                     throw new InvalidOperationException("Native benchmark deployment requires a predicted safe victory.");
                 using var ledger = new CombatReplayOutcome(combat);
-                SolverController.SetStopFullAutoOnCombatEnd(false, persist: false);
-                SolverController.SetStopFullAutoOnDeathTurn(false, persist: false);
-                SolverController.SetStopFullAutoOnWorseRecalculation(false, persist: false);
+                SolverController.SetStopFullAutoOnCombatEnd(false);
+                SolverController.SetStopFullAutoOnDeathTurn(false);
+                SolverController.SetStopFullAutoOnWorseRecalculation(false);
                 _protocolHost.EnableAutomaticTurnSearch();
                 bool observedEnd = false;
                 (long ActionStarted, int Turn, int Hp, bool Deploying, bool FullAuto, bool Paused)? lastProgress = null;

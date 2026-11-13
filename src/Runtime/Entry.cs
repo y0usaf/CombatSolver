@@ -52,7 +52,6 @@ public static class Entry
         }
         SolverSettings.Load();
         RuntimeGcStartup.Prepare();
-        SolverUiTokens.ConfigureTheme(SolverSettings.Current.OverlayTheme);
         SolverController.ApplyPersistentSettings(SolverSettings.Capture());
         ModTypeDiscoveryHub.RegisterModAssembly(ModId, Assembly.GetExecutingAssembly());
         RitsuLibFramework.SubscribeLifecycle<CombatStartingEvent>(evt => { RunStatistics.Battle(evt.CombatState); SolverController.BeginCombat(evt.CombatState); });

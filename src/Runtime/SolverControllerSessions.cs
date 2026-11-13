@@ -165,7 +165,6 @@ internal sealed class SolverCombatSession
     public bool ManualControlObserved { get; set; }
     public bool ShowcaseMode { get; set; }
     public CombatBugReportIssueLedger BugReportIssues { get; } = new();
-    public CombatBugReportUploadPolicy UploadPolicy { get; } = new();
 }
 
 internal sealed class SolverSearchSession(

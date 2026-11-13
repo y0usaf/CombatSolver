@@ -56,9 +56,6 @@ internal sealed partial class UnattendedTestRunner
             if (nativeRound)
             {
                 var originalSettings = SolverSettings.Current;
-                // The fixture owns this native choice session; disable automatic setup
-                // takeover so the production coordinator does not acquire a second owner.
-                SolverSettings.ApplyForTesting(originalSettings with { AutomaticCalculationEnabled = false });
                 try
                 {
                     using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(20));
