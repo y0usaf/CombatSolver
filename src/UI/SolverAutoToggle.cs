@@ -31,6 +31,8 @@ internal sealed partial class SolverAutoToggle : Button
         Pressed += OnPressed;
     }
 
+    public bool HasAnchor => _anchor is { } anchor && GodotObject.IsInstanceValid(anchor);
+
     public void ApplyAnchorTheme(Control anchor)
     {
         _anchor = anchor;

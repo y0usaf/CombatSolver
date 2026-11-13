@@ -47,6 +47,8 @@ internal static class SolverOverlay
             && _toggle != null
             && GodotObject.IsInstanceValid(_toggle))
         {
+            if (!_toggle.HasAnchor && FindEndTurnButton(host) is { } lateAnchor)
+                _toggle.ApplyAnchorTheme(lateAnchor);
             return;
         }
         Hide();
