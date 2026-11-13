@@ -18,11 +18,6 @@ internal sealed partial class UnattendedTestRunner
         public async Task RunBeforeExecutionAsync(ScenarioContext scenario)
         {
             UnattendedTestRequest request = runner._request;
-            if (request.ScenarioId == "OVERLAY-VISIBILITY-LIFECYCLE")
-            {
-                runner.SetStage("overlay_visibility_lifecycle");
-                await runner.AssertOverlayVisibilityLifecycleAsync(scenario.CombatState);
-            }
             if (request.ScenarioId == "REMAINING-HEALING-LOUSE")
             {
                 runner.SetStage("remaining_healing_louse");
@@ -47,12 +42,6 @@ internal sealed partial class UnattendedTestRunner
             {
                 runner.SetStage("remaining_healing_silent");
                 await runner.AssertRemainingHealingSilentAsync(scenario.CombatState, scenario.Player);
-            }
-            if (request.ScenarioId == "MEMORY-DISPLAY-CONTRACT")
-            {
-                runner.SetStage("memory_display_contract");
-                SearchMemoryUsageSnapshot sample = AssertMemoryDisplayContract();
-                runner._completedChecks.Add($"MemoryDisplay:PhysicalCapacity:Idle:Search:Reclaim:OverThreshold:ServerGC={sample.IsServerGc}");
             }
             if (request.ScenarioId == "POTION-GENERATION-CACHE")
             {

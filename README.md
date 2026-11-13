@@ -28,19 +28,21 @@ LICENSE
 THIRD_PARTY_NOTICES.md
 ```
 
-Enable RitsuLib and Combat Solver, then start a single-player fight. The route panel appears once the turn starts. **Play turn** runs one turn; **Auto: On** plays the fight. The UI is in Chinese when the game is, English otherwise.
+Enable RitsuLib and Combat Solver, then start a single-player fight. One compact toggle labelled **Auto: Off** / **Auto: On** sits above the End Turn button in the bottom-right corner: on, the solver plays the whole fight; off, it does nothing. The label is Chinese when the game is, English otherwise.
 
-## Settings
+## Fixed policy
 
-Settings live in `combat_solver_settings.json` and in the in-game Settings panel. The one search setting is **Calculation speed** (`speed`):
+There is nothing to configure. Every fight runs the same fixed policy:
 
-| Speed | Samples | Candidates | Beam | Nodes | Time per solve |
-|---|---:|---:|---:|---:|---:|
-| `Fast` | 8 | 3 | 16 | 800 | 2.5 s |
-| `Normal` (default) | 12 | 4 | 20 | 1,500 | 5 s |
-| `Thorough` | 16 | 5 | 24 | 2,500 | 10 s |
+- **Search:** 16 samples, 5 candidates, beam 24, 2,500 nodes, 10 s soft budget per solve.
+- **Potions:** the Smart policy; no per-potion overrides.
+- **Boss HP:** progression first, for act and final bosses.
+- **Battle HP loss target:** none; the solver keeps searching for the best route rather than stopping at a chosen loss.
+- **Growth:** default long-term budgets, long-term rewards weighed in, relic counters tracked, multi-width beam portfolio on, novelty and early-turn exploration off.
+- **Auto stop:** when the fight ends, on the death turn, on a worse recalculation, or when the live end-turn risk review finds the player dead or worse than planned.
+- **Deployment:** follows the game's own animation speed with no extra delay.
 
-Online statistics are off unless `fairForkOnlineStatisticsEnabled` is true. Older upstream keys (presets, budgets, parallelism, potion and growth strategies) are ignored and dropped on the next save.
+The toggle state is remembered in `combat_solver_settings.json` (`autoPlay`). Online statistics stay off unless `fairForkOnlineStatisticsEnabled` is true. Unknown or older keys are ignored and dropped on the next save.
 
 ## Build
 

@@ -27,15 +27,14 @@ internal sealed partial class UnattendedTestRunner
             }
             catch (IncompatibleGameplayModException exception)
             {
-                string message = SolverController.FormatSearchFailureForTesting(new InvalidOperationException("wrapper", exception), true);
                 var ledger = new CombatBugReportIssueLedger();
                 ledger.RecordFailure(CombatBugReportIssueKind.SearchSetupFailure, exception);
                 if (exception.ModId != "TestCalculatedMod" || !exception.Subject.Contains(live.Id.Entry)
-                    || !message.Contains("Test Calculated Mod") || message.Contains(SolverUiTokens.BugReportUploadInstruction)
+                    || !exception.PlayerFacingModName.Contains("Test Calculated Mod", StringComparison.Ordinal)
                     || ledger.RequiresPlayerUpload)
                     throw new InvalidOperationException("Third-party calculated failure lost its source or requested upload.");
             }
-            _completedChecks.Add("ThirdPartyCalculatedFailure:SourceClassified:WrappedUi:NoUploadPrompt");
+            _completedChecks.Add("ThirdPartyCalculatedFailure:SourceClassified:NoUploadPrompt");
         }
         finally { AssemblyInfo.MockTypes = previous; }
     }

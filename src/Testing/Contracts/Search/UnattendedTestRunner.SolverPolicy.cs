@@ -161,33 +161,10 @@ internal sealed partial class UnattendedTestRunner
 
         _writer.CaptureSolverResult(result);
         AssertAppliedNoGcConfiguration();
-        long reviewedWorldlines = result.TotalExpandedNodes;
-        SolverOverlaySnapshot reviewSnapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-            result,
-            unexpectedReplan: false,
-            reviewedWorldlines);
         if (result.BattlePotionIdsUsedSoFar.Length != result.BattlePotionsUsedSoFar
-            || result.PlannedPotionIds.Length != result.PotionCount
-            || (reviewSnapshot.UsedPotionOutcomeText != null) != (result.BattlePotionsUsedSoFar > 0)
-            || (reviewSnapshot.PlannedPotionOutcomeText != null) != (result.PotionCount > 0)
-            || (reviewSnapshot.RewardOutcomeText != null) != (result.PotionRewardOutlook.Enabled
-                && result.CombatEndedTurn.HasValue && result.Snapshot.AllEnemiesDead && !result.Snapshot.PlayerDead))
-            throw new InvalidOperationException("路线摘要的用药身份或掉药显示条件不一致。");
-        _completedChecks.Add("PotionOutcomeNamesAndRewardGate");
-        bool validReviewSummary = result.WasReused
-            ? reviewSnapshot.ReviewSummaryText.StartsWith("路线已复用，共查阅了 ", StringComparison.Ordinal)
-            : reviewSnapshot.ReviewSummaryText.StartsWith("花费了 ", StringComparison.Ordinal)
-                && reviewSnapshot.ReviewSummaryText.Contains("秒，共查阅了 ", StringComparison.Ordinal);
-        bool validCachedSummary = reviewSnapshot.ReviewSummaryText == "已恢复本场战斗记录的路线";
-        bool validEnding = reviewSnapshot.ReviewSummaryText.EndsWith(" 条世界线", StringComparison.Ordinal)
-            || (reviewSnapshot.ReviewSummaryText.Contains(" 条世界线（", StringComparison.Ordinal)
-                && reviewSnapshot.ReviewSummaryText.EndsWith(" 条/s）", StringComparison.Ordinal));
-        if (result.WasRestoredFromCache ? !validCachedSummary
-            : !validReviewSummary || !validEnding)
-        {
-            throw new InvalidOperationException("搜索完成快照没有生成耗时与世界线汇总。");
-        }
-        _completedChecks.Add("InitialWorldlineSummary");
+            || result.PlannedPotionIds.Length != result.PotionCount)
+            throw new InvalidOperationException("路线摘要的用药身份不一致。");
+        _completedChecks.Add("PotionOutcomeNames");
         if (_request.ScenarioId == "ROUTE-CACHE-SETUP-RESTORE-V0111")
         {
             if (!result.WasRestoredFromCache)
@@ -208,21 +185,6 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException(
                 $"首回合准备阶段没有计划 {_request.ExpectedInitialSetupChoiceSourceId} 的选牌。");
-        }
-        if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialSetupChoiceTextStartsWith))
-        {
-            SolverOverlayTurnSnapshot firstTurn = SolverOverlaySnapshot.Capture(result, unexpectedReplan: false)
-                .Turns
-                .First(turn => turn.Turn == startedTurn);
-            if (!firstTurn.TurnStartChoices.Any(choice => choice.StartsWith(
-                    _request.ExpectedInitialSetupChoiceTextStartsWith,
-                    StringComparison.Ordinal)))
-            {
-                throw new InvalidOperationException(
-                    $"首回合路线没有以“{_request.ExpectedInitialSetupChoiceTextStartsWith}”开头的准备选牌胶囊；" +
-                    $"实际={string.Join('|', firstTurn.TurnStartChoices)}。");
-            }
-            _completedChecks.Add("InitialSetupChoicePill");
         }
         if (expectsInitialSetup)
         {
@@ -707,23 +669,7 @@ internal sealed partial class UnattendedTestRunner
                     $"{string.Join(',', effects.Select(effect => effect.Summary))}，" +
                     $"预期为 {_request.ExpectedInitialRelicEffectSummary}。");
             }
-            SolverOverlayTurnSnapshot overlayTurn = SolverOverlaySnapshot.Capture(result, unexpectedReplan: false)
-                .Turns
-                .Single(turn => turn.Turn == startedTurn);
-            string[] overlayRelicLabels = overlayTurn.Actions
-                .Append(overlayTurn.EndTurnAction)
-                .OfType<SolverOverlayActionSnapshot>()
-                .SelectMany(action => action.RelicLabels)
-                .ToArray();
-            if (effects.All(effect => !overlayRelicLabels.Contains(
-                    effect.RelicTitle + effect.Summary,
-                    StringComparer.Ordinal)))
-            {
-                throw new InvalidOperationException(
-                    $"Overlay 没有显示遗物联动 {_request.ExpectedInitialRelicEffectId}：" +
-                    string.Join(',', overlayRelicLabels));
-            }
-            _completedChecks.Add($"OverlayRelicEffect:{_request.ExpectedInitialRelicEffectId}");
+            _completedChecks.Add($"RelicEffect:{_request.ExpectedInitialRelicEffectId}");
         }
         if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialFirstActionCardId))
         {
@@ -833,20 +779,7 @@ internal sealed partial class UnattendedTestRunner
                     $"{string.Join(',', matchingActions.Select(action => action.ReplayCount))}，" +
                     $"预期为 {expectedReplayCount}。");
             }
-            SolverOverlayActionSnapshot[] overlayActions = SolverOverlaySnapshot
-                .Capture(result, unexpectedReplan: false)
-                .Turns
-                .Single(turn => turn.Turn == startedTurn)
-                .Actions
-                .Where(action => action.Title.Equals(matchingActions[0].CardTitle, StringComparison.Ordinal))
-                .ToArray();
-            if (overlayActions.Length == 0
-                || overlayActions.Any(action => action.ReplayCount != expectedReplayCount))
-            {
-                throw new InvalidOperationException(
-                    $"Overlay 没有显示 {_request.ExpectedInitialActionCardId} 的重放×{expectedReplayCount}。");
-            }
-            _completedChecks.Add($"OverlayReplay:{_request.ExpectedInitialActionCardId}:x{expectedReplayCount}");
+            _completedChecks.Add($"Replay:{_request.ExpectedInitialActionCardId}:x{expectedReplayCount}");
         }
 
         _completedChecks.Add(

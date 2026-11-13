@@ -11,95 +11,15 @@ namespace CombatSolver;
 
 internal sealed partial class UnattendedTestRunner
 {
-    private async Task AssertOverlayVisibilityLifecycleAsync(CombatState combat)
-    {
-        NGame host = NGame.Instance
-            ?? throw new InvalidOperationException("界面可见性合同要求游戏宿主。");
-        SolverSettingsData originalSettings = SolverSettings.Current;
-        bool originalDisabled = SolverController.SolverDisabled;
-        SolverSettings.ApplyForTesting(originalSettings with
-        {
-            AutomaticCalculationEnabled = false,
-            AutoEnableFullAuto = false,
-        });
-        try
-        {
-            SolverOverlay.ShowManualCalculationReady(host, false);
-            if (!SolverOverlay.ExerciseVisibilityShortcutForTesting())
-                throw new InvalidOperationException("Ctrl+F9 隐藏意图必须控制已有与新建图层的可见性。");
-            _completedChecks.Add("OverlayVisibility:Shortcut:IgnoredKeys:Render:NewLayer");
-            if (!SolverOverlay.ToggleVisibilityFromShortcut() || SolverOverlay.IsVisible)
-                throw new InvalidOperationException("Ctrl+F9 必须隐藏界面。");
-            if (!SolverOverlay.ExerciseVisibilityShortcutForTesting() || SolverOverlay.IsVisible)
-                throw new InvalidOperationException("快捷键合同必须保留初始隐藏意图。");
-
-            SolverController.SetSolverDisabled(true, persist: false);
-            AssertHiddenAndInitialized("disabled");
-            SolverController.MonitorCombatPresence();
-            AssertHiddenAndInitialized("disabled_monitor");
-            SolverController.SetSolverDisabled(false, persist: false);
-            SolverOverlay.ShowManualCalculationReady(host, false);
-            SolverController.MonitorCombatPresence();
-            AssertHiddenAndInitialized("manual_monitor");
-            SolverOverlay.ShowSearching(host, LocalContext.GetMe(combat)!.PlayerCombatState!.TurnNumber,
-                deployWhenReady: false, reviewedWorldlinesBeforeSearch: 0);
-            AssertHiddenAndInitialized("searching");
-            SolverOverlay.ShowSearchStopped(host);
-            AssertHiddenAndInitialized("search_stopped");
-            _completedChecks.Add("OverlayVisibility:Disabled:Manual:Searching:Stopped:Monitor");
-
-            SolverController.BeginCombat(combat);
-            if (!SolverOverlay.InitializationPending || SolverOverlay.IsVisible)
-                throw new InvalidOperationException("战斗重置必须登记初始化并保持隐藏。");
-            await SolverController.LastCombatReferenceReleaseForTesting;
-            SolverController.MonitorCombatPresence();
-            AssertHiddenAndInitialized("combat_reset_monitor");
-            if (!SolverOverlay.ToggleVisibilityFromShortcut() || !SolverOverlay.IsVisible)
-                throw new InvalidOperationException("战斗重置后再次按 Ctrl+F9 必须恢复显示。");
-            SolverController.BeginCombat(combat);
-            await SolverController.LastCombatReferenceReleaseForTesting;
-            SolverController.MonitorCombatPresence();
-            if (SolverOverlay.InitializationPending || !SolverOverlay.IsVisible)
-                throw new InvalidOperationException("显示状态下战斗重置必须完成界面初始化。");
-            _completedChecks.Add("OverlayVisibility:CombatReset:PendingConsumed:Restore:VisibleReset");
-        }
-        finally
-        {
-            if (!SolverOverlay.IsVisible)
-                SolverOverlay.ToggleVisibilityFromShortcut();
-            SolverSettings.ApplyForTesting(originalSettings);
-            SolverController.SetSolverDisabled(originalDisabled, persist: false);
-        }
-
-        static void AssertHiddenAndInitialized(string boundary)
-        {
-            if (SolverOverlay.IsVisible || SolverOverlay.InitializationPending)
-                throw new InvalidOperationException($"界面边界 {boundary} 必须完成初始化并保持隐藏。");
-        }
-    }
-
     private void AssertSearchPortfolioSettings(CombatState combat)
     {
         SolverSettingsSnapshot defaults = SolverSettings.Capture();
         if (!defaults.UseBeamWidthPortfolio || defaults.UseNoveltyPortfolio || defaults.UseEarlyTurnExploration)
             throw new InvalidOperationException("固定搜索组合必须为多宽度开启、多策略与前两回合探索关闭。");
-        if (!new SolverSettingsData().ShowSpeedXWarning)
-            throw new InvalidOperationException("皮皮极速引导横幅必须默认允许显示。");
-        SolverSettingsData dismissedHints = SolverSettings.RoundTripForTesting(
-            new SolverSettingsData()
-            {
-                ShowSpeedXWarning = false,
-                Speed = SolverSpeed.Thorough,
-            });
-        if (dismissedHints.ShowSpeedXWarning || dismissedHints.Speed != SolverSpeed.Thorough)
-            throw new InvalidOperationException("引导横幅或计算速度没有持久化。");
         if (SolverSettings.DeserializeForTesting(
                 "{\"performancePreset\":\"VeryHigh\",\"enableNoGcRegion\":false,\"fairPlannerSamples\":3,\"potionDirectives\":[]}")
             != new SolverSettingsData())
             throw new InvalidOperationException("旧设置键没有在读取时被忽略。");
-        SolverOverlay.ShowManualCalculationReady(NGame.Instance!, false);
-        if (!SolverOverlay.ExercisePerformanceHintForTesting())
-            throw new InvalidOperationException("大战损性能提示没有遵守 8 HP 触发阈值。");
         SolverSettingsSnapshot portfolioSettings = SolverSettings.Capture();
         SearchPolicySnapshot portfolioEnabled = SolverController.CaptureSearchPolicy(
             portfolioSettings with
@@ -141,9 +61,6 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("控制器会话测试要求求解器初始启用。");
         Player player = LocalContext.GetMe(combat)
             ?? throw new InvalidOperationException("药水策略 UI 测试找不到本地玩家。");
-        SolverOverlay.ShowManualCalculationReady(host, false);
-        if (!SolverOverlay.ExerciseVisibilityShortcutForTesting())
-            throw new InvalidOperationException("Ctrl+F9 没有独立切换求解器界面可见性。");
         (int Slot, PotionModel Potion)? strategyPotion = Enumerable.Range(0, player.PotionSlots.Count)
             .Select(slot => (Slot: slot, Potion: player.GetPotionAtSlotIndex(slot)))
             .Where(item => item.Potion != null && PotionOnUseSupport.CanSearch(item.Potion))
@@ -230,160 +147,13 @@ internal sealed partial class UnattendedTestRunner
         SolverController.RequestSearch(host, combat, SearchReason.Manual);
         if (!SolverController.IsSearching)
             throw new InvalidOperationException("控制器没有建立搜索会话。");
-        int progressTurn = player.PlayerCombatState!.TurnNumber;
-        SolverSpeculativeRoutePreview progressPreview = new(
-            CandidateVersion: 1,
-            StartTurnNumber: progressTurn,
-            ProjectedBattlePotionCount: 0,
-            ProjectedBattleHpLost: 9,
-            CombatEnded: false,
-            OnlyDeathRoutesFound: false,
-            HasRisk: false,
-            Turns:
-            [
-                new SolverFrontierTurn(
-                    progressTurn,
-                    Actions: [],
-                    HpLost: 9,
-                    HpRecovered: 0,
-                    EnemyHpLost: 1,
-                    EnergyLeft: 0,
-                    CombatEnded: false),
-            ]);
-        SolverOverlay.ShowProgress(
-            new SolverProgress(
-                progressTurn,
-                progressTurn,
-                CompletedTurnLayers: 0,
-                PlayDepth: 0,
-                ExpandedNodes: 7,
-                ReviewedWorldlines: 37,
-                MaxNodes: 100,
-                FrontierNodes: 0,
-                EndedNodes: 0,
-                ElapsedMilliseconds: 500,
-                Phase: "test",
-                RequestBudgetMilliseconds: 10_000),
-            deployWhenReady: false,
-            reviewedWorldlinesBeforeSearch: 5);
-        // Readouts ease toward the report per frame; settle them before comparing values.
-        SolverOverlay.SettleSearchReadoutsForTesting();
-        if (SolverOverlay.SearchSummaryTextForTesting != "已查阅 42 条世界线（74 条/s）"
-            || Math.Abs(SolverOverlay.ShownSearchProgressRatioForTesting - 0.05d) > 0.0001d)
-        {
-            throw new InvalidOperationException("搜索进度区没有独立显示累计查阅世界线数量。");
-        }
-        double progressRatio = SolverOverlay.SearchProgressRatioForTesting;
-        SolverOverlay.ShowProgress(
-            new SolverProgress(
-                progressTurn,
-                progressTurn,
-                CompletedTurnLayers: 0,
-                PlayDepth: 0,
-                ExpandedNodes: 1,
-                ReviewedWorldlines: 40,
-                MaxNodes: 100,
-                FrontierNodes: 0,
-                EndedNodes: 0,
-                ElapsedMilliseconds: 600,
-                Phase: "正在搜索无药路线",
-                CurrentBestResult: new SolverInterimResult(
-                    Won: false,
-                    OutstandingStolenResource: 0,
-                    ProjectedBattleHpLost: 9,
-                    StrategicHpDeficit: 9,
-                    PotionStrategicCost: 0,
-                    ProjectedBattlePotionCount: 0,
-                    CombatEndedTurn: null,
-                    EnemyHp: 1,
-                    Score: 0d),
-                SpeculativeRoutePreview: progressPreview,
-                RequestBudgetMilliseconds: 10_000),
-            deployWhenReady: false,
-            reviewedWorldlinesBeforeSearch: 5,
-            bestSnapshot: SolverOverlaySnapshot.CaptureSpeculativeRoute(progressPreview));
-        if (Math.Abs(progressRatio - 0.05d) > 0.0001d
-            || Math.Abs(SolverOverlay.SearchProgressRatioForTesting - 0.06d) > 0.0001d
-            || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
-                "正在搜索无药路线",
-                StringComparison.Ordinal) != true
-            || SolverOverlay.SearchSummaryTextForTesting?.Contains(
-                "已查阅",
-                StringComparison.Ordinal) != true
-            || SolverOverlay.HpOutcomeTextForTesting?.Contains(
-                "预计战损 未知",
-                StringComparison.Ordinal) != true)
-        {
-            throw new InvalidOperationException("搜索进度条没有按整次请求的时间预算平稳推进。");
-        }
-        SolverOverlay.ShowProgress(
-            new SolverProgress(
-                progressTurn,
-                progressTurn,
-                CompletedTurnLayers: 0,
-                PlayDepth: 0,
-                ExpandedNodes: 100,
-                ReviewedWorldlines: 100,
-                MaxNodes: 100,
-                FrontierNodes: 0,
-                EndedNodes: 0,
-                ElapsedMilliseconds: 15_000,
-                Phase: "复核最终候选",
-                RequestBudgetMilliseconds: 10_000),
-            deployWhenReady: false,
-            reviewedWorldlinesBeforeSearch: 5);
-        if (Math.Abs(SolverOverlay.SearchProgressRatioForTesting - 0.95d) > 0.0001d)
-            throw new InvalidOperationException("运行中的搜索进度条没有为收尾工作保留余量。");
-        if (SolverController.IsSearching
-            && (SolverOverlay.StopSearchButtonTextForTesting != "停止计算"
-                || SolverOverlay.StopSearchButtonDisabledForTesting))
-        {
-            throw new InvalidOperationException("搜索期间独立停止计算按钮不可用。");
-        }
-        if (!SolverOverlay.MessageWrappingEnabledForTesting)
-            throw new InvalidOperationException("求解器消息区域没有启用自动换行。");
-        if (!SolverOverlay.UploadProgressConfiguredForTesting)
-            throw new InvalidOperationException("在线问题包上传没有配置可视化进度条和单实例按钮初始状态。");
-        if (!SolverOverlay.SearchCompletionNotificationSettingsConfiguredForTesting)
-            throw new InvalidOperationException("搜索结束通知三态选项没有按持久化设置加载。");
-        if (!SolverOverlay.VisualSettingsConfiguredForTesting
-            || SolverOverlay.ActiveThemeForTesting != SolverSettings.Current.OverlayTheme)
-        {
-            throw new InvalidOperationException("界面主题或覆盖层透明度没有按持久化设置加载。");
-        }
-        bool resizeUiConfigured = SolverOverlay.ResizeUiConfiguredForTesting;
-        bool resizePersistencePassed = await SolverOverlay.ExerciseOverlayResizePersistenceForTestingAsync();
-        if (!resizeUiConfigured || !resizePersistencePassed)
-        {
-            throw new InvalidOperationException(
-                $"覆盖层拖拽缩放、尺寸持久化或展开恢复没有正确建立：" +
-                $"configured={resizeUiConfigured}, persistence={resizePersistencePassed}。");
-        }
-        if (!SolverOverlay.SettingsTabsConfiguredForTesting
-            || !SolverOverlay.ExerciseSettingsTabSwitchingForTesting())
-        {
-            throw new InvalidOperationException("设置页没有按常规、性能、反馈三页独立切换。");
-        }
-        if (!SolverOverlay.ManualSystemMemoryReleaseButtonConfiguredForTesting)
-            throw new InvalidOperationException("强制释放内存按钮没有位于主界面内存条右侧。");
-        bool memoryUsageBarConfigured = SolverOverlay.MemoryUsageBarConfiguredForTesting;
+
         // 进入战斗时模型注册表早已初始化，生命周期信号必须已送达；模组类型在此之前不得进缓存。
         if (!ModelDbGetIdCachePatch.ModelRegistryInitializedForTesting
-            || !ModelDbGetIdCachePatch.ExerciseRegistrationGateForTesting(typeof(SolverOverlay)))
+            || !ModelDbGetIdCachePatch.ExerciseRegistrationGateForTesting(typeof(SolverController)))
         {
             throw new InvalidOperationException("ModelDb.GetId 缓存没有按模型注册表初始化时点区分模组类型。");
         }
-        bool memoryUsageBarFormatting = SolverOverlay.ExerciseMemoryUsageBarForTesting();
-        if (!memoryUsageBarConfigured || !memoryUsageBarFormatting)
-        {
-            throw new InvalidOperationException(
-                $"主界面内存占用条没有按搜索 GC 回收边界建立：" +
-                $"configured={memoryUsageBarConfigured} formatting={memoryUsageBarFormatting}。");
-        }
-        if (!SolverOverlay.ExercisePerformanceHintForTesting())
-            throw new InvalidOperationException("战损结果没有可用的计算速度重试胶囊提示。");
-        if (!SolverOverlay.ExerciseSearchLimitHintForTesting())
-            throw new InvalidOperationException("时间或节点上限停止后没有显示不可关闭的顶部提示。");
         if (strategyPotion is { } potionEntry)
         {
             PotionStrategySnapshot initialStrategy = SolverController.CapturePotionStrategy(
@@ -440,120 +210,17 @@ internal sealed partial class UnattendedTestRunner
                 != SolverPotionDirective.Smart)
                 throw new InvalidOperationException("恢复智能后仍保留了逐瓶策略覆盖项。");
         }
-        if (!SolverOverlay.ExerciseSearchCompletionNotificationPolicyForTesting())
-            throw new InvalidOperationException("搜索结束通知三态选项不能无损回读旧设置字段。");
-        if (!SolverOverlay.ExerciseVisualSettingsForTesting())
-            throw new InvalidOperationException("浅色主题或覆盖层透明度不能无损回读设置。");
-        SolverSettingsData originalVisualSettings = SolverSettings.Current;
-        SolverOverlayTheme alternateTheme = originalVisualSettings.OverlayTheme == SolverOverlayTheme.Dark
-            ? SolverOverlayTheme.Light
-            : SolverOverlayTheme.Dark;
-        try
-        {
-            SolverSettings.ApplyForTesting(originalVisualSettings with
-            {
-                OverlayTheme = alternateTheme,
-                OverlayOpacity = 0.65f,
-            });
-            SolverOverlay.ApplyConfiguredTheme();
-            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
-            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
-            if (SolverOverlay.ActiveThemeForTesting != alternateTheme
-                || Math.Abs(SolverOverlay.OverlayOpacityForTesting - 0.65f) > 0.001f
-                || !SolverOverlay.VisualSettingsConfiguredForTesting)
-            {
-                throw new InvalidOperationException("界面主题切换没有重建覆盖层并恢复透明度设置。");
-            }
-        }
-        finally
-        {
-            SolverSettings.ApplyForTesting(originalVisualSettings);
-            SolverOverlay.ApplyConfiguredTheme();
-            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
-            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
-        }
-        SolverSettingsData notificationDefaults = new();
-        if (notificationDefaults.Speed != SolverSpeed.Normal)
-            throw new InvalidOperationException("新安装和恢复默认没有使用标准速度。");
-        if (!notificationDefaults.SearchCompletionNotificationsEnabled
-            || notificationDefaults.SearchCompletionNotificationMode
-            != SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground
-            || SearchCompletionNotifier.ShouldNotifyForTesting(
-                enabled: false,
-                mode: SolverSearchCompletionNotificationMode.Always,
-                gameForeground: false)
-            || SearchCompletionNotifier.ShouldNotifyForTesting(
-                enabled: true,
-                mode: SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground,
-                gameForeground: true)
-            || !SearchCompletionNotifier.ShouldNotifyForTesting(
-                enabled: true,
-                mode: SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground,
-                gameForeground: false)
-            || !SearchCompletionNotifier.ShouldNotifyForTesting(
-                enabled: true,
-                mode: SolverSearchCompletionNotificationMode.Always,
-                gameForeground: true))
-        {
-            throw new InvalidOperationException("搜索结束通知的默认值或前台判断不正确。");
-        }
-        if (notificationDefaults.OverlayTheme != SolverOverlayTheme.Dark
-            || Math.Abs(notificationDefaults.OverlayOpacity - 0.65f) > 0.001f
-            || notificationDefaults.OverlayWidth != 1200f
-            || notificationDefaults.OverlayHeight != 700f)
-        {
-            throw new InvalidOperationException("界面默认值不是深色主题、65% 透明度和 1200×700 尺寸。");
-        }
-        SolverSettingsData originalNotificationSettings = SolverSettings.Current;
-        try
-        {
-            SolverSettings.ApplyForTesting(originalNotificationSettings with
-            {
-                SearchCompletionNotificationsEnabled = true,
-                SearchCompletionNotificationMode = SolverSearchCompletionNotificationMode.Always,
-            });
-            int requestsBefore = SearchCompletionNotifier.RequestCountForTesting;
-            int nativeBefore = SearchCompletionNotifier.NativeNotificationCountForTesting;
-            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
-            if (SearchCompletionNotifier.RequestCountForTesting != requestsBefore + 1
-                || SearchCompletionNotifier.NativeNotificationCountForTesting != nativeBefore)
-            {
-                throw new InvalidOperationException("Headless 搜索结束通知没有停在原生平台调用之前。");
-            }
-        }
-        finally
-        {
-            SolverSettings.ApplyForTesting(originalNotificationSettings);
-        }
-        if (!SolverOverlay.ExerciseUploadCompletionTransitionForTesting())
-            throw new InvalidOperationException("上传任务结束前按钮状态提前切回空闲，可能重新打开确认弹窗。");
         AssertSearchPortfolioSettings(combat);
         AssertDefaultSearchParallelism();
-        string parallelFailure = SolverController.FormatSearchFailureForTesting(
-            new InvalidOperationException("parallel failure"),
-            parallelSearchWasEnabled: true);
-        string serialFailure = SolverController.FormatSearchFailureForTesting(
-            new InvalidOperationException("serial failure"),
-            parallelSearchWasEnabled: false);
-        if (!parallelFailure.Contains("上传问题包", StringComparison.Ordinal)
-            || !parallelFailure.Contains("关闭（单线程）", StringComparison.Ordinal)
-            || !serialFailure.Contains("上传问题包", StringComparison.Ordinal)
-            || serialFailure.Contains("关闭（单线程）", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("搜索失败提示没有按本次请求的并行状态提供恢复建议。");
-        }
 
-        // The UI checks above cross several frames. A one-HP fixture can finish its first search
-        // during those awaits, so establish a fresh active session immediately before exercising
-        // the synchronous stop transition.
+        // A one-HP fixture can finish its first search during the awaited checks above, so
+        // establish a fresh active session immediately before exercising the stop transition.
         if (!SolverController.IsSearching)
         {
             SolverController.RequestSearch(host, combat, SearchReason.Manual);
             if (!SolverController.IsSearching)
                 throw new InvalidOperationException("停止断言前无法重新建立活动搜索会话。");
         }
-        int stopNotificationRequestsBefore = SearchCompletionNotifier.RequestCountForTesting;
-        int stopNativeNotificationsBefore = SearchCompletionNotifier.NativeNotificationCountForTesting;
         SolverController.StopSearchByUser(host);
         if (SolverController.IsSearching
             || SolverController.IsDeploying
@@ -563,42 +230,28 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("用户停止搜索后仍残留活动会话、路线或自动计算状态。");
         }
-        if (SearchCompletionNotifier.RequestCountForTesting != stopNotificationRequestsBefore + 1
-            || SearchCompletionNotifier.NativeNotificationCountForTesting
-            != stopNativeNotificationsBefore)
-        {
-            throw new InvalidOperationException("用户停止搜索后没有产生一次受 headless 保护的结束通知。");
-        }
 
         SolverController.RequestSearch(host, combat, SearchReason.AutoTurnStart);
         if (SolverController.IsSearching || !SolverController.AutomaticSearchPaused)
             throw new InvalidOperationException("用户停止后，自动回合入口重新启动了搜索。");
 
         SolverController.RecordManualProjectionComparisonForTesting(17, 9, 0, 1);
-        SolverOverlay.RefreshControls();
         if (SolverController.ManualRouteImprovementDetected
-            || SolverOverlay.ManualRouteImprovementVisibleForTesting
             || SolverController.LastManualProjectionComparisonForTesting is not
                 { AdditionalPotionCount: 1, PotionAdjustedHpReduction: -1 })
             throw new InvalidOperationException("手操多用一瓶药只省8 HP时产生了更优世界线提示。");
 
         SolverController.RecordManualProjectionComparisonForTesting(18, 1, 0, 2);
-        SolverOverlay.RefreshControls();
-        if (SolverController.ManualRouteImprovementDetected
-            || SolverOverlay.ManualRouteImprovementVisibleForTesting)
+        if (SolverController.ManualRouteImprovementDetected)
             throw new InvalidOperationException("手操多用两瓶药只省17 HP时产生了更优世界线提示。");
 
         SolverController.RecordManualProjectionComparisonForTesting(17, 8, 0, 1);
-        SolverOverlay.RefreshControls();
-        if (!SolverController.ManualRouteImprovementDetected
-            || !SolverOverlay.ManualRouteImprovementVisibleForTesting)
+        if (!SolverController.ManualRouteImprovementDetected)
             throw new InvalidOperationException("手操多用一瓶药省9 HP时缺少更优世界线提示。");
 
         SolverController.RecordManualProjectionComparisonForTesting(7, 3);
-        SolverOverlay.RefreshControls();
         if (!SolverController.ManualRouteImprovementDetected
-            || SolverController.LastManualProjectionComparisonForTesting?.Difference != -4
-            || !SolverOverlay.ManualRouteImprovementVisibleForTesting)
+            || SolverController.LastManualProjectionComparisonForTesting?.Difference != -4)
         {
             throw new InvalidOperationException("手操降低预计战损后没有记录比较结果并显示绿色反馈提示。");
         }
