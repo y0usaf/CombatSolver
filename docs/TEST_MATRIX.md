@@ -81,6 +81,27 @@ dotnet run --project tools/testing/checks/CombatSolver.GcPolicyChecks/CombatSolv
 
 金币和回复合同同时传 `-EvidenceDirectory .local/validation/pr203/<场景>`（Bash：`--evidence-directory`），初始生命为 50/80。金纸合同还传 `-RelicsPath coverage/fixtures/regressions/axebot/axebot-joss-deferred-relics.json`（Bash：`--relics-path`）。搜索阶段顺序合同为 `KNOWN-HEALING-MEMBERS` 和 `KNOWN-HEALING-OPENING`，使用 SILENT；受影响的固定前缀合同使用 IRONCLAD，强制结束回合牌合同使用 REGENT。
 
+## 公平决策的候选比较派发（2026-11-14）
+
+`FairDecisionPlanner.Decide` 的比较阶段改为 `(样本, 候选)` 平铺派发，并发上限 `min(作业数, max(样本宽度, min(逻辑核心*3/4, 样本宽度*2)))`。重跑入口（离线 harness，不启动可见游戏）：
+
+```bash
+dotnet build CombatSolver.csproj -c Release -p:CopyModOnBuild=false
+dotnet build tools/search/OfflineSearchHarness/OfflineSearchHarness.csproj -c Release
+
+# 质量与耗时哨兵：同根、同预设、同预算；A/B 用 OFFLINE_HARNESS_COMBATSOLVER_DLL 换 DLL
+OFFLINE_HARNESS_FAIR_PLAY=v2 OFFLINE_HARNESS_FAIR_SPEED=Normal DOTNET_gcServer=1 \
+  dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll \
+  --request tools/search/OfflineSearchHarness/late-run/positions/late-ir-decmil-t2-a.json \
+  --label ab --out .local/late-run/ab --milestone M1 --budget-ms 5000 --dop 1
+
+# 公平性合同（隐藏状态只重采样、不读实时状态、不回收）
+OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS=1 dotnet .local/tool-build/OfflineSearchHarness/bin/Release/net9.0/OfflineSearchHarness.dll \
+  --character IRONCLAD --encounter FUZZY_WURM_CRAWLER_WEAK --seed FAIRCHK --label fair --out .local/fair-checks --milestone M1 --budget-ms 5000 --dop 1
+```
+
+实测（本机 32 逻辑核、服务端 GC、单宿主串行、其余 agent 同时占用 CPU）：`Thorough` 上 `t1-a`+`t2-a` 决策均值 9480→7754 ms、最大 17658→16770 ms、求解次数 967→941，损血每次都相同；`Normal` `holdout` 五个位置均值 4323→4383 ms（漂移内）、p90 11456→10454 ms、损血相同、计划 14/15 次逐项相同；`Normal` `tune` 四个位置均值 4232→3393 ms、最大 13671→9747 ms、损血与计划完全一致。32 并发对照在 `t2-a` 把路线改差（损失血 7→13），因此并发上限停在 3/4 核。数字与未验证项见[开发笔记](DEVELOPMENT_NOTES.md)。
+
 ## 当前矩阵命令
 
 矩阵启动器只读取本节的平台原生命令；历史记录不作为自动执行清单。以下两项分别检查倾泻手空边界与相邻效果作用域，不运行整场搜索。需要当前游戏及 RitsuLib 路径，矩阵启动器统一管理实例并在结束时清理。

@@ -294,37 +294,67 @@ internal static class FairDecisionPlanner
             // replaced by a fabricated worst-case value.
             Stopwatch comparisonClock = Stopwatch.StartNew();
             long comparisonBudget = settings.SolveBudgetMilliseconds;
-            Parallel.For(0, sampleCount, parallel, sample =>
+            // Every (sample, candidate) pair is an independent solve over that sample's own root:
+            // nothing is shared except the write-back slots and the counters. Dispatch the pairs as
+            // one flat list instead of one chain per sample, so a sample no longer queues its
+            // (candidates - 1) comparisons behind its first one while the other lanes sit idle.
+            // The same pairs still run, still stop at the same comparison budget, and still write
+            // the same slots; only their dispatch order changes, which is why a decision now
+            // finishes in fewer wall-clock rounds and fits more pairs inside its comparison budget.
+            List<(int Sample, int Candidate)> comparisonJobs = [];
+            for (int sample = 0; sample < sampleCount; sample++)
             {
                 for (int candidate = 0; candidate < proposals.Length; candidate++)
                 {
-                    if (string.Equals(ownKeys[sample], proposals[candidate].Key, StringComparison.Ordinal))
-                        continue;
-                    if (comparisonClock.ElapsedMilliseconds >= comparisonBudget)
-                        continue;
-                    PlanAction action = proposals[candidate].Action;
-                    if (!HasRevealedChoice(action)
-                        && TryEvaluate(sample, candidate, proposals[candidate].Prefix, revealedFallback: true))
-                        continue;
-                    IReadOnlyList<PlanAction> variants;
-                    try
-                    {
-                        variants = revealedVariants(samples[sample], action);
-                    }
-                    catch (InvalidOperationException ex) when (!token.IsCancellationRequested)
-                    {
-                        LogInvalid(sample, proposals[candidate].Key, ex);
-                        continue;
-                    }
-                    foreach (PlanAction variant in variants)
-                        TryEvaluate(sample, candidate, [variant], revealedFallback: false);
+                    if (!string.Equals(ownKeys[sample], proposals[candidate].Key, StringComparison.Ordinal))
+                        comparisonJobs.Add((sample, candidate));
                 }
-            });
+            }
+            // Lanes: twice the configured sample width, never more than three quarters of the
+            // logical cores, never fewer than the sample width. The sample width leaves cores idle
+            // on a wide machine, so the comparison pass may use more; one lane per job instead
+            // oversubscribes it, and past that point every solve covers fewer nodes inside its own
+            // budget: 32 lanes on a 32-thread host made the estimate noisy enough to change a route
+            // for the worse on late-ir-decmil-t2-a, while 24 lanes kept every route.
+            int comparisonSampleLanes = settings.MaxParallelism > 0
+                ? Math.Min(settings.MaxParallelism, sampleCount)
+                : sampleCount;
+            int comparisonLanes = Math.Max(comparisonSampleLanes,
+                Math.Min(Environment.ProcessorCount * 3 / 4, comparisonSampleLanes * 2));
+            ParallelOptions comparisonOptions = new()
+            {
+                CancellationToken = token,
+                MaxDegreeOfParallelism = Math.Min(comparisonJobs.Count, Math.Max(1, comparisonLanes)),
+            };
+            Parallel.For(0, comparisonJobs.Count, comparisonOptions, index =>
+                ComparePair(comparisonJobs[index].Sample, comparisonJobs[index].Candidate));
+
+            void ComparePair(int sample, int candidate)
+            {
+                if (comparisonClock.ElapsedMilliseconds >= comparisonBudget)
+                    return;
+                PlanAction action = proposals[candidate].Action;
+                if (!HasRevealedChoice(action)
+                    && TryEvaluate(sample, candidate, proposals[candidate].Prefix, revealedFallback: true))
+                    return;
+                IReadOnlyList<PlanAction> variants;
+                try
+                {
+                    variants = revealedVariants(samples[sample], action);
+                }
+                catch (InvalidOperationException ex) when (!token.IsCancellationRequested)
+                {
+                    LogInvalid(sample, proposals[candidate].Key, ex);
+                    return;
+                }
+                foreach (PlanAction variant in variants)
+                    TryEvaluate(sample, candidate, [variant], revealedFallback: false);
+            }
             solves += extra.Sum();
 
             bool TryEvaluate(int sample, int candidate, IReadOnlyList<PlanAction> prefix, bool revealedFallback)
             {
-                extra[sample]++;
+                Interlocked.Increment(ref extra[sample]);
                 try
                 {
                     SolverResult result = TimedSolve(samples[sample], prefix);
