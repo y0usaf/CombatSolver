@@ -132,7 +132,7 @@ internal sealed partial class PerformanceRecording : Node
 
     public override void _Input(InputEvent input)
     {
-        if (!_canSnapshot || _session == null || input is not InputEventKey { Pressed: true, Echo: false, CtrlPressed: true, Keycode: Key.F8 }) return;
+        if (!_canSnapshot || _session == null || input is not InputEventKey { Pressed: true, Echo: false, CtrlPressed: true, Keycode: Key.F7 }) return;
         long id = PerformanceSession.Now;
         string temporary = Path.Combine(_directory, "snapshot-request.tmp");
         File.WriteAllText(temporary, JsonSerializer.Serialize(new { id, utcMs = id, context = _lastContext }));
@@ -238,7 +238,7 @@ internal sealed partial class PerformanceRecording : Node
         }
         bool failed = _session!.Failure != null || _session.Dropped > 0 || collectorFailed;
         _status.Text = SolverText.Get(failed ? "性能录制失败：请勿继续测试" : healthy ? "性能录制中（状态日志＋调用栈）" : "性能录制待就绪／中断：请稍候");
-        if (_canSnapshot) _status.Text += "\n" + SolverText.Get("Ctrl＋F8：卡顿时保存内存现场（会短暂停顿）");
+        if (_canSnapshot) _status.Text += "\n" + SolverText.Get("Ctrl＋F7：卡顿时保存内存现场（会短暂停顿）");
         _status.Modulate = failed ? Colors.Red : healthy ? Colors.LightGreen : Colors.Yellow;
     }
 

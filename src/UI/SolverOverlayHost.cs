@@ -13,6 +13,9 @@ internal sealed partial class SolverOverlayHost : Node
             return;
         switch (key.Keycode)
         {
+            case Key.F8:
+                SolverController.ExecuteSingleTurn();
+                break;
             case Key.F9:
                 SolverOverlay.ToggleAuto();
                 break;

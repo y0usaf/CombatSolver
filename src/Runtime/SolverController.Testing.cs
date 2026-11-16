@@ -8,6 +8,17 @@ internal static partial class SolverController
     // Unlike session counters, this only advances when a background search starts
     // and survives the combat-end reset.
     internal static int SearchGenerationForTesting => _nextSearchGeneration;
+    internal static void SetFullAutoEnabledForTesting(bool enabled)
+    {
+        AssertMainThread();
+        _combat.FullAutoEnabled = enabled;
+    }
+    internal static void CancelCoopWaitForTesting()
+    {
+        AssertMainThread();
+        CancelCoopAutoWait();
+    }
+    internal static int DeployedActionCountForTesting => _deployedActionCount;
 
     // Unattended validation installs a frozen result at the normal deployment boundary.
     internal static void StartPredictedRouteForTesting(NGame host, CombatState state, SolverResult result, Action<CombatState> onCombatEnd)

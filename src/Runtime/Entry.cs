@@ -141,8 +141,7 @@ public static class Entry
     {
         if (!Enabled
             || state.CurrentSide != CombatSide.Player
-            || NGame.Instance == null
-            || SolverController.IsMultiplayerSession)
+            || NGame.Instance == null)
             return;
         if (SolverController.SolverDisabled)
         {
@@ -191,9 +190,14 @@ public static class Entry
         if (SolverController.FullAutoEnabled)
             await SolverController.WaitForTurnStartDeploymentDelayAsync(host, turn, token);
 
+        if (SolverController.IsMultiplayerCombat(state))
+        {
+            await SolverController.RequestAutomaticSearchAfterStableBoardAsync(host, state, turn, token);
+            return;
+        }
+
         if (!Enabled
             || SolverController.SolverDisabled
-            || SolverController.IsMultiplayerSession
             || !UnattendedTestRunner.AutomaticTurnSearchEnabled
             || !SolverController.ShouldAutomaticallySearchNextTurn
             || SolverController.AutomaticSearchPaused

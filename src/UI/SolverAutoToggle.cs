@@ -51,7 +51,7 @@ internal sealed partial class SolverAutoToggle : Button
         bool on = IsOn();
         SolverAutoStatusSnapshot status = SolverController.AutoStatus;
         SetPressedNoSignal(on);
-        Disabled = SolverController.SolverDisabled || SolverController.IsMultiplayerSession;
+        Disabled = SolverController.SolverDisabled;
         if (_plate != null)
             _plate.Modulate = !on ? OffTint : status.Failed ? ErrorTint : OnTint;
         if (_label != null)
@@ -61,7 +61,7 @@ internal sealed partial class SolverAutoToggle : Button
         }
         TooltipText = status.Failed
             ? SolverText.Format($"自动模式出错：{status.FailureReason}")
-            : SolverText.Get("Ctrl+F9 切换自动模式，Ctrl+F10 查看求解器状态");
+            : SolverText.Get("Ctrl+F9 切换自动模式，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态");
     }
 
     private bool IsOn()
@@ -112,7 +112,7 @@ internal sealed partial class SolverAutoToggle : Button
 
     private void Apply(NGame? host, CombatState? state, bool enabled)
     {
-        if (SolverController.SolverDisabled || SolverController.IsMultiplayerSession)
+        if (SolverController.SolverDisabled)
         {
             SyncState();
             return;

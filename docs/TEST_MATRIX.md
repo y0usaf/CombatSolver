@@ -1,5 +1,16 @@
 # CombatSolver 测试入口
 
+## 多人自动模式与单回合执行
+
+虚拟 2／4 人跑局在单进程内为每名玩家建立 `Player`，原始无人测试场景 `COOP-AUTO-EXECUTE` 覆盖：队友回合未结束时 Auto 等待、队友准备后在稳定根恢复、首次本地出牌后修改队友棋盘只执行一张并丢弃余下路线、`Ctrl+F8` 单回合执行只出本地牌且 Auto 保持关闭。虚拟跑局仍使用单人 net service，因此夹具直接写入原版准备结束集合来观察 `IsPlayerReadyToEndTurn`；真实联机语义由游戏自身的多人 net service 提供，尚未实测。
+
+```text
+pwsh -NoProfile -File tools/testing/run-unattended-test.ps1 -ScenarioId COOP-AUTO-EXECUTE -PlayerCount 2 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -Seed COOPAUTO1 -EnemyCurrentHp 60 -FixedSearchBudget -SearchBudgetOverrideMilliseconds 1500 -TimeoutSeconds 180 -CleanupInstanceOnExit
+./tools/testing/run-unattended-test.sh --scenario-id COOP-AUTO-EXECUTE --player-count 2 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --seed COOPAUTO1 --enemy-current-hp 60 --fixed-search-budget --search-budget-override-milliseconds 1500 --timeout-seconds 180 --cleanup-instance-on-exit
+```
+
+`--player-count 4` 使用同一入口；本轮 2 人和 4 人各 Passed，检查项为 `VirtualCoopRun:Players=2|4`、`CoopAuto:WaitForTeammates:StableBoard`、`CoopAuto:BoardChangeAfterFirstAction:RemainingPlanDiscarded`、`CoopAuto:SingleTurnExecute:LocalActions=2:AutoStopped`。单人 `BETA-DEPLOY-IRONCLAD-SENTINEL` 同时 Passed（`finishedTurn=3`）。真实 Steam/ENet 双人房间、延迟、队友目标辅助牌和网络取消仍未验证。
+
 ## 0.51.4 战斗逻辑与选牌续接
 
 5 项定向原生验证、复跑入口和未验证项见[历史卷 27](archive/testing/volume-27.md#0514-战斗逻辑与选牌续接)。

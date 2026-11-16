@@ -4,6 +4,8 @@ param(
     [string]$ScenarioId = "SMOKE-001",
     [string]$CharacterId = "IRONCLAD",
     [string]$Seed = "COMBATSOLVER",
+    [ValidateRange(1, 4)]
+    [int]$PlayerCount = 1,
     [string]$EncounterId = "FUZZY_WURM_CRAWLER_WEAK",
     [string]$Sts2GameRoot = "D:\Steam\steamapps\common\Slay the Spire 2",
     [string]$RitsuWorkshopRoot = "D:\Steam\steamapps\workshop\content\2868840\3747602295",
@@ -820,6 +822,7 @@ $request = [ordered]@{
     actIndexForTest = $ActIndexForTest
     markEncounterAsSecondBossForTest = $MarkEncounterAsSecondBossForTest.IsPresent
     seed = $Seed
+    playerCount = $PlayerCount
     enemyCurrentHp = $EnemyCurrentHp
     initialPlayerHp = if ($InitialPlayerHp -gt 0) { $InitialPlayerHp } else { $null }
     initialPlayerMaxHp = if ($InitialPlayerMaxHp -gt 0) { $InitialPlayerMaxHp } else { $null }

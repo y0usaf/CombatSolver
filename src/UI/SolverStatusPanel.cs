@@ -82,6 +82,8 @@ internal sealed partial class SolverStatusPanel : PanelContainer
             return SolverText.Get("部署中");
         if (SolverController.IsSearching)
             return SolverText.Get("搜索中");
+        if (SolverController.IsWaitingForCoopBoard)
+            return SolverText.Get("等待队友结束回合");
         return SolverText.Get("空闲");
     }
 

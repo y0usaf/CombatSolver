@@ -23,6 +23,8 @@ internal sealed class UnattendedTestRequest
     public string EncounterId { get; init; } = "FUZZY_WURM_CRAWLER_WEAK";
     public string[] ModifierIds { get; init; } = [];
     public string Seed { get; init; } = "COMBATSOLVER";
+    /// <summary>Virtual seats created in one process. 1 is the existing single-player path.</summary>
+    public int PlayerCount { get; init; } = 1;
     public string? GeneratedScenarioPath { get; init; }
     public string? RunSnapshotPath { get; init; }
     public bool LoadRunSnapshotDirectly { get; init; }

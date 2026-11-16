@@ -1,5 +1,6 @@
 using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.ValueProps;
@@ -60,6 +61,12 @@ internal static class MonsterMoveSemantics
                     processedEnemyDeaths);
                 if (simulator.HasPendingChoice)
                     return simulatedPlayer.IsDead;
+                if (!simulator.State.GetCreature(move.Owner).IsDead)
+                {
+                    DamageOtherPlayers(simulator, combat, move.Owner, player, baseDamage, processedEnemyDeaths);
+                    if (simulator.HasPendingChoice)
+                        return simulatedPlayer.IsDead;
+                }
                 if (simulatedPlayer.IsDead)
                 {
                     playerDied = true;
@@ -115,6 +122,40 @@ internal static class MonsterMoveSemantics
         combat.NormalizeAeonglassWithers(simulator);
         combat.NormalizeCardAfflictions(simulator);
         return simulatedPlayer.IsDead;
+    }
+
+    /// <summary>
+    /// Vanilla hands every monster move all living player creatures and the ordinary monster
+    /// attacks hit all of them. The search only scores the local player, but co-op plans must
+    /// still see teammate HP move so enemy damage is not modelled as local-only.
+    /// </summary>
+    private static void DamageOtherPlayers(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        Creature attacker,
+        Creature localPlayer,
+        int baseDamage,
+        ISet<uint> processedEnemyDeaths)
+    {
+        if (combat.Players.Count <= 1)
+            return;
+        foreach (Player other in combat.Players)
+        {
+            if (ReferenceEquals(other.Creature, localPlayer))
+                continue;
+            if (simulator.State.GetCreature(other.Creature).IsDead)
+                continue;
+            DamagePlayer(simulator, combat, attacker, other.Creature, baseDamage);
+            if (simulator.HasPendingChoice)
+                return;
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                combat,
+                combat.KnownEnemies,
+                processedEnemyDeaths);
+            if (simulator.HasPendingChoice)
+                return;
+        }
     }
 
     public static IReadOnlyList<DamageResult> DamagePlayer(

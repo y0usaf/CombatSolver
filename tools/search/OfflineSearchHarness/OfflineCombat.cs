@@ -16,7 +16,10 @@ internal sealed record HarnessScenario(
     string EncounterId,
     string Seed,
     int Ascension,
-    int ActIndexForTest);
+    int ActIndexForTest)
+{
+    public int PlayerCount { get; init; } = 1;
+}
 
 /// <summary>
 /// 用游戏自己的对象图建一场战斗并推进到玩家第一回合。步骤照
@@ -35,8 +38,11 @@ internal static class OfflineCombat
             throw new InvalidOperationException("已经有进行中的跑局。");
 
         UnlockState unlockState = SaveManager.Instance.GenerateUnlockStateFromProgress();
+        Player[] players = Enumerable.Range(0, Math.Clamp(scenario.PlayerCount, 1, 4))
+            .Select(seat => Player.CreateForNewRun(character, unlockState, (ulong)seat + 1))
+            .ToArray();
         RunState runState = RunState.CreateForNewRun(
-            [Player.CreateForNewRun(character, unlockState, 1uL)],
+            players,
             ModelDb.ActsByIndex is { } ? ActModel.GetDefaultList().Select(act => act.ToMutable()).ToList() : [],
             [],
             GameMode.Standard,

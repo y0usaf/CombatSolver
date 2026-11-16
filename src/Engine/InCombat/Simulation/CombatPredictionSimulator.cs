@@ -120,7 +120,8 @@ internal sealed partial class CombatPredictionSimulator
             ? runSnapshot.CreatePredictionRngSet()
             : throw new InvalidOperationException("Combat prediction needs a captured run RNG snapshot, not live run RNG.");
         StateStore = new PredictionStateStore();
-        History = new CombatPredictionHistory(_trace, combatState.Players.Count == 1 ? combatState.Players[0] : null);
+        History = new CombatPredictionHistory(_trace,
+            MegaCrit.Sts2.Core.Context.LocalContext.GetMe(combatState) ?? combatState.Players.FirstOrDefault());
         if (combatState is ICombatPredictionRootMaterializable materializable)
             materializable.MaterializeRoot(this);
     }
