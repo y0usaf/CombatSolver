@@ -28,7 +28,7 @@ internal static class BattleDamageTracker
     {
         Reset();
         _combat = combat;
-        _lastObservedHp = GetSinglePlayer(combat)?.Creature.CurrentHp;
+        _lastObservedHp = GetLocalPlayer(combat)?.Creature.CurrentHp;
         _combatStartHp = _lastObservedHp;
         _potionHistoryCountAtStart = CountPotionHistoryEntries();
         _historyEntryCountAtLastObservation = CombatManager.Instance.History.Entries.Count();
@@ -40,7 +40,7 @@ internal static class BattleDamageTracker
         if (!ReferenceEquals(_combat, combat))
             Begin(combat);
 
-        Player? player = GetSinglePlayer(combat);
+        Player? player = GetLocalPlayer(combat);
         if (player == null)
         {
             string[] usedPotions = PotionIdsUsedSoFar();
@@ -81,7 +81,7 @@ internal static class BattleDamageTracker
 
     public static void RegisterPlan(CombatState combat, SolverResult result)
     {
-        Player? player = GetSinglePlayer(combat);
+        Player? player = GetLocalPlayer(combat);
         if (player?.PlayerCombatState == null)
             return;
 
@@ -105,8 +105,10 @@ internal static class BattleDamageTracker
         ClearPlan();
     }
 
-    private static Player? GetSinglePlayer(ICombatState? combat)
-        => combat?.Players.Count == 1 ? combat.Players[0] : null;
+    private static Player? GetLocalPlayer(ICombatState? combat)
+        => combat == null
+            ? null
+            : MegaCrit.Sts2.Core.Context.LocalContext.GetMe(combat) ?? combat.Players.FirstOrDefault();
 
     internal static int RecoveredOrGainedForDisplay(int startHp, int currentHp, int observedLoss)
         => Math.Max(0, observedLoss + currentHp - startHp);

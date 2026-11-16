@@ -6,16 +6,19 @@
   "搜索中": "searching",
   "部署中": "deploying",
   "空闲": "idle",
+  "等待队友结束回合": "waiting for teammates",
   "上次决策": "Last decision",
   "故障原因": "Error",
   "最近事件": "Recent events",
   "自动模式：{0} {1}": "Auto Mode: {0} {1}",
   "自动模式：{0}（故障） {1}": "Auto Mode: {0} (error) {1}",
   "自动模式出错：{0}": "Auto Mode error: {0}",
-  "Ctrl+F9 切换自动模式，Ctrl+F10 查看求解器状态": "Ctrl+F9 toggles Auto Mode, Ctrl+F10 shows solver status",
+  "Ctrl+F9 切换自动模式，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态": "Ctrl+F9 toggles Auto Mode, Ctrl+F8 runs the current turn now, Ctrl+F10 shows solver status",
+  "执行本回合": "Run This Turn",
+  "Ctrl+F8 立即求解并执行当前回合，然后停止自动模式": "Ctrl+F8 solves and plays the current turn now, then stops Auto Mode",
   "性能录制失败：请勿开始测试": "Performance recording failed: do not start the test",
   "性能录制失败：请勿继续测试": "Performance recording failed: do not continue the test",
   "性能录制中（状态日志＋调用栈）": "Performance recording active (status log + call stacks)",
   "性能录制待就绪／中断：请稍候": "Performance recording starting or interrupted: wait",
-  "Ctrl＋F8：卡顿时保存内存现场（会短暂停顿）": "Ctrl+F8: capture a memory snapshot when the game stutters (brief pause)"
+  "Ctrl＋F7：卡顿时保存内存现场（会短暂停顿）": "Ctrl+F7: capture a memory snapshot when the game stutters (brief pause)"
 }

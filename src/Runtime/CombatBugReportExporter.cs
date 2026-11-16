@@ -743,11 +743,7 @@ internal static class CombatBugReportExporter
         ForensicCheckpointCapture capture = new(
             sequence,
             session.Recording?.EventCursor,
-            CombatManager.Instance.IsInProgress
-                && localPlayer?.PlayerCombatState?.Phase.ToString() == "Play"
-                && !RunManager.Instance.ActionExecutor.IsRunning
-                && !CombatManager.Instance.EndingPlayerTurnPhaseOne
-                && !CombatManager.Instance.EndingPlayerTurnPhaseTwo,
+            CombatStability.IsPlayerTurnStable(state),
             label,
             capturedAt,
             session.SearchRootId,

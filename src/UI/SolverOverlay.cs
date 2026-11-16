@@ -15,6 +15,7 @@ internal static class SolverOverlay
     private const int AttachIntervalFrames = 60;
     private static CanvasLayer? _layer;
     private static SolverAutoToggle? _toggle;
+    private static SolverExecuteTurnButton? _executeTurn;
     private static SolverStatusPanel? _panel;
     private static Font? _font;
     private static int _framesUntilSync;
@@ -41,6 +42,7 @@ internal static class SolverOverlay
         if (!IsToggleAlive)
             TryAttachTopBar(host);
         _toggle?.SyncState();
+        _executeTurn?.SyncState();
     }
 
     public static void ToggleAuto()
@@ -62,9 +64,12 @@ internal static class SolverOverlay
     {
         if (_toggle != null && GodotObject.IsInstanceValid(_toggle))
             _toggle.QueueFree();
+        if (_executeTurn != null && GodotObject.IsInstanceValid(_executeTurn))
+            _executeTurn.QueueFree();
         if (_layer != null && GodotObject.IsInstanceValid(_layer))
             _layer.QueueFree();
         _toggle = null;
+        _executeTurn = null;
         _panel = null;
         _layer = null;
     }
@@ -77,6 +82,7 @@ internal static class SolverOverlay
                 return;
             _framesUntilSync = SyncIntervalFrames;
             _toggle!.SyncState();
+            _executeTurn?.SyncState();
             return;
         }
         if (--_framesUntilAttach > 0)
@@ -116,6 +122,12 @@ internal static class SolverOverlay
         if (_toggle != null && GodotObject.IsInstanceValid(_toggle))
             _toggle.QueueFree();
         _font ??= ResolveFont(host, topBar);
+        if (_executeTurn != null && GodotObject.IsInstanceValid(_executeTurn))
+            _executeTurn.QueueFree();
+        _executeTurn = new SolverExecuteTurnButton { Name = "CombatSolverExecuteTurn" };
+        _executeTurn.AttachStyleSource(topBar, _font);
+        parent.AddChild(_executeTurn);
+        parent.MoveChild(_executeTurn, map.GetIndex());
         _toggle = new SolverAutoToggle { Name = "CombatSolverAutoToggle" };
         _toggle.AttachStyleSource(topBar, _font);
         parent.AddChild(_toggle);
@@ -125,9 +137,13 @@ internal static class SolverOverlay
             _toggle.Position = new Vector2(
                 map.Position.X - _toggle.CustomMinimumSize.X - 6f,
                 map.Position.Y);
+            _executeTurn.Position = new Vector2(
+                _toggle.Position.X - _executeTurn.CustomMinimumSize.X - 6f,
+                map.Position.Y);
         }
         _panel?.AttachStyleSource(topBar, _font);
         _toggle.SyncState();
+        _executeTurn.SyncState();
     }
 
     private static NTopBar? FindTopBar(Node root)

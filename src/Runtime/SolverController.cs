@@ -22,6 +22,7 @@ internal enum SearchReason
     Manual,
     AutoTurnStart,
     Deploy,
+    SingleTurn,
     FullAuto,
     DeploymentDrift,
     PlanExhausted,
@@ -69,6 +70,9 @@ internal static partial class SolverController
     private static int _deploymentCtsDisposeCountForTesting;
     private static CancellationTokenSource? _deferredSearchCts;
     private static int _deferredSearchId;
+    private static int _coopAutoWaitGeneration;
+    private static int _coopAutoWaitCount;
+    private static int _deployedActionCount;
     private static CancellationTokenSource _combatDeferredOperationCancellation = new();
 
     public static bool IsSearching
@@ -129,6 +133,8 @@ internal static partial class SolverController
         => RunManager.Instance.IsInProgress && RunManager.Instance.NetService.Type.IsMultiplayer();
 
     public static bool FullAutoEnabled => _combat.FullAutoEnabled;
+    public static bool IsWaitingForCoopBoard => Volatile.Read(ref _coopAutoWaitCount) > 0;
+    internal static bool IsMultiplayerCombat(CombatState state) => state.Players.Count is > 1 and <= 4;
     public static bool AutoRequested => !_solverDisabled && SolverSettings.Current.AutoPlay;
     public static SolverAutoStatusSnapshot AutoStatus => SolverAutoStatus.Capture(FullAutoEnabled);
     public static bool RouteFrozen => _combat.RouteFrozen;
@@ -574,7 +580,7 @@ internal static partial class SolverController
         ResetCore("combat_starting");
         SolverAutoStatus.ResetCombat();
         _combat.FullAutoEnabled = !_solverDisabled
-            && state is CombatState { Players.Count: 1 }
+            && state is CombatState { Players.Count: >= 1 and <= 4 }
             && SolverSettings.Current.AutoPlay;
         SolverAutoStatus.Record(
             "combat_start",
@@ -583,6 +589,7 @@ internal static partial class SolverController
         SolverOverlay.RefreshControls();
         DeployedCardIdsForTesting.Clear();
         DeployedPotionIdsForTesting.Clear();
+        _deployedActionCount = 0;
         LastDeployedActionStartedAtMillisecondsForTesting = 0;
         NativeChoiceRuntime.ResetTraceForTesting();
         LastTurnSetupResultForTesting = null;
@@ -982,6 +989,7 @@ internal static partial class SolverController
         {
             SearchReason.AutoTurnStart => ReplanCause.InitialSearch,
             SearchReason.DeploymentDrift => ReplanCause.DeploymentDrift,
+            SearchReason.SingleTurn => ReplanCause.ExplicitRequest,
             SearchReason.PlanExhausted => ReplanCause.PlanExhausted,
             SearchReason.InformationRevealed => ReplanCause.InformationRevealed,
             _ => ReplanCause.ExplicitRequest,
@@ -1295,6 +1303,7 @@ internal static partial class SolverController
         if (!enabled)
         {
             _combat.FullAutoEnabled = false;
+            CancelCoopAutoWait();
             CancelDeployment();
             SolverAutoStatus.Record("stop", "user_toggle_off");
             Entry.Logger.Info("[CombatSolver/Test] FULL_AUTO enabled=false reason=user");
@@ -1355,6 +1364,14 @@ internal static partial class SolverController
             $"stop_on_worse_recalculation={_stopFullAutoOnWorseRecalculation}");
         SolverAutoStatus.Record("start", "user_toggle_on");
         SolverOverlay.RefreshControls();
+
+        if (IsMultiplayerCombat(state) && !CombatStability.IsCoopBoardStable(state))
+        {
+            SolverAutoStatus.Record("wait",
+                $"turn={currentTurn} reason=auto_enabled waiting_for_teammates");
+            ScheduleCoopAutoSearch(host, state, currentTurn);
+            return;
+        }
 
         LiveCombatStamp current = LiveCombatStamp.Capture(state);
         if (_combat.LatestResult != null && _combat.LatestStamp == current)
@@ -1476,6 +1493,196 @@ internal static partial class SolverController
             return;
         SolverOverlay.RefreshControls();
         Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=apply_current_turn");
+    }
+
+    /// <summary>
+    /// Solve and deploy the current turn once, then leave Auto Mode off for the rest of the fight.
+    /// This is also the co-op escape hatch when both sides are waiting for each other.
+    /// </summary>
+    public static void ExecuteSingleTurn()
+    {
+        AssertMainThread();
+        NGame? host = NGame.Instance;
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (_solverDisabled || host == null || state == null || !CombatManager.Instance.IsInProgress)
+        {
+            SolverAutoStatus.Record("skip", "single_turn reason=no_combat");
+            return;
+        }
+        if (_deployment != null)
+        {
+            SolverAutoStatus.Record("skip", "single_turn reason=already_deploying");
+            return;
+        }
+        bool autoWasOn = _combat.FullAutoEnabled;
+        _combat.FullAutoEnabled = false;
+        CancelCoopAutoWait();
+        _combat.RouteFrozen = false;
+        _combat.AutomaticSearchPaused = false;
+        _combat.AutomaticSearchPausedTurn = null;
+        if (!CanSolve(state, out string rejection))
+        {
+            SolverAutoStatus.Record("skip", $"single_turn reason={rejection}");
+            SolverOverlay.RefreshControls();
+            return;
+        }
+        int turn = LocalContext.GetMe(state)!.PlayerCombatState!.TurnNumber;
+        SolverAutoStatus.Record(
+            "single_turn",
+            $"turn={turn} auto_was_on={autoWasOn.ToString().ToLowerInvariant()}");
+        Entry.Logger.Info($"[CombatSolver/Test] SINGLE_TURN_EXECUTE turn={turn} auto_was_on={autoWasOn}");
+        SolverOverlay.RefreshControls();
+
+        LiveCombatStamp current = LiveCombatStamp.Capture(state);
+        if (_combat.LatestResult is { } result
+            && _combat.LatestStamp == current
+            && result.StartTurnNumber == turn)
+        {
+            StartDeployment(host, state, result);
+            return;
+        }
+        if (_search is { } search
+            && ReferenceEquals(search.State, state)
+            && search.Stamp == current)
+        {
+            search.DeployWhenReady = true;
+            SolverOverlay.RefreshControls();
+            Entry.Logger.Info($"[CombatSolver/Test] SINGLE_TURN_DEPLOY_WAIT generation={search.Generation}");
+            return;
+        }
+        RequestSearch(host, state, SearchReason.SingleTurn, deployWhenReady: true);
+    }
+
+    internal static async Task RequestAutomaticSearchAfterStableBoardAsync(
+        NGame host,
+        CombatState state,
+        int turn,
+        CancellationToken token)
+    {
+        if (!await WaitForCoopStableBoardAsync(host, state, turn, static () => true, token))
+            return;
+        if (!_combat.FullAutoEnabled
+            || !UnattendedTestRunner.AutomaticTurnSearchEnabled
+            || _combat.AutomaticSearchPaused
+            || _search != null
+            || _deployment != null
+            || !CombatManager.Instance.IsInProgress
+            || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
+            || LocalContext.GetMe(state)?.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } playerState
+            || playerState.TurnNumber != turn)
+        {
+            return;
+        }
+        RequestSearch(host, state, SearchReason.AutoTurnStart);
+    }
+
+    internal static async Task<bool> WaitForCoopStableBoardAsync(
+        NGame host,
+        CombatState state,
+        int turn,
+        Func<bool> isCurrent,
+        CancellationToken token)
+    {
+        if (!IsMultiplayerCombat(state))
+            return true;
+        int lastSignature = -1;
+        Interlocked.Increment(ref _coopAutoWaitCount);
+        try
+        {
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!isCurrent()
+                    || !_combat.FullAutoEnabled
+                    || !CombatManager.Instance.IsInProgress
+                    || CombatManager.Instance.IsOverOrEnding
+                    || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state))
+                {
+                    return false;
+                }
+                Player? me = LocalContext.GetMe(state);
+                if (me?.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } playerState
+                    || playerState.TurnNumber != turn)
+                {
+                    return false;
+                }
+                if (CombatStability.IsCoopBoardStable(state))
+                {
+                    SolverAutoStatus.Record("wait_done", $"turn={turn} teammates_ready=true board=stable");
+                    Entry.Logger.Info($"[CombatSolver/Test] COOP_AUTO_READY turn={turn}");
+                    return true;
+                }
+                int readyCount = 0;
+                foreach (Player candidate in state.Players)
+                {
+                    if (ReferenceEquals(candidate, me)
+                        || CombatManager.Instance.IsPlayerReadyToEndTurn(candidate))
+                        readyCount++;
+                }
+                bool queueRunning = RunManager.Instance.ActionExecutor.IsRunning;
+                bool endingOne = CombatManager.Instance.EndingPlayerTurnPhaseOne;
+                bool endingTwo = CombatManager.Instance.EndingPlayerTurnPhaseTwo;
+                int signature = readyCount
+                    | (queueRunning ? 1 << 8 : 0)
+                    | (endingOne ? 1 << 9 : 0)
+                    | (endingTwo ? 1 << 10 : 0);
+                if (signature != lastSignature)
+                {
+                    lastSignature = signature;
+                    string detail =
+                        $"{readyCount}/{state.Players.Count} queue={queueRunning} ending={endingOne}/{endingTwo}";
+                    SolverAutoStatus.Record("wait", $"turn={turn} waiting_for_teammates ready={detail}");
+                    Entry.Logger.Info($"[CombatSolver/Test] COOP_AUTO_WAIT turn={turn} ready={detail}");
+                }
+                await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _coopAutoWaitCount);
+        }
+    }
+
+    private static void ScheduleCoopAutoSearch(NGame host, CombatState state, int turn)
+    {
+        AssertMainThread();
+        int generation = ++_coopAutoWaitGeneration;
+        Task task = StartCombatDeferredOperation(async token =>
+        {
+            bool stable = await WaitForCoopStableBoardAsync(
+                host,
+                state,
+                turn,
+                () => generation == _coopAutoWaitGeneration,
+                token);
+            if (!stable || generation != _coopAutoWaitGeneration)
+                return;
+            if (!_combat.FullAutoEnabled
+                || _search != null
+                || _deployment != null
+                || !CombatManager.Instance.IsInProgress
+                || CombatManager.Instance.IsOverOrEnding
+                || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state))
+            {
+                return;
+            }
+            LiveCombatStamp current = LiveCombatStamp.Capture(state);
+            if (_combat.LatestResult is { } result && _combat.LatestStamp == current)
+            {
+                StartFullAutoDeployment(host, state, result);
+                return;
+            }
+            RequestSearch(host, state, SearchReason.FullAuto);
+        });
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            task = UnattendedAsyncActivityTracker.Track(task);
+        _ = task;
+    }
+
+    private static void CancelCoopAutoWait()
+    {
+        _coopAutoWaitGeneration++;
+        Interlocked.Exchange(ref _coopAutoWaitCount, 0);
     }
 
     public static void AdoptCurrentRoute()
@@ -1603,6 +1810,7 @@ internal static partial class SolverController
     private static void ResetCore(string reason)
     {
         int lifecycleGeneration = Interlocked.Increment(ref _combatLifecycleGeneration);
+        CancelCoopAutoWait();
         CancelDeferredSearch();
         Task deferredSearchRelease = DrainDeferredSearchReleases();
         Task combatDeferredRelease = CancelAndDrainCombatDeferredOperations();
@@ -1796,7 +2004,7 @@ internal static partial class SolverController
         if (_combat.State == null && !IsSearching && !IsDeploying
             && !PendingCombatDeferredOperations.Any(task => !task.IsCompleted)
             && !PlayerTurnSetupCoordinator.IsManaging(current)
-            && current.Players.Count == 1
+            && current.Players.Count is >= 1 and <= 4
             && LocalContext.GetMe(current)?.PlayerCombatState?.Phase == PlayerTurnPhase.Play
             && NGame.Instance is { } host)
         {
@@ -1807,7 +2015,13 @@ internal static partial class SolverController
                      && ShouldAutomaticallySearchNextTurn
                      && UnattendedTestRunner.AutomaticTurnSearchEnabled
                      && CanSolve(current, out _))
-                RequestSearch(host, current, SearchReason.AutoTurnStart);
+            {
+                int turn = LocalContext.GetMe(current)!.PlayerCombatState!.TurnNumber;
+                if (IsMultiplayerCombat(current) && !CombatStability.IsCoopBoardStable(current))
+                    ScheduleCoopAutoSearch(host, current, turn);
+                else
+                    RequestSearch(host, current, SearchReason.AutoTurnStart);
+            }
             else
                 SolverOverlay.RefreshControls();
         }
@@ -2016,6 +2230,15 @@ internal static partial class SolverController
             _combat.LatestStamp = null;
             SolverOverlay.RefreshControls();
             Entry.Logger.Info($"[CombatSolver/Test] SEARCH_STALE generation={generation} player_input={search.PlayerInputObserved}");
+            if (IsMultiplayerCombat(searchedState)
+                && _combat.FullAutoEnabled
+                && ReferenceEquals(currentState, searchedState)
+                && CanSolve(searchedState, out _))
+            {
+                int staleTurn = LocalContext.GetMe(searchedState)?.PlayerCombatState?.TurnNumber ?? -1;
+                if (staleTurn > 0)
+                    ScheduleCoopAutoSearch(host, searchedState, staleTurn);
+            }
             return;
         }
 
@@ -2255,7 +2478,12 @@ internal static partial class SolverController
             result.PotionUses.Count,
             result.WasReused);
         CancelDeployment();
-        SolverDeploymentSession deployment = new() { State = state, StartTurnNumber = result.StartTurnNumber };
+        SolverDeploymentSession deployment = new()
+        {
+            State = state,
+            StartTurnNumber = result.StartTurnNumber,
+            RequireCoopStableBoard = _combat.FullAutoEnabled,
+        };
         _deployment = deployment;
         SolverSettingsSnapshot deploymentSettings = SolverSettings.Capture();
         SolverOverlay.RefreshControls();
@@ -2303,6 +2531,54 @@ internal static partial class SolverController
         await session.CompleteAndDetachAsync();
     }
 
+    private static async Task<bool> EnsureCoopBoardCurrentAsync(
+        NGame host,
+        CombatState state,
+        SolverDeploymentSession deployment,
+        CoopBoardStamp observed,
+        int turn,
+        int nextActionIndex,
+        CancellationToken token)
+    {
+        ActionExecutor executor = RunManager.Instance.ActionExecutor;
+        GameAction? running = executor.CurrentlyRunningAction;
+        if (executor.IsRunning || running != null)
+        {
+            Task barrier = running == null
+                ? executor.FinishedExecutingActions()
+                : Task.WhenAll(executor.FinishedExecutingActions(), running.CompletionTask);
+            await barrier.WaitAsync(token);
+        }
+        token.ThrowIfCancellationRequested();
+        bool teammatesReady = !deployment.RequireCoopStableBoard
+            || CombatStability.AreAllTeammatesReadyToEndTurn(state);
+        if (teammatesReady && CoopBoardStamp.Capture(state) == observed)
+            return true;
+        Entry.Logger.Warn(
+            $"[CombatSolver/Test] COOP_BOARD_CHANGED turn={turn} next_action={nextActionIndex} " +
+            $"teammates_ready={teammatesReady}");
+        SolverAutoStatus.Record(
+            "stop",
+            $"coop_board_changed turn={turn} next_action={nextActionIndex} teammates_ready={teammatesReady}");
+        return false;
+    }
+
+    private static void DiscardCoopPlan(
+        NGame host,
+        CombatState state,
+        SolverDeploymentSession deployment,
+        int turn)
+    {
+        _combat.ContinuationSource = null;
+        _combat.LatestResult = null;
+        _combat.LatestStamp = null;
+        CompleteDeployment(deployment);
+        SolverOverlay.RefreshControls();
+        Entry.Logger.Warn($"[CombatSolver/Test] COOP_PLAN_DISCARDED turn={turn}");
+        if (_combat.FullAutoEnabled && IsSamePlayableTurn(state, turn))
+            ScheduleCoopAutoSearch(host, state, turn);
+    }
+
     private static async Task DeployCurrentTurn(
         NGame host,
         CombatState state,
@@ -2317,6 +2593,9 @@ internal static partial class SolverController
             ? Stopwatch.GetTimestamp()
             : 0;
         int turn = result.StartTurnNumber;
+        CoopBoardStamp? observedCoopBoard = state.Players.Count > 1
+            ? CoopBoardStamp.Capture(state)
+            : null;
         List<PlanAction> actions = result.BestNode.Actions
             .Where(action => action.Turn == turn && action.IsExecutable)
             .ToList();
@@ -2338,6 +2617,13 @@ internal static partial class SolverController
                 token.ThrowIfCancellationRequested();
                 if (!IsSamePlayableTurn(state, turn))
                     throw new InvalidOperationException("部署途中已不再是原玩家回合。");
+                if (observedCoopBoard is { } observedBoard
+                    && !await EnsureCoopBoardCurrentAsync(
+                        host, state, deployment, observedBoard, turn, actionIndex, token))
+                {
+                    DiscardCoopPlan(host, state, deployment, turn);
+                    return;
+                }
 
                 Player player = LocalContext.GetMe(state)!;
                 FairObservation.RevealCursor revealCursor = FairObservation.CaptureReveal(state, player);
@@ -2448,6 +2734,13 @@ internal static partial class SolverController
                 try
                 {
                     await AwaitDeploymentActionChoicesAsync(choiceSession, actionCompletion, phaseChoices.Length, token);
+                    // Native CompletionTask also completes successfully when ExecuteAction faults.
+                    if (queuedAction.Exception is { } actionFailure)
+                        throw new InvalidOperationException(
+                            $"Native deployment action failed: turn={turn} action_index={actionIndex} " +
+                            $"action={action.CardId ?? action.PotionId} target={action.TargetCombatId}.",
+                            actionFailure);
+                    _deployedActionCount++;
                     RunStatistics.Activity(state, execution: true, auto: _combat.FullAutoEnabled);
                 }
                 catch (NativeChoicePlanMismatchException)
@@ -2482,6 +2775,8 @@ internal static partial class SolverController
                         $"powers={string.Join(',', player.Creature.Powers.Select(power =>
                             $"{power.Id.Entry}:{power.Amount}/{power.AmountOnTurnStart}"))}");
                 }
+                if (observedCoopBoard != null)
+                    observedCoopBoard = CoopBoardStamp.Capture(state);
                 if (CombatManager.Instance.IsInProgress
                     && IsSamePlayableTurn(state, turn)
                     && (FairObservation.DescribeReveal(revealCursor, state, player)
@@ -2526,6 +2821,13 @@ internal static partial class SolverController
                         state,
                         SearchReason.PlanExhausted,
                         deployWhenReady: !_combat.FullAutoEnabled);
+                    return;
+                }
+                if (observedCoopBoard is { } endTurnBoard
+                    && !await EnsureCoopBoardCurrentAsync(
+                        host, state, deployment, endTurnBoard, turn, actions.Count, token))
+                {
+                    DiscardCoopPlan(host, state, deployment, turn);
                     return;
                 }
                 Player player = LocalContext.GetMe(state)!;
@@ -3114,8 +3416,8 @@ internal static partial class SolverController
             rejection = "求解器已在设置中禁用。";
         else if (!CombatManager.Instance.IsInProgress)
             rejection = "当前没有进行中的战斗。";
-        else if (state.Players.Count != 1)
-            rejection = "第一版只支持单人战斗。";
+        else if (state.Players.Count is < 1 or > 4)
+            rejection = "求解器支持 1 到 4 名玩家的战斗。";
         else if (state.CurrentSide != CombatSide.Player || player?.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
             rejection = "当前不是玩家出牌阶段。";
         else if (CombatManager.Instance.PlayerActionsDisabled)

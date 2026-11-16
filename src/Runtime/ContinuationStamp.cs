@@ -80,6 +80,10 @@ internal sealed record ContinuationStamp(string StateText)
             pcs.Stars,
             player.Gold);
         AppendOsty(text, player.Osty, player.Osty?.CurrentHp ?? 0, player.Osty?.MaxHp ?? 0);
+        AppendPets(text, state.Allies.Where(creature => creature.PetOwner == player && creature != player.Osty),
+            creature => creature.CurrentHp, creature => creature.MaxHp, creature => creature.Block);
+        AppendOtherPlayers(text, state.Players.Where(other => !ReferenceEquals(other, player)),
+            other => other.Creature.CurrentHp, other => other.Creature.MaxHp, other => other.Creature.Block);
         AppendEnemies(text, state.Enemies,
             enemy => enemy.CurrentHp,
             enemy => enemy.MaxHp,
@@ -140,6 +144,14 @@ internal sealed record ContinuationStamp(string StateText)
             combat.GetOsty(player) is { } osty ? simulator.State.GetCreature(osty).CurrentHp : 0,
             combat.GetOstyMaxHp(simulator, player));
         IReadOnlyList<Creature> predictedEnemies = combat.Enemies;
+        AppendPets(text, combat.Allies.Where(creature => creature.PetOwner == player && creature != combat.GetOsty(player)),
+            creature => simulator.State.GetCreature(creature).CurrentHp,
+            creature => simulator.State.GetCreature(creature).MaxHp,
+            creature => simulator.State.GetCreature(creature).Block);
+        AppendOtherPlayers(text, combat.Players.Where(other => !ReferenceEquals(other, player)),
+            other => simulator.State.GetCreature(other.Creature).CurrentHp,
+            other => simulator.State.GetCreature(other.Creature).MaxHp,
+            other => simulator.State.GetCreature(other.Creature).Block);
         AppendEnemies(text, predictedEnemies,
             enemy => simulator.State.GetCreature(enemy).CurrentHp,
             enemy => simulator.State.GetCreature(enemy).MaxHp,
@@ -180,6 +192,22 @@ internal sealed record ContinuationStamp(string StateText)
             simulator.Rng.NicheState);
         text.Append(";max_hand_size=").Append(simulator.GetMaxHandSize(player));
         return new ContinuationStamp(text.ToString());
+    }
+
+    private static void AppendOtherPlayers(
+        StringBuilder text,
+        IEnumerable<Player> players,
+        Func<Player, int> currentHp,
+        Func<Player, int> maxHp,
+        Func<Player, int> block)
+    {
+        foreach (Player player in players.OrderBy(player => player.NetId))
+        {
+            text.Append(";other_player=").Append(player.NetId)
+                .Append(':').Append(currentHp(player))
+                .Append('/').Append(maxHp(player))
+                .Append('/').Append(block(player));
+        }
     }
 
     private static StringBuilder Begin(int turn, int hp, int maxHp, int block, int energy, int stars, int gold)

@@ -27,7 +27,8 @@ internal sealed class CombatReplayOutcome : IDisposable
 
     public CombatReplayOutcome(CombatState state)
     {
-        _player = state.Players.Single().Creature;
+        _player = MegaCrit.Sts2.Core.Context.LocalContext.GetMe(state)?.Creature
+            ?? state.Players[0].Creature;
         _initialHp = _player.CurrentHp;
         _historyStart = CombatManager.Instance.History.Entries.Count();
         _actions = RunManager.Instance.ActionQueueSet;

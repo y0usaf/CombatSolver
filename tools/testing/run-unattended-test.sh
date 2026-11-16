@@ -46,6 +46,7 @@ add_option scenario-id "SMOKE-001" string raw_string
 add_option character-id "IRONCLAD" string raw_string
 add_option seed "COMBATSOLVER" string raw_string
 add_option encounter-id "FUZZY_WURM_CRAWLER_WEAK" string raw_string
+add_option player-count 1 int positive_int
 add_option sts2-game-root "$steam_root/steamapps/common/Slay the Spire 2" string none
 add_option ritsu-workshop-root "$steam_root/steamapps/workshop/content/2868840/3747602295" string none
 add_option combat-solver-build-dir "" string none
@@ -402,6 +403,7 @@ for name in "${option_order[@]}"; do
 done
 
 ((option_value[ascension] >= 0 && option_value[ascension] <= 10)) || die "--ascension must be between 0 and 10"
+((option_value[player-count] >= 1 && option_value[player-count] <= 4)) || die "--player-count must be between 1 and 4"
 search_max_dop="${option_value[search-max-degree-of-parallelism-for-test]}"
 ((search_max_dop == -1 || (search_max_dop >= 1 && search_max_dop <= 16))) || \
     die "--search-max-degree-of-parallelism-for-test must be -1 or between 1 and 16"

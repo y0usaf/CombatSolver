@@ -380,6 +380,7 @@ internal sealed record HarnessOptions
           --seed <string>        跑局种子（无 --request 时用，默认 OFFLINEHARNESS1）
           --ascension <int>      飞升层数（默认 0）
           --act-index <int>      测试幕索引（默认 0）
+          --players <1..4>       虚拟玩家数（1..4，默认 1；本地视角为 1 号座位）
           --profile <p>          Medium|Custom（默认 Custom）
           --beam <int>           Beam 宽度（覆盖预设）
           --nodes <int>          最大展开节点（覆盖预设）
@@ -502,6 +503,7 @@ internal sealed record HarnessOptions
     {
         string character = "IRONCLAD", encounter = "FUZZY_WURM_CRAWLER_WEAK", seed = "OFFLINEHARNESS1";
         int ascension = 0, actIndex = 0, dop = 1, budget = 600_000, unorderedPileMask = 0, stateKeySalt = 0;
+        int players = 1;
         int transpositionPruneOff = 0, memoryNoProgressLimit = 0, earlyTurnExplorationDepth = 0;
         int? earlyTurnExplorationBudgetMilliseconds = null;
         int? transpositionEntryLimit = null;
@@ -550,6 +552,7 @@ internal sealed record HarnessOptions
                 case "--seed": seed = Value(); break;
                 case "--ascension": ascension = int.Parse(Value()); break;
                 case "--act-index": actIndex = int.Parse(Value()); break;
+                case "--players": players = int.Parse(Value()); break;
                 case "--profile": profile = Value(); break;
                 case "--beam": beam = int.Parse(Value()); break;
                 case "--nodes": nodes = int.Parse(Value()); break;
@@ -676,6 +679,10 @@ internal sealed record HarnessOptions
             throw new ArgumentException("--signal-ballast-mb 只接受 0..4096。");
         if (signalBallastMegabytes > 0 && !enableNoGcRegion)
             throw new ArgumentException("--signal-ballast-mb 需要 --enable-no-gc-region。");
+        if (players is < 1 or > 4)
+            throw new ArgumentException("--players 只接受 1..4。");
+        if (players > 1 && requestPath != null)
+            throw new ArgumentException("--players 只能用于无 --request 的虚拟跑局。");
         if (profile == "Custom" && requestPath == null)
         {
             beam ??= 24;
@@ -684,7 +691,10 @@ internal sealed record HarnessOptions
 
         return new HarnessOptions
         {
-            Scenario = new HarnessScenario(character, encounter, seed, ascension, actIndex),
+            Scenario = new HarnessScenario(character, encounter, seed, ascension, actIndex)
+            {
+                PlayerCount = players,
+            },
             RequestPath = requestPath,
             Label = label,
             Profile = profile,

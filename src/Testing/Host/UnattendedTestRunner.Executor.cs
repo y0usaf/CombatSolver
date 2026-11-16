@@ -41,6 +41,12 @@ internal sealed partial class UnattendedTestRunner
             bool expectedCardPlayed = request.ExpectedPlayedCardId == null;
             bool expectedPotionUsed = request.ExpectedUsedPotionId == null;
             bool expectedPlayerPowerObserved = request.ExpectedObservedPlayerPowerId == null;
+            if (request.ScenarioId == "COOP-AUTO-EXECUTE")
+            {
+                runner.SetStage("coop_auto_execute");
+                await runner.AssertCoopAutoExecuteAsync(combatState, player);
+                return Observation(combatEnded: !CombatManager.Instance.IsInProgress);
+            }
             if (request.ScenarioId == "CHECKPOINT-PROFILE-CONTRACT")
             {
                 runner.AssertCheckpointProfileContract(combatState);

@@ -195,6 +195,8 @@ internal sealed partial class UnattendedTestRunner
                 runner._host.RootSceneContainer.SetCurrentScene(NRun.Create(savedState));
                 await RunManager.Instance.GenerateMap();
             }
+            else if (request.PlayerCount > 1)
+                await StartVirtualCoopRunAsync(character, modifiers, request);
             else
                 await runner._host.StartNewSingleplayerRun(
                 character,
@@ -413,6 +415,38 @@ internal sealed partial class UnattendedTestRunner
                 orbChecks,
                 potionChecks,
                 monsterMoveChecks);
+        }
+
+        /// <summary>
+        /// Virtual co-op: every seat lives in this process, the way the archived multiplayer
+        /// probe built local multiplayer. Steam/ENet rooms are never involved.
+        /// </summary>
+        private async Task StartVirtualCoopRunAsync(
+            CharacterModel character,
+            IReadOnlyList<ModifierModel> modifiers,
+            UnattendedTestRequest request)
+        {
+            int playerCount = Math.Clamp(request.PlayerCount, 2, 4);
+            Player[] players = Enumerable.Range(0, playerCount)
+                .Select(seat => Player.CreateForNewRun(
+                    character, MegaCrit.Sts2.Core.Unlocks.UnlockState.all, (ulong)seat + 1))
+                .ToArray();
+            RunState run = RunState.CreateForNewRun(
+                players,
+                ActModel.GetDefaultList().Select(act => act.ToMutable()).ToList(),
+                modifiers,
+                request.GameMode,
+                false,
+                request.GameMode == GameMode.Dread ? 10 : request.Ascension,
+                request.Seed);
+            RunManager.Instance.SetUpNewSingleplayer(run, shouldSave: false);
+            await PreloadManager.LoadRunAssets(run.Players.Select(player => player.Character));
+            await PreloadManager.LoadActAssets(run.Acts[0]);
+            await RunManager.Instance.FinalizeStartingRelics();
+            RunManager.Instance.Launch();
+            runner._host.RootSceneContainer.SetCurrentScene(NRun.Create(run));
+            await RunManager.Instance.EnterAct(0, doTransition: false);
+            runner._completedChecks.Add($"VirtualCoopRun:Players={playerCount}");
         }
 
         internal async Task InjectInitialStateAsync(CombatState CombatState, Player player)

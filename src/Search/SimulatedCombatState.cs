@@ -656,13 +656,32 @@ internal sealed partial class SimulatedCombatState
             return 0;
         T incoming = CreatePowerForApplication<T>(target, prototype?.Target, applier, prototype);
         amount = ModifyPowerAmountForRelics(incoming, target, amount, applier);
+        bool instanced = incoming.InstanceType == MegaCrit.Sts2.Core.Entities.Powers.PowerInstanceType.Instanced;
+        // PowerCmd.Apply scales the first application on an enemy for every power that
+        // opts into multiplayer scaling; stacking an existing power is never scaled.
+        bool firstApplication = instanced || GetAmount<T>(target) == 0;
+        if (firstApplication
+            && Players.Count > 1
+            && (target.IsPrimaryEnemy || target.IsSecondaryEnemy)
+            && incoming.ShouldScaleInMultiplayer)
+        {
+            amount = (int)incoming.GetScaledAmountForMultiplayer(
+                this, applier, amount, target, CurrentPowerCardSource);
+        }
         if (incoming.GetTypeForAmount(amount) == MegaCrit.Sts2.Core.Entities.Powers.PowerType.Debuff
             && ConsumeArtifact(target))
         {
             return 0;
         }
-        bool instanced = incoming.InstanceType == MegaCrit.Sts2.Core.Entities.Powers.PowerInstanceType.Instanced;
-        if (instanced || GetAmount<T>(target) == 0)
+        if (incoming is TemporaryThornsPower)
+        {
+            beforeApplied += value => Apply<ThornsPower>(target, value, applier);
+            afterAmountChanged += (offset, power) =>
+            {
+                if (offset != power.Amount) Apply<ThornsPower>(target, offset, applier);
+            };
+        }
+        if (firstApplication)
             beforeApplied?.Invoke(amount);
         PowerModel simulated;
         if (instanced)
@@ -694,6 +713,14 @@ internal sealed partial class SimulatedCombatState
             && target.IsEnemy)
         {
             ritual._wasJustAppliedByEnemy = true;
+        }
+        // PlatingPower.AfterApplied resets Decrement to the player count in multiplayer.
+        if (simulated is PlatingPower plating
+            && previousAmount == 0
+            && simulated._amount > 0
+            && target.IsEnemy)
+        {
+            plating.DynamicVars["Decrement"].BaseValue = Players.Count;
         }
         if (simulated is KnockdownPower knockdown && applier != null)
         {

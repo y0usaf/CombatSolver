@@ -11,6 +11,8 @@
 
 回收生命周期的最小独立验证可用 `dotnet run --project tools/testing/checks/CombatSolver.GcPolicyChecks/CombatSolver.GcPolicyChecks.csproj -c Release -- checkpoint`，不启动 Godot；该模式链接生产 GC 政策，建立真实 NoGC 区域并验证续用与收集中取消。它不替代完整游戏里的延迟手动请求及引用释放 epoch 合同。
 
+虚拟多人场景使用 `-PlayerCount 2` / `--player-count 2`（1–4，默认 1）：本进程为每名玩家建立 `Player`，仍使用单人 net service；`COOP-AUTO-EXECUTE` 用它覆盖多人自动模式与单回合执行。真实联机房间不在该入口覆盖范围内。
+
 固定小预算搜索使用 `-FixedSearchBudget -SearchBudgetOverrideMilliseconds 1500`，Bash 对应 `--fixed-search-budget --search-budget-override-milliseconds 1500`。需要在不改玩家设置的情况下覆盖多策略路线搜索时，使用 `-UseNoveltyPortfolioForTest` / `--use-novelty-portfolio-for-test`；该开关只存在于无人测试协议，结束请求时由 `ProtocolHost` 重置。生产只有一套搜索配置；旧 ForceShortSearchOnly 和短/深预算输入仅作为兼容入口，不能据此断言阶段。旧 ExpectedInitialSearchPhase/DeepSearchTriggered/DeepSearchImprovedResult 参数已删除，改断言总工作量、边界和实际路线。新回放政策覆盖文件使用 `profile` / `fixedBudget`；旧归档的 `deepProfile` 仍可读取。
 
 先在各任务自己的 worktree 构建，禁止两个 agent 同时构建同一 worktree：
