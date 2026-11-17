@@ -18,9 +18,19 @@
 
 ## 下一版本（开发中）
 
+### 联机自动模式的节奏选择：自由行动／等待队友
+
+- 问题：联机 Auto 固定「最后出牌」——必须等每名队友结束本回合、动作队列空闲后才求解并部署。真实对局里这不像在玩牌，像在排队。
+- 选择：新增 `SolverCoopPlayMode` 二值设置 `FreePlay`／`Wait`，写入 `user://combat_solver_settings.json` 的 `coopPlayMode`，随游戏重启保留。缺该字段的旧设置文件按 `FreePlay` 读取，因此自由行动是默认值；`Wait` 与旧行为逐字一致。单人战斗不受影响（节奏只在 2–4 人战斗里生效）。
+- 自由行动：不做队友等待。`WaitForCoopStableBoardAsync` 直接判定棋盘可用，`SolverDeploymentSession.RequireCoopStableBoard` 为否，因此部署只受「原生动作队列空闲 + `CoopBoardStamp` 未变」约束。每次出牌前和结束回合前仍逐项比较 `CoopBoardStamp`；队友改变棋盘时丢弃剩余路线并立即重新求解（同一回合内重排，而不是等队友准备）。没有任何复制牌或代打路径：动作仍只来自本地玩家的手牌／药水与 `EndPlayerTurnAction`，卡实例由 `FindCardForDeployment` 按出现序号匹配。
+- 等待队友：与原行为一致——`SetFullAuto`、战斗重新挂载、命中过期结果、丢弃路线和回合开始的自动搜索都先等稳定棋盘。
+- 立即生效：已在等待中的 `WaitForCoopStableBoardAsync` 每帧重读节奏；玩家切成自由行动后它在下一帧返回，挂起的搜索或部署继续，不需要再点一次 Auto。`SetCoopPlayMode` 只负责持久化与刷新。
+- 界面：顶部栏新增「自由行动／等待队友」按钮（在「执行本回合」左侧），`Ctrl+F11` 同义；状态面板显示当前节奏。`Ctrl+F7`／`Ctrl+F8`／`Ctrl+F9`／`Ctrl+F10` 语义不变。
+- 验证：虚拟 2／4 人 `COOP-FREE-PLAY-EXECUTE` 与 `COOP-AUTO-EXECUTE` 各 Passed（自由行动：队友仍在行动时先出本地牌、队友中途改棋盘后丢弃路线并在同回合重排、重排后把该回合剩余的本地手牌打完（`CoopFreePlay:TeammateChangeMidTurn:ReplannedLocalActions=3`，无重复卡实例、无代打）、`Ctrl+F8` 只出本地牌且 Auto 保持关闭；等待节奏：阻塞、切自由行动解除、切回再阻塞、稳定根、丢弃余下路线、单回合）。队友改变棋盘由夹具注入：探测确认单进程虚拟跑局无法让其他玩家出牌（Auto 关闭时注入并原生出牌 exit 139，只注入不出牌 Passed），所以「Auto 部署途中真实队友出牌」仍属未验证项，留给真实联机。单人 `BETA-DEPLOY-IRONCLAD-SENTINEL` Passed（第 1 回合结束，HP 80/80）。跑局都停在夹具第 2 回合终点，战斗未结束。0.111 副本同批 8 项全部 Passed。真实 Steam 双人房间仍未验证。重跑入口见[测试矩阵](TEST_MATRIX.md#联机自动模式节奏)。
+
 ### 多人联机自动模式与单回合执行
 
-- 行为：`CanSolve`、搜索根和战斗开始恢复允许 1–4 名玩家；Auto 只在本地玩家的战斗里工作，绝不会代打队友手牌。多人回合开始后先等待，直到每名队友都已准备结束回合、原生动作队列空闲且没有结束回合阶段（与问题包稳定检查共用 `CombatStability.IsPlayerTurnStable`），才在当前稳定根上求解并部署本地手牌。
+- 行为：`CanSolve`、搜索根和战斗开始恢复允许 1–4 名玩家；Auto 只在本地玩家的战斗里工作，绝不会代打队友手牌。「等待队友」节奏下，多人回合开始后先等待，直到每名队友都已准备结束回合、原生动作队列空闲且没有结束回合阶段（与问题包稳定检查共用 `CombatStability.IsPlayerTurnStable`），才在当前稳定根上求解并部署本地手牌；「自由行动」节奏见上节。
 - 状态：`ContinuationStamp` 的实时/预测文本为其他玩家追加公开的 HP／最大 HP／格挡；`CoopBoardStamp` 另含每名玩家的回合、阶段和可见状态。搜到结果后每次出牌前、结束回合前都比较该文本；队友改变棋盘时丢弃剩余路线，Auto 重新等待稳定根，单回合执行则停止并把回合交回玩家。
 - 单人回合执行：顶部栏新增“执行本回合”按钮，`Ctrl+F8` 同义。它关闭 Auto，立即搜索并部署当前回合（可复用已有同根结果或进行中的搜索），结束后保持 Auto 关闭。原来 `Ctrl+F8` 的性能录制内存现场改为 `Ctrl+F7`。
 - 联机建模（廉价口径）：根捕获沿用实时多人缩放后的敌人 HP；预测召唤怪沿用 `ScaleMonsterHpForMultiplayer`；敌人攻击按原版“每个存活玩家都是目标”的语义同时结算队友（只评分本地玩家）；`MultiplayerScalingModel` 的格挡倍率与 `ShouldScaleInMultiplayer` 的首次 Power 施加按原版公式还原；队友未来出牌、指向队友的辅助牌和非伤害怪物效果仍不建模。战损账本、历史计数和录像观测统一取本地玩家。
