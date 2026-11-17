@@ -210,6 +210,15 @@ internal sealed record ContinuationStamp(string StateText)
         }
     }
 
+    private static void AppendPets(StringBuilder text, IEnumerable<Creature> pets,
+        Func<Creature, int> hp, Func<Creature, int> maxHp, Func<Creature, int> block)
+    {
+        text.Append(";pets=");
+        foreach (Creature pet in pets)
+            text.Append(pet.CombatId).Append(':').Append(pet.Monster!.Id.Entry).Append(':')
+                .Append(hp(pet)).Append('/').Append(maxHp(pet)).Append('/').Append(block(pet)).Append(',');
+    }
+
     private static StringBuilder Begin(int turn, int hp, int maxHp, int block, int energy, int stars, int gold)
         => new StringBuilder().Append("turn=").Append(turn)
             .Append(";hp=").Append(hp).Append(";max_hp=").Append(maxHp).Append(";block=").Append(block)

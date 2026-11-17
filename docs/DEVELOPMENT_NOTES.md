@@ -18,6 +18,14 @@
 
 ## 下一版本（开发中）
 
+### 公共分支 0.111 的兼容构建
+
+- 用途：Steam 公共分支 v0.111.1（以及仍在该版本上的队友）使用本分支联机；0.113 的 `fair-mode` 主线不受影响。分支名 `fair/0.111-public`，基线取 0.113 合并前的 fair 提交 `b38fda76`，再拣选 0.113 合并后的 9 个 fair 提交。
+- 差异：该分支没有 0.113 才引入的 `RunModel`／Dread／Blitz／Fool 箭系统与 `TemporaryThornsPower`。拣选时补回 0.113 合并带进调用侧的 `ContinuationStamp.AppendPets`，把 `SolverController` 的部署 `queuedAction` 提到分支外，虚拟跑局改用 0.111 的 `RunState.CreateForNewRun` 参数（无游戏模式／隐藏局参数），并删去 10 项 0.113 独有的无人测试断言（Fool／Dread／Blitz／Aim／模式隔离）。
+- 清单：`CombatSolver.json` 的 `min_game_version` 为 `0.111.1`，依赖 RitsuLib ≥ 0.6.0（实测 0.6.14，compat 分支 0.111.0）。
+- 验证：RitsuLib 0.6.14 与 CombatSolver 同时加载，CombatSolver 76/76 补丁应用成功、0 失败，无版本或引用错误；`SMOKE-001` 单人 1 回合结束（HP 80/80）；`COOP-AUTO-EXECUTE` 虚拟双人 Passed（等待队友稳定根、首次出牌后棋盘变化丢弃余下路线、单回合执行只出本地两张牌且 Auto 保持关闭）。
+- 未验证：真实 Steam 联机房间、网络延迟与队友目标辅助牌；测试用私有副本仅把 ELF 解释器指向本机 glibc（NixOS 无 `/lib64/ld-linux-x86-64.so.2`），游戏文件与 Mod 均与交付副本逐字节相同。
+
 ### 多人联机自动模式与单回合执行
 
 - 行为：`CanSolve`、搜索根和战斗开始恢复允许 1–4 名玩家；Auto 只在本地玩家的战斗里工作，绝不会代打队友手牌。多人回合开始后先等待，直到每名队友都已准备结束回合、原生动作队列空闲且没有结束回合阶段（与问题包稳定检查共用 `CombatStability.IsPlayerTurnStable`），才在当前稳定根上求解并部署本地手牌。

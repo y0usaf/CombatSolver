@@ -435,9 +435,8 @@ internal sealed partial class UnattendedTestRunner
                 players,
                 ActModel.GetDefaultList().Select(act => act.ToMutable()).ToList(),
                 modifiers,
-                request.GameMode,
-                false,
-                request.GameMode == GameMode.Dread ? 10 : request.Ascension,
+                GameMode.Standard,
+                request.Ascension,
                 request.Seed);
             RunManager.Instance.SetUpNewSingleplayer(run, shouldSave: false);
             await PreloadManager.LoadRunAssets(run.Players.Select(player => player.Character));

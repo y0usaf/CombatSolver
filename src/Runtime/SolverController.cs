@@ -2651,6 +2651,7 @@ internal static partial class SolverController
                     ? Stopwatch.GetTimestamp()
                     : 0;
                 Task actionCompletion;
+                GameAction queuedAction;
                 if (action.Kind == PlanActionKind.UsePotion)
                 {
                     PotionModel? potion = player.GetPotionAtSlotIndex(action.PotionSlot);
@@ -2682,7 +2683,7 @@ internal static partial class SolverController
                             deployWhenReady: !_combat.FullAutoEnabled);
                         return;
                     }
-                    GameAction queuedAction = await EnqueueAndCaptureActionAsync(
+                    queuedAction = await EnqueueAndCaptureActionAsync(
                         candidate => candidate is UsePotionAction usePotion
                             && ReferenceEquals(usePotion.Player, player)
                             && usePotion.PotionIndex == (uint)action.PotionSlot,
@@ -2717,7 +2718,7 @@ internal static partial class SolverController
                             deployWhenReady: !_combat.FullAutoEnabled);
                         return;
                     }
-                    GameAction queuedAction = await EnqueueAndCaptureActionAsync(
+                    queuedAction = await EnqueueAndCaptureActionAsync(
                         candidate => candidate is PlayCardAction playCard
                             && ReferenceEquals(playCard.NetCombatCard.ToCardModelOrNull(), card),
                         () =>

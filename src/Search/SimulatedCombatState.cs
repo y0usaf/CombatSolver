@@ -673,14 +673,6 @@ internal sealed partial class SimulatedCombatState
         {
             return 0;
         }
-        if (incoming is TemporaryThornsPower)
-        {
-            beforeApplied += value => Apply<ThornsPower>(target, value, applier);
-            afterAmountChanged += (offset, power) =>
-            {
-                if (offset != power.Amount) Apply<ThornsPower>(target, offset, applier);
-            };
-        }
         if (firstApplication)
             beforeApplied?.Invoke(amount);
         PowerModel simulated;
