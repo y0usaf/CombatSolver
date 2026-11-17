@@ -252,7 +252,10 @@ internal sealed class SolverDeploymentSession
 {
     public CombatState? State { get; init; }
     public int StartTurnNumber { get; init; }
-    /// <summary>Auto Mode promised to act after every teammate ended this turn.</summary>
+    /// <summary>
+    /// Wait pace only: Auto Mode promised to act after every teammate ended this turn.
+    /// Free play leaves this false so a teammate's move mid-turn is caught by the board stamp.
+    /// </summary>
     public bool RequireCoopStableBoard { get; init; }
     public CancellationTokenSource Cancellation { get; } = new();
     public Task Operation { get; set; } = Task.CompletedTask;

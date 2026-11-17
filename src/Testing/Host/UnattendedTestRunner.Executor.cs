@@ -47,6 +47,12 @@ internal sealed partial class UnattendedTestRunner
                 await runner.AssertCoopAutoExecuteAsync(combatState, player);
                 return Observation(combatEnded: !CombatManager.Instance.IsInProgress);
             }
+            if (request.ScenarioId == "COOP-FREE-PLAY-EXECUTE")
+            {
+                runner.SetStage("coop_free_play_execute");
+                await runner.AssertCoopFreePlayExecuteAsync(combatState, player);
+                return Observation(combatEnded: !CombatManager.Instance.IsInProgress);
+            }
             if (request.ScenarioId == "CHECKPOINT-PROFILE-CONTRACT")
             {
                 runner.AssertCheckpointProfileContract(combatState);

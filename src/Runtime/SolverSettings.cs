@@ -32,6 +32,16 @@ internal enum BossHpStrategy
     MinimizeHpLoss,
 }
 
+/// <summary>How Auto Mode paces itself against co-op teammates.</summary>
+internal enum SolverCoopPlayMode
+{
+    /// <summary>Play the local hand at the solver's own pace; replan when the board changes under it.</summary>
+    FreePlay,
+
+    /// <summary>Wait until every teammate ended this player turn before solving and playing.</summary>
+    Wait,
+}
+
 internal sealed record SolverSettingsData
 {
     public bool SolverDisabled { get; init; }
@@ -42,6 +52,11 @@ internal sealed record SolverSettingsData
     public bool RetainAllCombatLogs { get; init; }
     public SolverDeploymentFastMode DeploymentFastMode { get; init; } = SolverDeploymentFastMode.FollowGame;
     public double? DeploymentInterActionDelaySeconds { get; init; }
+    /// <summary>
+    /// Chosen co-op Auto pace. Free play is the default, so a settings file written by an
+    /// older build without this property loads as Free play.
+    /// </summary>
+    public SolverCoopPlayMode CoopPlayMode { get; init; } = SolverCoopPlayMode.FreePlay;
 }
 
 internal sealed record SolverSettingsSnapshot(
@@ -137,6 +152,7 @@ internal static class SolverSettings
         Entry.Logger.Info(
             $"[CombatSolver/Test] SETTINGS_LOADED persisted={persisted} " +
             $"auto_play={loaded.AutoPlay.ToString().ToLowerInvariant()} " +
+            $"coop_play_mode={loaded.CoopPlayMode} " +
             $"speed={effectiveSettings.Speed} " +
             $"solver_disabled={loaded.SolverDisabled} " +
             $"detailed_diagnostic_logs={loaded.EnableDetailedDiagnosticLogs} " +
@@ -227,6 +243,8 @@ internal static class SolverSettings
     {
         if (!Enum.IsDefined(data.DeploymentFastMode))
             throw new InvalidDataException($"Unknown deployment fast mode {data.DeploymentFastMode}.");
+        if (!Enum.IsDefined(data.CoopPlayMode))
+            throw new InvalidDataException($"Unknown co-op Auto pace {data.CoopPlayMode}.");
         ValidateRange(data.DeploymentInterActionDelaySeconds, 0d, 3d,
             nameof(data.DeploymentInterActionDelaySeconds));
     }

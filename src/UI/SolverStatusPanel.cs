@@ -59,6 +59,9 @@ internal sealed partial class SolverStatusPanel : PanelContainer
                 : OffColor;
 
         StringBuilder text = new();
+        text.Append(SolverText.Get("协作节奏")).Append(": ")
+            .Append(SolverText.Get(SolverController.CoopFreePlayEnabled ? "自由行动" : "等待队友"))
+            .AppendLine();
         text.Append(SolverText.Get("上次决策")).Append(": ").AppendLine(status.LastDecision);
         if (status.Failed)
             text.Append(SolverText.Get("故障原因")).Append(": ").AppendLine(status.FailureReason);
