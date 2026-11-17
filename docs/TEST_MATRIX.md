@@ -1,15 +1,26 @@
 # CombatSolver 测试入口
 
+## 联机自动模式节奏
+
+`COOP-FREE-PLAY-EXECUTE` 覆盖「自由行动」节奏：设置层证明自由行动是缺省值且选择可回读；`WaitForCoopStableBoardAsync` 在队友未准备时立即返回；Auto 在队友仍在行动时就打出本地牌（队友手牌与出牌记录不变）；队友中途改变棋盘后丢弃剩余路线并立即重新求解，期间不进入队友等待；最后 `Ctrl+F8` 仍只执行一个本地回合并关闭 Auto，且同一卡实例不会被出两次。`COOP-AUTO-EXECUTE` 覆盖「等待队友」节奏：等待、切换成自由行动即解除等待、切回等待后重新阻塞、队友准备后在稳定根恢复、首次出牌后改棋盘丢弃余下路线、`Ctrl+F8` 只出本地牌且 Auto 保持关闭。
+
+```text
+pwsh -NoProfile -File tools/testing/run-unattended-test.ps1 -ScenarioId COOP-FREE-PLAY-EXECUTE -PlayerCount 2 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -Seed COOPFREE1 -EnemyCurrentHp 60 -FixedSearchBudget -SearchBudgetOverrideMilliseconds 1500 -TimeoutSeconds 180 -CleanupInstanceOnExit
+./tools/testing/run-unattended-test.sh --scenario-id COOP-FREE-PLAY-EXECUTE --player-count 2 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --seed COOPFREE1 --enemy-current-hp 60 --fixed-search-budget --search-budget-override-milliseconds 1500 --timeout-seconds 180 --cleanup-instance-on-exit
+```
+
+检查项：`CoopFreePlay:Settings:DefaultFreePlayAndPersistedChoice`、`CoopFreePlay:DoesNotWaitForTeammates`、`CoopFreePlay:ActsWhileTeammateStillPlaying:LocalActions=1`、`CoopFreePlay:BoardChangeAfterFirstAction:StalePlanDroppedAndReplanned`、`CoopFreePlay:SingleTurnExecute:LocalActions=2:AutoStopped`、`CoopFreePlay:TeammateChangeMidTurn:ReplannedLocalActions=3`；`--player-count 4` 使用同一入口；本轮 0.111 副本 2 人与 0.113 副本 2／4 人各 Passed。队友中途改棋盘由夹具在原版生物上注入：单独探测过（Auto 关闭、只把一张防御注入队友手牌并让其走原生动作队列）原生动作路径直接崩溃（exit 139），同一夹具只注入不出牌则 Passed，因此这是单进程虚拟跑局的限制，而不是自由行动的并发问题；「Auto 出牌途中真实队友出牌」只能由真实联机验证；最后一步在下一个玩家回合重复该过程，并等 Auto 把丢弃后的回合走完。虚拟跑局仍用单人 net service 并把队友准备标记直接写进原版集合，真实联机语义由游戏自身的多人 net service 提供，尚未实测。
+
 ## 多人自动模式与单回合执行
 
-虚拟 2／4 人跑局在单进程内为每名玩家建立 `Player`，原始无人测试场景 `COOP-AUTO-EXECUTE` 覆盖：队友回合未结束时 Auto 等待、队友准备后在稳定根恢复、首次本地出牌后修改队友棋盘只执行一张并丢弃余下路线、`Ctrl+F8` 单回合执行只出本地牌且 Auto 保持关闭。虚拟跑局仍使用单人 net service，因此夹具直接写入原版准备结束集合来观察 `IsPlayerReadyToEndTurn`；真实联机语义由游戏自身的多人 net service 提供，尚未实测。
+虚拟 2／4 人跑局在单进程内为每名玩家建立 `Player`，无人测试场景 `COOP-AUTO-EXECUTE` 覆盖「等待队友」节奏：队友回合未结束时 Auto 等待、切换成自由行动立即解除该等待、切回等待后重新阻塞、队友准备后在稳定根恢复、首次本地出牌后修改队友棋盘只执行一张并丢弃余下路线、`Ctrl+F8` 单回合执行只出本地牌且 Auto 保持关闭。虚拟跑局仍使用单人 net service，因此夹具直接写入原版准备结束集合来观察 `IsPlayerReadyToEndTurn`；真实联机语义由游戏自身的多人 net service 提供，尚未实测。
 
 ```text
 pwsh -NoProfile -File tools/testing/run-unattended-test.ps1 -ScenarioId COOP-AUTO-EXECUTE -PlayerCount 2 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -Seed COOPAUTO1 -EnemyCurrentHp 60 -FixedSearchBudget -SearchBudgetOverrideMilliseconds 1500 -TimeoutSeconds 180 -CleanupInstanceOnExit
 ./tools/testing/run-unattended-test.sh --scenario-id COOP-AUTO-EXECUTE --player-count 2 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --seed COOPAUTO1 --enemy-current-hp 60 --fixed-search-budget --search-budget-override-milliseconds 1500 --timeout-seconds 180 --cleanup-instance-on-exit
 ```
 
-`--player-count 4` 使用同一入口；本轮 2 人和 4 人各 Passed，检查项为 `VirtualCoopRun:Players=2|4`、`CoopAuto:WaitForTeammates:StableBoard`、`CoopAuto:BoardChangeAfterFirstAction:RemainingPlanDiscarded`、`CoopAuto:SingleTurnExecute:LocalActions=2:AutoStopped`。单人 `BETA-DEPLOY-IRONCLAD-SENTINEL` 同时 Passed（`finishedTurn=3`）。真实 Steam/ENet 双人房间、延迟、队友目标辅助牌和网络取消仍未验证。
+`--player-count 4` 使用同一入口；检查项为 `VirtualCoopRun:Players=2|4`、`CoopAuto:WaitPace:BlocksWhileTeammatePlays`、`CoopAuto:SwitchToFreePlay:ReleasedWait`、`CoopAuto:WaitForTeammates:StableBoard`、`CoopAuto:BoardChangeAfterFirstAction:RemainingPlanDiscarded`、`CoopAuto:SingleTurnExecute:LocalActions=2:AutoStopped`。本分支单人 `SMOKE-001` 同时 Passed（`NativeOutcome:combatEnded=True:turn=1:hp=80:maxHp=80`；0.113 副本用 `BETA-DEPLOY-IRONCLAD-SENTINEL`，同为第 1 回合结束、HP 80/80）。真实 Steam/ENet 双人房间、延迟、队友目标辅助牌和网络取消仍未验证。
 
 ## 0.51.4 战斗逻辑与选牌续接
 
