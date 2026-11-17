@@ -61,7 +61,7 @@ internal sealed partial class SolverAutoToggle : Button
         }
         TooltipText = status.Failed
             ? SolverText.Format($"自动模式出错：{status.FailureReason}")
-            : SolverText.Get("Ctrl+F9 切换自动模式，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态");
+            : SolverText.Get("Ctrl+F9 切换自动模式，Ctrl+F11 切换自由行动/等待队友，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态");
     }
 
     private bool IsOn()

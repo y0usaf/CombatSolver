@@ -18,6 +18,15 @@ internal static partial class SolverController
         AssertMainThread();
         CancelCoopAutoWait();
     }
+    /// <summary>Selects a co-op pace without writing the player's settings file.</summary>
+    internal static SolverCoopPlayMode SetCoopPlayModeForTesting(SolverCoopPlayMode mode)
+    {
+        AssertMainThread();
+        SolverCoopPlayMode previous = SolverSettings.Current.CoopPlayMode;
+        SolverSettings.ApplyForTesting(SolverSettings.Current with { CoopPlayMode = mode });
+        Entry.Logger.Info($"[CombatSolver/Test] COOP_PLAY_MODE_TEST policy={mode} previous={previous}");
+        return previous;
+    }
     internal static int DeployedActionCountForTesting => _deployedActionCount;
 
     // Unattended validation installs a frozen result at the normal deployment boundary.

@@ -15,6 +15,7 @@ internal static class SolverOverlay
     private const int AttachIntervalFrames = 60;
     private static CanvasLayer? _layer;
     private static SolverAutoToggle? _toggle;
+    private static SolverCoopModeButton? _coopMode;
     private static SolverExecuteTurnButton? _executeTurn;
     private static SolverStatusPanel? _panel;
     private static Font? _font;
@@ -42,8 +43,14 @@ internal static class SolverOverlay
         if (!IsToggleAlive)
             TryAttachTopBar(host);
         _toggle?.SyncState();
+        _coopMode?.SyncState();
         _executeTurn?.SyncState();
     }
+
+    /// <summary>Flips the co-op Auto pace between Free play and Wait and stores the choice.</summary>
+    public static void CycleCoopPlayMode()
+        => SolverController.SetCoopPlayMode(
+            SolverController.CoopFreePlayEnabled ? SolverCoopPlayMode.Wait : SolverCoopPlayMode.FreePlay);
 
     public static void ToggleAuto()
     {
@@ -66,9 +73,12 @@ internal static class SolverOverlay
             _toggle.QueueFree();
         if (_executeTurn != null && GodotObject.IsInstanceValid(_executeTurn))
             _executeTurn.QueueFree();
+        if (_coopMode != null && GodotObject.IsInstanceValid(_coopMode))
+            _coopMode.QueueFree();
         if (_layer != null && GodotObject.IsInstanceValid(_layer))
             _layer.QueueFree();
         _toggle = null;
+        _coopMode = null;
         _executeTurn = null;
         _panel = null;
         _layer = null;
@@ -82,6 +92,7 @@ internal static class SolverOverlay
                 return;
             _framesUntilSync = SyncIntervalFrames;
             _toggle!.SyncState();
+            _coopMode?.SyncState();
             _executeTurn?.SyncState();
             return;
         }
@@ -122,8 +133,14 @@ internal static class SolverOverlay
         if (_toggle != null && GodotObject.IsInstanceValid(_toggle))
             _toggle.QueueFree();
         _font ??= ResolveFont(host, topBar);
+        if (_coopMode != null && GodotObject.IsInstanceValid(_coopMode))
+            _coopMode.QueueFree();
         if (_executeTurn != null && GodotObject.IsInstanceValid(_executeTurn))
             _executeTurn.QueueFree();
+        _coopMode = new SolverCoopModeButton { Name = "CombatSolverCoopMode" };
+        _coopMode.AttachStyleSource(topBar, _font);
+        parent.AddChild(_coopMode);
+        parent.MoveChild(_coopMode, map.GetIndex());
         _executeTurn = new SolverExecuteTurnButton { Name = "CombatSolverExecuteTurn" };
         _executeTurn.AttachStyleSource(topBar, _font);
         parent.AddChild(_executeTurn);
@@ -140,9 +157,13 @@ internal static class SolverOverlay
             _executeTurn.Position = new Vector2(
                 _toggle.Position.X - _executeTurn.CustomMinimumSize.X - 6f,
                 map.Position.Y);
+            _coopMode.Position = new Vector2(
+                _executeTurn.Position.X - _coopMode.CustomMinimumSize.X - 6f,
+                map.Position.Y);
         }
         _panel?.AttachStyleSource(topBar, _font);
         _toggle.SyncState();
+        _coopMode.SyncState();
         _executeTurn.SyncState();
     }
 

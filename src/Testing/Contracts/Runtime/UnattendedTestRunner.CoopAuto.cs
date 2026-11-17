@@ -10,12 +10,25 @@ namespace CombatSolver;
 internal sealed partial class UnattendedTestRunner
 {
     /// <summary>
-    /// Virtual two/three/four-seat co-op scenario. It proves the local process
-    /// waits for every teammate before Auto solves, that Ctrl+F8/Execute Turn
-    /// deploys only the local hand, and that a co-op board change drops the
-    /// remaining plan instead of playing stale actions.
+    /// Virtual two/three/four-seat co-op scenario for the Wait pace. It proves the local process
+    /// waits for every teammate before Auto solves, that Ctrl+F8/Execute Turn deploys only the
+    /// local hand, that a co-op board change drops the remaining plan, and that picking Free play
+    /// releases a wait that is already running.
     /// </summary>
     private async Task AssertCoopAutoExecuteAsync(CombatState combat, Player player)
+    {
+        SolverCoopPlayMode previousPace = SolverController.SetCoopPlayModeForTesting(SolverCoopPlayMode.Wait);
+        try
+        {
+            await AssertCoopWaitPaceAsync(combat, player);
+        }
+        finally
+        {
+            SolverController.SetCoopPlayModeForTesting(previousPace);
+        }
+    }
+
+    private async Task AssertCoopWaitPaceAsync(CombatState combat, Player player)
     {
         if (combat.Players.Count < 2)
             throw new InvalidOperationException("COOP-AUTO-EXECUTE requires --player-count 2..4.");
@@ -39,9 +52,29 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("Auto stopped waiting before the teammate ended their turn.");
         if (!SolverController.IsWaitingForCoopBoard)
             throw new InvalidOperationException("Auto did not report that it is waiting for teammates.");
+        _completedChecks.Add("CoopAuto:WaitPace:BlocksWhileTeammatePlays");
+
+        // 1b. Picking Free play while Auto waits releases the wait on the spot.
+        SolverController.SetCoopPlayModeForTesting(SolverCoopPlayMode.FreePlay);
+        bool releasedByPaceChange = await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        if (!releasedByPaceChange || SolverController.IsWaitingForCoopBoard)
+        {
+            throw new InvalidOperationException(
+                "Switching to Free play did not release the running teammate wait.");
+        }
+        _completedChecks.Add("CoopAuto:SwitchToFreePlay:ReleasedWait");
+
+        // 1c. Back on Wait, a fresh wait blocks again until every teammate ended the turn.
+        SolverController.SetCoopPlayModeForTesting(SolverCoopPlayMode.Wait);
+        using CancellationTokenSource stableCancellation = new(TimeSpan.FromSeconds(10));
+        Task<bool> stableWait = SolverController.WaitForCoopStableBoardAsync(
+            host, combat, turn, static () => true, stableCancellation.Token);
+        await PumpForAsync(TimeSpan.FromMilliseconds(300), "coop_wait_observed_again");
+        if (stableWait.IsCompleted)
+            throw new InvalidOperationException("Wait pace stopped waiting before the teammate ended their turn.");
 
         MarkTeammatesReadyForTest(combat, player);
-        bool stable = await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        bool stable = await stableWait.WaitAsync(TimeSpan.FromSeconds(5));
         SolverController.SetFullAutoEnabledForTesting(false);
         if (!stable
             || !CombatStability.AreAllTeammatesReadyToEndTurn(combat)
@@ -91,9 +124,7 @@ internal sealed partial class UnattendedTestRunner
         await PrepareLocalStrikesAsync(combat, player, 2);
         MarkTeammatesReadyForTest(combat, player);
         int handBefore = player.PlayerCombatState!.Hand.Cards.Count;
-        int teammateCardPlaysBefore = CombatManager.Instance.History.Entries
-            .OfType<CardPlayStartedEntry>()
-            .Count(entry => ReferenceEquals(entry.CardPlay.Card.Owner, teammate));
+        int teammateCardPlaysBefore = CountCardPlays(teammate);
         int actionsBefore = SolverController.DeployedActionCountForTesting;
         SolverController.ExecuteSingleTurn();
         await PumpUntilAsync(
@@ -107,10 +138,7 @@ internal sealed partial class UnattendedTestRunner
         if (SolverController.FullAutoEnabled)
             throw new InvalidOperationException("Execute Turn left Auto Mode enabled.");
         int actions = SolverController.DeployedActionCountForTesting - actionsBefore;
-        int teammateCardPlaysAfter = CombatManager.Instance.History.Entries
-            .OfType<CardPlayStartedEntry>()
-            .Count(entry => ReferenceEquals(entry.CardPlay.Card.Owner, teammate));
-        if (teammateCardPlaysAfter != teammateCardPlaysBefore)
+        if (CountCardPlays(teammate) != teammateCardPlaysBefore)
             throw new InvalidOperationException("Execute Turn played a teammate's card.");
         if (actions < 1 || player.PlayerCombatState!.Hand.Cards.Count >= handBefore)
             throw new InvalidOperationException("Execute Turn did not play the local hand.");
@@ -125,17 +153,23 @@ internal sealed partial class UnattendedTestRunner
     /// the local turn on the way there.
     /// </summary>
     private static void MarkTeammatesReadyForTest(CombatState combat, Player localPlayer)
+        => SetTeammatesReadyForTest(combat, localPlayer, ready: true);
+
+    private static void SetTeammatesReadyForTest(CombatState combat, Player localPlayer, bool ready)
     {
         const System.Reflection.BindingFlags flags =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         object turnState = typeof(CombatManager).GetField("_turnState", flags)?.GetValue(CombatManager.Instance)
             ?? throw new InvalidOperationException("CombatManager has no active turn state.");
-        object ready = turnState.GetType().GetProperty("PlayersReadyToEndTurn")?.GetValue(turnState)
+        object readySet = turnState.GetType().GetProperty("PlayersReadyToEndTurn")?.GetValue(turnState)
             ?? throw new InvalidOperationException("CombatTurnState has no ready set.");
         foreach (Player teammate in combat.Players.Where(candidate => !ReferenceEquals(candidate, localPlayer)))
         {
-            ((HashSet<Player>)ready).Add(teammate);
-            if (!CombatManager.Instance.IsPlayerReadyToEndTurn(teammate))
+            if (ready)
+                ((HashSet<Player>)readySet).Add(teammate);
+            else
+                ((HashSet<Player>)readySet).Remove(teammate);
+            if (CombatManager.Instance.IsPlayerReadyToEndTurn(teammate) != ready)
                 throw new InvalidOperationException("The teammate ready marker did not reach the combat state.");
         }
     }
@@ -153,6 +187,11 @@ internal sealed partial class UnattendedTestRunner
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         await NextFrameAsync();
     }
+
+    private static int CountCardPlays(Player player)
+        => CombatManager.Instance.History.Entries
+            .OfType<CardPlayStartedEntry>()
+            .Count(entry => ReferenceEquals(entry.CardPlay.Card.Owner, player));
 
     private async Task WaitForSolverIdleAsync(string stage)
     {

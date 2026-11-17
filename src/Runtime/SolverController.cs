@@ -135,6 +135,13 @@ internal static partial class SolverController
     public static bool FullAutoEnabled => _combat.FullAutoEnabled;
     public static bool IsWaitingForCoopBoard => Volatile.Read(ref _coopAutoWaitCount) > 0;
     internal static bool IsMultiplayerCombat(CombatState state) => state.Players.Count is > 1 and <= 4;
+    /// <summary>The chosen co-op Auto pace, read live so the in-game control takes effect at once.</summary>
+    public static SolverCoopPlayMode CoopPlayMode => SolverSettings.Current.CoopPlayMode;
+    /// <summary>
+    /// Free play plays the local hand at its own pace and replans when the board changes under it;
+    /// <see cref="SolverCoopPlayMode.Wait"/> is the old "go last" pace.
+    /// </summary>
+    public static bool CoopFreePlayEnabled => CoopPlayMode is SolverCoopPlayMode.FreePlay;
     public static bool AutoRequested => !_solverDisabled && SolverSettings.Current.AutoPlay;
     public static SolverAutoStatusSnapshot AutoStatus => SolverAutoStatus.Capture(FullAutoEnabled);
     public static bool RouteFrozen => _combat.RouteFrozen;
@@ -1365,12 +1372,20 @@ internal static partial class SolverController
         SolverAutoStatus.Record("start", "user_toggle_on");
         SolverOverlay.RefreshControls();
 
-        if (IsMultiplayerCombat(state) && !CombatStability.IsCoopBoardStable(state))
+        if (!CoopFreePlayEnabled
+            && IsMultiplayerCombat(state)
+            && !CombatStability.IsCoopBoardStable(state))
         {
             SolverAutoStatus.Record("wait",
-                $"turn={currentTurn} reason=auto_enabled waiting_for_teammates");
+                $"turn={currentTurn} reason=auto_enabled pace=wait waiting_for_teammates");
             ScheduleCoopAutoSearch(host, state, currentTurn);
             return;
+        }
+        if (CoopFreePlayEnabled && IsMultiplayerCombat(state))
+        {
+            SolverAutoStatus.Record("free_play",
+                $"turn={currentTurn} reason=auto_enabled pace=free_play " +
+                $"teammates_ready={CombatStability.AreAllTeammatesReadyToEndTurn(state).ToString().ToLowerInvariant()}");
         }
 
         LiveCombatStamp current = LiveCombatStamp.Capture(state);
@@ -1381,6 +1396,22 @@ internal static partial class SolverController
         }
         if (_search == null && _deployment == null)
             RequestSearch(host, state, SearchReason.FullAuto);
+    }
+
+    /// <summary>
+    /// Stores the co-op Auto pace. The choice is persisted, so it survives a game restart.
+    /// A wait that is already running notices the change on its next frame and returns at once,
+    /// which lets the waiting search or deployment proceed without a second request.
+    /// </summary>
+    public static void SetCoopPlayMode(SolverCoopPlayMode mode)
+    {
+        AssertMainThread();
+        if (SolverSettings.Current.CoopPlayMode == mode)
+            return;
+        SolverSettings.Update(SolverSettings.Current with { CoopPlayMode = mode });
+        SolverAutoStatus.Record("mode", $"coop_play_mode={mode}");
+        Entry.Logger.Info($"[CombatSolver/Test] COOP_PLAY_MODE mode={mode}");
+        SolverOverlay.RefreshControls();
     }
 
     public static bool PrepareAutomaticSearchForTurn(NGame host, CombatState state)
@@ -1585,6 +1616,11 @@ internal static partial class SolverController
     {
         if (!IsMultiplayerCombat(state))
             return true;
+        if (CoopFreePlayEnabled)
+        {
+            RecordFreePlayWithoutWaiting(state, turn);
+            return true;
+        }
         int lastSignature = -1;
         Interlocked.Increment(ref _coopAutoWaitCount);
         try
@@ -1592,6 +1628,12 @@ internal static partial class SolverController
             while (true)
             {
                 token.ThrowIfCancellationRequested();
+                if (CoopFreePlayEnabled)
+                {
+                    SolverAutoStatus.Record("wait_released", $"turn={turn} reason=pace_changed_to_free_play");
+                    Entry.Logger.Info($"[CombatSolver/Test] COOP_AUTO_WAIT_RELEASED turn={turn} reason=pace_changed");
+                    return true;
+                }
                 if (!isCurrent()
                     || !_combat.FullAutoEnabled
                     || !CombatManager.Instance.IsInProgress
@@ -1641,6 +1683,18 @@ internal static partial class SolverController
         {
             Interlocked.Decrement(ref _coopAutoWaitCount);
         }
+    }
+
+    /// <summary>
+    /// Free play answers "is the board settled enough to act" without looking at the teammates,
+    /// but keeps one status line for the turns it starts while they are still playing.
+    /// </summary>
+    private static void RecordFreePlayWithoutWaiting(CombatState state, int turn)
+    {
+        if (CombatStability.AreAllTeammatesReadyToEndTurn(state))
+            return;
+        SolverAutoStatus.Record("free_play", $"turn={turn} acting_without_teammates_ready");
+        Entry.Logger.Info($"[CombatSolver/Test] COOP_AUTO_FREE_PLAY turn={turn} waiting=false");
     }
 
     private static void ScheduleCoopAutoSearch(NGame host, CombatState state, int turn)
@@ -2017,7 +2071,9 @@ internal static partial class SolverController
                      && CanSolve(current, out _))
             {
                 int turn = LocalContext.GetMe(current)!.PlayerCombatState!.TurnNumber;
-                if (IsMultiplayerCombat(current) && !CombatStability.IsCoopBoardStable(current))
+                if (!CoopFreePlayEnabled
+                    && IsMultiplayerCombat(current)
+                    && !CombatStability.IsCoopBoardStable(current))
                     ScheduleCoopAutoSearch(host, current, turn);
                 else
                     RequestSearch(host, current, SearchReason.AutoTurnStart);
@@ -2482,7 +2538,7 @@ internal static partial class SolverController
         {
             State = state,
             StartTurnNumber = result.StartTurnNumber,
-            RequireCoopStableBoard = _combat.FullAutoEnabled,
+            RequireCoopStableBoard = _combat.FullAutoEnabled && !CoopFreePlayEnabled,
         };
         _deployment = deployment;
         SolverSettingsSnapshot deploymentSettings = SolverSettings.Capture();

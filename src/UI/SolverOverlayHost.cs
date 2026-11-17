@@ -22,6 +22,9 @@ internal sealed partial class SolverOverlayHost : Node
             case Key.F10:
                 SolverOverlay.TogglePanel();
                 break;
+            case Key.F11:
+                SolverOverlay.CycleCoopPlayMode();
+                break;
             default:
                 return;
         }
