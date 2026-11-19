@@ -95,6 +95,10 @@ namespace CombatSolver
         public static bool IsPreCombatWorker { get; set; }
         public static TestLogger Logger = new();
     }
+    internal static class FairObservation
+    {
+        public static bool Enabled => false;
+    }
     public sealed class TestLogger
     {
         public void Info(string message) { }

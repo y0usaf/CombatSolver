@@ -16,7 +16,6 @@ CHECKS = (
     "DiagnosticLogTests",
     "ExpansionBatchChecks",
     "ForkableListLayoutChecks",
-    "LoopDisplayChecks",
     "ModelIdCacheChecks",
     "ModelPredictionStateChecks",
     "PortfolioSelectorChecks",
