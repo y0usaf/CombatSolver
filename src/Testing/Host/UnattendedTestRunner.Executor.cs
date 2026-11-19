@@ -53,6 +53,12 @@ internal sealed partial class UnattendedTestRunner
                 await runner.AssertCoopFreePlayExecuteAsync(combatState, player);
                 return Observation(combatEnded: !CombatManager.Instance.IsInProgress);
             }
+            if (request.ScenarioId is "ZERO-CREDIT-GROWTH-PROOF" or "ZERO-CREDIT-GROWTH-PROOF-REGEN")
+            {
+                await runner.AssertZeroCreditGrowthProofAsync(combatState, player,
+                    request.ScenarioId.EndsWith("-REGEN", StringComparison.Ordinal));
+                return Observation(combatEnded: false);
+            }
             if (request.ScenarioId == "CHECKPOINT-PROFILE-CONTRACT")
             {
                 runner.AssertCheckpointProfileContract(combatState);
@@ -283,6 +289,12 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "NATIVE-CARD-ORDERING")
             {
                 await runner.AssertNativeCardOrderingAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId is "ORDERED-HAND-DUPLICATES-FIRST" or "ORDERED-HAND-DUPLICATES-SECOND")
+            {
+                await runner.AssertOrderedHandDuplicatesAsync(combatState, player,
+                    request.ScenarioId == "ORDERED-HAND-DUPLICATES-SECOND");
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId is "FOOL-BRANCH-STATE" or "FOOL-TURN-LIFECYCLE")
@@ -543,6 +555,11 @@ internal sealed partial class UnattendedTestRunner
             {
                 await AssertTheftRecoveryPolicyAsync(combatState);
                 return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId is "GREMLIN-ESCAPE-GOLD" or "GREMLIN-ESCAPE-GOLD-STATE" or "GREMLIN-ESCAPE-GOLD-STOLEN")
+            {
+                await runner.AssertGremlinEscapeGoldAsync(combatState, player);
+                return Observation(combatEnded: request.ScenarioId == "GREMLIN-ESCAPE-GOLD");
             }
             if (request.ScenarioId is "SEARCH-HP-TARGET-STOP" or "NOVELTY-HP-TARGET-STOP")
             {
@@ -939,6 +956,26 @@ internal sealed partial class UnattendedTestRunner
                 await runner.AssertRitualTemporaryStrengthOrderAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
+            if (request.ScenarioId == "TURN-POWER-ORDERING")
+            {
+                await runner.AssertTurnPowerOrderingAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "BEAT-DOWN-DYNAMIC-TARGET")
+            {
+                await runner.AssertBeatDownDynamicTargetAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "TERMINAL-POWER-PREFIX")
+            {
+                await runner.AssertTerminalPowerPrefixAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "DOOM-RETAINED-BLOCK")
+            {
+                await runner.AssertDoomRetainedBlockAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
             if (request.ScenarioId == "NOXIOUS-RAMPART-ORDER")
             {
                 await runner.AssertNoxiousRampartOrderAsync(combatState, player);
@@ -1048,6 +1085,30 @@ internal sealed partial class UnattendedTestRunner
             if (request.ScenarioId == "FIXED-PREFIX-POTION-POLICY")
             {
                 await runner.AssertFixedPrefixPotionPolicyAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "NATIVE-HEALING-CAPABILITY-BOUNDARY")
+            {
+                runner.SetStage("native_healing_capability_boundary");
+                await runner.AssertNativeHealingCapabilityBoundaryAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "NATIVE-HEALING-CALLBACK-BOUNDARY")
+            {
+                runner.SetStage("native_healing_callback_boundary");
+                await runner.AssertNativeHealingCallbackBoundaryAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "HEALTH-CALLBACK-BOUND")
+            {
+                runner.SetStage("health_callback_bound");
+                await runner.AssertHealthCallbackBoundAsync(combatState, player);
+                return Observation(combatEnded: false);
+            }
+            if (request.ScenarioId == "PLAYER-POTION-CALLBACK-BOUND")
+            {
+                runner.SetStage("player_potion_callback_bound");
+                await runner.AssertPlayerPotionCallbackBoundAsync(combatState, player);
                 return Observation(combatEnded: false);
             }
             if (request.ScenarioId.StartsWith("REPORT-CARDS-", StringComparison.Ordinal))

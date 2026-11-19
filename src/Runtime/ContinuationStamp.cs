@@ -67,6 +67,9 @@ internal sealed record ContinuationStamp(string StateText)
 
     public static ContinuationStamp CaptureLive(CombatState state)
     {
+        PredictionRitsuCapabilityAudit.Validate();
+        PredictionRitsuHealingAudit.ValidateGlobalListeners();
+        PredictionModHookSubscriberCapture.ValidateCardOnPlaySources(state.RunState, state);
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("找不到本地玩家。");
         PlayerCombatState pcs = player.PlayerCombatState
@@ -103,6 +106,8 @@ internal sealed record ContinuationStamp(string StateText)
         ModelPredictionStateMirrors.AppendLiveContinuation(text, state);
         if (AdaptedCardOnPlayMirrors.CaptureLiveStamp() is { } onPlayStamp)
             text.Append(";onplay_configuration=").Append(onPlayStamp);
+        if (MirroredHookListenerFilter.CaptureLivePatchStamp() is { } hookPatchStamp)
+            text.Append(";hook_projection_patches=").Append(hookPatchStamp);
         if (PredictionModHookSubscriberCapture.CaptureLiveLoadoutSummonPowerState(state) is { } loadoutSummonState)
             text.Append(";loadout_summon_powers=").Append(loadoutSummonState);
         AppendPowers(text, state.Creatures.SelectMany(creature => creature.Powers));
@@ -123,6 +128,8 @@ internal sealed record ContinuationStamp(string StateText)
         AppendRngState(text.Append(";non_combat_generation="), player.PlayerRng.NonCombatGeneration.CaptureState());
         text.Append(";max_hand_size=").Append(RitsuLibFramework.GetMaxHandSize(player));
         CombatRulesSnapshot.Capture(state).Append(text);
+        if (TheftEncounterStrategy.ForfeitsEncounterGold(state))
+            text.Append(";encounter_gold_forfeited=1");
         return new ContinuationStamp(text.ToString());
     }
 
@@ -183,6 +190,8 @@ internal sealed record ContinuationStamp(string StateText)
         ModelPredictionStateMirrors.AppendPredicted(ref adapterFingerprint, text, simulator, combat);
         if (combat.AdaptedOnPlay is { } adaptedOnPlay)
             text.Append(";onplay_configuration=").Append(adaptedOnPlay.Stamp);
+        if (combat.MirroredHookPatchStamp is { } hookPatchStamp)
+            text.Append(";hook_projection_patches=").Append(hookPatchStamp);
         if (combat.HasInactiveLoadoutSummonPowers)
             text.Append(";loadout_summon_powers=empty");
         AppendPowers(text, combat.EffectivePowers(), simulator);
@@ -202,6 +211,8 @@ internal sealed record ContinuationStamp(string StateText)
         AppendRngState(text.Append(";non_combat_generation="), simulator.Rng.NonCombatGenerationState(player));
         text.Append(";max_hand_size=").Append(simulator.GetMaxHandSize(player));
         combat.Rules.Append(text);
+        if (TheftEncounterStrategy.ForfeitsEncounterGold(combat))
+            text.Append(";encounter_gold_forfeited=1");
         return new ContinuationStamp(text.ToString());
     }
 

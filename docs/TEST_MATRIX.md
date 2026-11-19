@@ -22,6 +22,22 @@ pwsh -NoProfile -File tools/testing/run-unattended-test.ps1 -ScenarioId COOP-AUT
 
 `--player-count 4` 使用同一入口；本轮 2 人和 4 人各 Passed，检查项为 `VirtualCoopRun:Players=2|4`、`CoopAuto:WaitPace:BlocksWhileTeammatePlays`、`CoopAuto:SwitchToFreePlay:ReleasedWait`、`CoopAuto:WaitForTeammates:StableBoard`、`CoopAuto:BoardChangeAfterFirstAction:RemainingPlanDiscarded`、`CoopAuto:SingleTurnExecute:LocalActions=2:AutoStopped`。单人 `BETA-DEPLOY-IRONCLAD-SENTINEL` 同时 Passed（`NativeOutcome:combatEnded=True:turn=1:hp=80:maxHp=80`）。真实 Steam/ENet 双人房间、延迟、队友目标辅助牌和网络取消仍未验证。
 
+## 0.51.8 治疗补丁启动修复
+
+治疗后置补丁加载时的求解、治疗原生差分和日志包回执合同见[历史卷 31](archive/testing/volume-31.md)。
+
+## 0.51.7 薄荷尖塔兼容与诊断取证
+
+真实薄荷尖塔与 BaseLib 的原生差分、诊断 ZIP 和上传回执合同见[历史卷 30](archive/testing/volume-30.md)。
+
+## 0.51.6 社区 PR 与工具整合
+
+原生差分、离线合同、独立检查和测试工具的复跑入口见[历史卷 29](archive/testing/volume-29.md)。
+
+## 0.51.5 结算顺序与运行时交接
+
+定向原生差分、第二回合续用、便携 GC 合同及未验证项见[历史卷 28](archive/testing/volume-28.md#0515-结算顺序与运行时交接)。
+
 ## 0.51.4 战斗逻辑与选牌续接
 
 5 项定向原生验证、复跑入口和未验证项见[历史卷 27](archive/testing/volume-27.md#0514-战斗逻辑与选牌续接)。

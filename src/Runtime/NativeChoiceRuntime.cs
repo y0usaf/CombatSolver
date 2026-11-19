@@ -1008,6 +1008,7 @@ internal static class NativeChoiceSurface
         CancellationToken token)
     {
         NPlayerHand hand = (NPlayerHand)surface;
+        hand.PeekButton.SetPeeking(false);
         // The player may have highlighted cards while the solver was observing the page.
         // Rebuild the selection through native deselection before applying the ordered plan.
         var highlighted = (List<CardModel>)AccessTools.Field(typeof(NPlayerHand), "_selectedCards").GetValue(hand)!;

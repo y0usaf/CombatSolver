@@ -69,7 +69,10 @@ SteamEruptionPower 的转阶段也由 `AfterDeathMirrors` 持有。Hook 内恢�
 1. 清单 `affects_gameplay: false`；
 2. `PredictionModHookSubscriberInertness.IsCombatInert` 判定为战斗惰性——只重写了战斗外的
    hook，或者只重写了战斗开始 / 战斗结束 hook（前者的效果已经落在被捕获的根状态里，后者在
-   胜负判定之后才分发，求解器搜到战斗结束就停）；
+   胜负判定之后才分发，求解器搜到战斗结束就停）。这条类型推断的实例准入还要求
+   `AbstractModel.ExecutionFinished` 没有监听器；原生调用方在默认回调完成后也会触发该事件。
+   主线程捕获时逐实例核对，不缓存监听器是否为空，不能用派生同名字段替代原生事件。
+   这一准入不等于回复来源或未来状态等价性证书；
 3. 在 `PredictionModHookSubscriberCapture.KnownPreRootSubscriberTypeNames` 白名单里。
 4. Loadout 的 `PowerGiverSummonHook`：主线程检查实际加载的公开计数快照接口及怪物能力配置，把空配置写入续用状态戳。版本号变化不会阻止搜索；接口变化或配置非空时明确失败。这不放行 Loadout 的其他战斗效果。
 5. BaseLib `CardModifier`：侧表状态随预测卡牌独立复制并重绑 Owner，Hook 仍由对应镜像处理。修饰器的战斗监听成员与原生 BaseLib 一致，按玩家五种战斗牌堆枚举；生成牌完成战斗域登记后，在入堆时参与监听，离开所有牌堆后退出监听。复跑使用 `-VerifyBaseLibCardModifierBoundary`，合同直接对照原生生成牌及各牌堆的生命周期。
@@ -346,6 +349,16 @@ StrategicEffectMirrors.Register<TYourPower>(requirements, evaluate, host);
 
 ## 6. 已知的封闭开关
 
+当前回复组件表和 Ritsu 治疗门禁尚未覆盖 `Creature.CurrentHpChanged`、`MaxHpChanged` 以及它们转发的 `CombatStateTracker.CombatStateChanged` 全部受众。[直接/延迟原生反例](https://github.com/ltlly/CombatSolver/blob/1018fd7020aaaff1b2d24e9950f4b37446eea441/docs/performance/finite-health-capacity-proof-20261008.md)以及[实际 Ritsu 详情回调](https://github.com/ltlly/CombatSolver/blob/1018fd7020aaaff1b2d24e9950f4b37446eea441/docs/performance/health-event-source-admission-20261008.md)均复现 0 回复界后额外回复 2 点；后者未改变外层监听名单。只识别外层方法、空页面表或空治疗注册表不足以闭合证明，实际子控件回调、卡值重算、界面信号以及下层补丁需要独立核对。[卡值重算子证明](https://github.com/ltlly/CombatSolver/blob/1018fd7020aaaff1b2d24e9950f4b37446eea441/docs/performance/card-value-notification-proof-20261008.md)仅覆盖五个原生牌堆与三种已审计空附魔的直接调用，不能补足其余通知或未来来源。
+
+[用药回复回调证明](https://github.com/ltlly/CombatSolver/blob/1018fd7020aaaff1b2d24e9950f4b37446eea441/docs/performance/pruning-callback-proof-research-20261008.md)新增 `Player.UsedPotionRemoved` 的根资格检查：未知监听器可以通过原生动作直接重设 HP，不能继续使用 0 回复界。仅接纳审计 MVID 下精确原版界面方法和目标，核对指定同步依赖、原生单人服务以及相关事件；未知直接/悬停回调、同步测试委托或指定方法补丁使现有回复消费者退回无限上界。只冻结拒绝原因，不执行或适配扩展；其他生命、UI 信号、子控件、后续注册以及完整未来闭包仍然需要独立证明。
+
+[生命通知剪枝门槛](https://github.com/ltlly/CombatSolver/blob/1018fd7020aaaff1b2d24e9950f4b37446eea441/docs/performance/health-callback-pruning-guard-20261008.md)补充稳定根拒绝：玩家、敌人和已存在奥斯蒂的当前/最大生命事件、精确 Tracker 转发（也检查牌堆/历史/能量的独立可达通知）以及实际 Ritsu 浏览器详情回调，未知绑定或指定入口补丁使统一回复消费者退回无限界。根和 Fork 仅保存不可变拒绝原因，不执行回调，也不扩展未知语义的模拟支持。已观察原版/Ritsu 外层绑定保留此前准入；这个保护不是完整调用图证明，后续注册、其他 UI 回调/信号以及未来来源仍然需要闭合。
+
+[卡牌通知回复门槛](https://github.com/ltlly/CombatSolver/blob/1018fd7020aaaff1b2d24e9950f4b37446eea441/docs/performance/card-notification-and-recovery-roi-20261009.md)复现原生通知直接重设玩家 HP 的 2 点反例。稳定根检查 8 个无参 CardModel 事件以及暂时离堆的所属实例，未知绑定或所检查方法补丁退回无限回复界；仅保留当前 Tracker 与原版手牌闪光/Ritsu 刷新的精确绑定，转发由现有生命通知门槛检查。它不执行未知回调，不认证附着变化、ExecutionFinished、其他 UI 信号或未来注册。
+
+模型镜像登记、原版类型身份和非 gameplay 清单不能补足证明。下表的组件资格仅表示已检查的来源表通过，不能解释为全部生命事件、界面回调或扩展链安全。
+
 组合达标早停额外读取冻结的 `CombatRootSnapshot.HasVisibleHealingSource`：牌、玩家 Power 和可搜索药水的 `Heal` / `HealPercent` / `RegenPower` 变量，以及已有 `RegenPower`，会保守保留追加搜索；已选路线实际回血也保留追加搜索。变量在主线程完成物化后读取，治疗随从同样可能触发保守回退。这不是完整治疗来源登记或可达收益上界；没有这些元数据的自定义治疗、后续生成的治疗来源，仍可能因玩家战损目标已经达标而少做追加审计。关闭战损达标早停可保留原追加搜索；不改变模拟执行和既有第三方适配合同。
 
 下面这些位置目前是按原版类型写死的开关，第三方登记不进去。要用只能 Harmony 打补丁，或者等
@@ -353,10 +366,17 @@ StrategicEffectMirrors.Register<TYourPower>(requirements, evaluate, host);
 
 | 位置 | 症状 | 状态 |
 |---|---|---|
+| `PredictionCardCallbackAudit.Capture` | 稳定根检查 8 个无参卡牌通知、永久牌组/生成超集和暂时离堆的根所属实例；未知绑定、版本/布局或指定 Tracker 方法补丁使回复消费者退回无限界，Fork 仅共享原因。精确 Tracker 准入复用生命转发门槛，不能解释为其他 UI/未来回调安全 | 封闭拒绝门槛，无外部放行入口 |
+| `PredictionHealthCallbackAudit.Capture` | 稳定根检查生命事件、实际 Tracker 受众和 Ritsu 详情刷新，未知绑定/所检查补丁退回无限回复界；只共享原因，不持有 live 对象。保留原外层准入不是完整回复证书，未来注册和其他信号仍然未证明 | 封闭拒绝门槛，无外部放行入口 |
+| `PredictionPlayerPotionCallbackAudit.Capture` | 用药完成以及指定悬停同步来源在稳定根检查，未知受众、版本/布局、测试委托或依赖补丁拒绝回复剪枝；原版精确回调按已审计身份接纳，Fork 只共享不可变原因。不是所有生命/UI 事件认证，未知语义不自动获得模拟支持 | 封闭回复证明准入，无外部放行入口 |
+| `PredictionRitsuCapabilityAudit.Validate` | 原版模型类型不替代附着行为审计；未审计 Ritsu 版本只撤销有限回复证书，当前/未来规范宿主能力、未知保存条目以及默认构造注入在根/live 拒绝，空宿主/仅注册工厂保留 | 无外部认证入口；精确 Runtime/Shared 契约，仅缓存元数据，不执行未知工厂；其他回调仍然需要独立审计 |
+| `PredictionRitsuHealingAudit.ValidateGlobalListeners` / `CaptureHealingRejection` | 已启用的 Ritsu 进程级治疗监听器在根捕获及 live 采用边界检查。Heal 补丁组合与 Ritsu 运行库版本用于判定有限回复上界资格，未认证时采用一般搜索策略 | 封闭语义边界与搜索证明 |
+
+| `MirroredHookListenerFilter.CanProjectReceivers` / `SimulatedCombatState.TryBuildProjectedHookListeners` | 镜像专用监听表省略既有参与位图为零的后缀成员，完整原生表保持。准入核对已审计游戏 `0.113.0` / `0.113.1` MVID 以及字段/Preview getter 的无补丁状态；基 Hook、原生关键字 Hook 或相关 getter 安装 Harmony 补丁时通过 `LiveCombatStamp` 失效旧路线并回退完整构造，不透明 `CardModifier` 与外部/动态类型保守保留 | 封闭性能特化 |
 | `ArrowMirrors` / `ModifyPreBlockDamageTargetMirrors` | v0.113 原版箭 Hook 与格挡前伤害转移采用内部精确登记。箭槽、插箭引用和历史由同一 Fork context 重映射；当前入口按内置模型维护 | 封闭原版登记 |
 | `SimulatedCombatState` 的 `RunModels` 与领域捕获 | 克隆 MultiplayerScalingModel、DreadRunModel、BlitzRunModel 和十二种原版领域，解除 run/combat 引用；第三方类型需提供分支语义和所有权合同 | 封闭原版状态 |
 | `StrategicHpRecoveryBound.CanCertifyRemainingHealingEnvironment` / `RemainingHealingUpperBound` | 只在已审计的原版角色、敌人、卡牌、持续效果、遗物和药水闭包内收紧剩余治疗上界；包括固定Shiv来源、Slither费用随机化及Inky虚弱；敌人集合包含逐项审计的精确SoulNexus，其三个行动与生命周期不授予玩家治疗；另含精确Regent／LouseProgenitor闭包，BurningSticks复制消耗技能的例外仍保守处理。未知来源、附魔／苦难、消耗牌被动与取回来源保守回退无限余量；再生及战后治疗继续计入。第三方语义登记不等于治疗上界证明，没有外部证书注册入口；原战斗模拟支持范围不因此扩大 | 封闭性能证明 |
-| `StrategicHpRecoveryBound.ComponentHealingRejection` / `ComponentHealingUpperBound` | 按审计版本和精确组件表组合严格回复证明，根捕获全部初始牌堆、永久牌组与全局监听来源，分支保留有效再生并检查剩余合法剂量。未知来源、附件、获取链和目标拒绝；未知分支的无限界不再与已知来源估计取最小值。该证书没有第三方注册入口；模拟镜像登记不会自动获得资格。Smart 的精确用药层与开局后续搜索仅在现有成长、遗物、强制用药、资源追回和保命资源门禁通过后消费完整无药胜利基线 | 封闭组件证明 |
+| `StrategicHpRecoveryBound.ComponentHealingRejection` / `ComponentHealingUpperBound` | 按审计版本（`0.113.0` / `0.113.1`）和精确组件表组合严格回复证明，根捕获全部初始牌堆、永久牌组与全局监听来源，分支保留有效再生并检查剩余合法剂量。扩展初始来源另冻资格，只供原整体认证拒绝的零额度成长战损消费者；原前置／窄搜索／Smart 资格保持。未知来源、附件、获取链和目标拒绝；未知分支的无限界不与已知来源估计取最小值。没有第三方注册入口，模拟镜像登记不会自动获得资格。回复认证不单独证明成长或用药支配；跨成长桶严格战损比较要求完整合规胜利、无遗物／追回目标、已知已付成本不高于分支成本，并保留相等战损、更便宜分支以及 `BossTempo` 等损路线 | 封闭组件证明 |
 | `CombatSearchCoordinator.CanFinishNativeLouseZeroDamageRoute` / `CombatRootSnapshot.InitialRemainingHealingUpperBound` | 精确原生Regent／Louse闭包的初始治疗上界为零，且无风险满血零损无药完整胜利才停止可选药水后验；固定预算、强制药水、死亡保护、成长／遗物目标与未追回资源阻止退出。未知初始Power／药水／生成牌和剩余再生保守拒绝；没有外部证书登记入口。BurningSticks存在时拒绝消耗BundleOfJoy快捷证书；新增7牌／5Power／3遗物／2药水只在此闭包，其他环境的原表不变 | 封闭性能证明 |
 | `CombatHistoryCounterKey.ForCard` / `OpenGenerationSources` | 原版历史读者按所读计数入键，随机生成、变牌及间接生成药水来源保守全量入键；新增原版入口必须同步该表。根包含消耗堆。第三方模型、已捕获 Mod 订阅者、BaseLib 修饰器或存在 AdaptedOnPlay 快照时自动回退六项全量，不能据此支持六项之外的新历史语义；新计数仍须显式扩展历史、Fork 和指纹合同。 | 封闭语义依赖表 |
 | `CombatPredictionSimulator.SupportsManualCardChoiceContinuation` / `PredictionStateStore.SupportsManualCardChoiceContinuation` | 自身选牌续执行覆盖清单中的41张原版单人卡，要求无附魔/污染、手动单次执行；已生成的请求、候选、历史与活动格挡计数有显式复制合同，不能据此接纳第三方选牌委托；拒绝不透明外部状态以及所有 `IPredictionForkBoundary` 状态（包括模型状态适配器包装）。不符合时保留原完整回放，已有第三方战斗支持范围不因此扩大；无注册入口 | 封闭性能特化 |
@@ -375,7 +395,7 @@ StrategicEffectMirrors.Register<TYourPower>(requirements, evaluate, host);
 | `NativeModelCloneConcurrency` | 预测克隆只放行已核对原版阶段、原版变量及 BaseLib/Ritsu 稀疏元数据复制补丁组合的普通原版卡牌；附魔/灾厄、第三方模型/变量和未知补丁保留原锁。Power 只放行已物化原版变量、继承默认克隆及 InitInternalData 的原版类型，同时核对基阶段与变量 getter 补丁；自定义初始化保持原锁。每个线程最外层模拟隔离域重新核对，不支持求解中安装补丁；原版 MutableClone 保护不变。没有新增外部注册入口 | 精确框架适配 |
 | `RitsuEmptyCapabilityFastPathPatches` | 模拟隔离域的空 capability 集可直接保留原卡牌标签序列；不枚举/复制标签，不缓存分支值。非空贡献者与精确类型默认来源继续框架入口；晚注册刷新来源代次，已物化的空集合仍按框架语义处理。live 不旁路，无新增登记入口 | 精确框架适配 |
 | `DynamicVarCloneMetadataPatches` | 模拟克隆只优化已核对为空默认值的 BaseLib 提示/升级字段与 Ritsu 提示工厂；非空值照常复制，live 调用保持原框架行为。其他附加字段继续原有克隆逻辑，不属于此优化入口 | 精确框架适配 |
-| `CorePowerSupport.TriggerPlayerRegularSideTurnEndEffects`、`FlushPlayerHandAtTurnEnd`、AfterSideTurnStart | 常规回合末、手牌清理和抽牌后的阵营时点仍由具体效果实现。注能核心的首回合产球由 `TriggerRelicsAfterSideTurnStart` 结算，闪电伤害加成通过 `ModifyOrbValue` 读取。已开放的抽牌前、生物入场及其他回合阶段见 §2.10 | 部分开放 |
+| `CorePowerSupport.TriggerPlayerRegularSideTurnEndEffects`、`FlushPlayerHandAtTurnEnd`、AfterSideTurnStart | 常规回合末、手牌清理和抽牌后的阵营时点仍由具体效果实现。准备时间与潜伏根系在 `TurnStartPowerSupport` 的同一有序 Power 遍历中结算；敌方再生／覆甲处于灾厄死亡前的 Early 阶段。注能核心的首回合产球由 `TriggerRelicsAfterSideTurnStart` 结算，闪电伤害加成通过 `ModifyOrbValue` 读取。已开放的抽牌前、生物入场及其他回合阶段见 §2.10 | 部分开放 |
 | `CombatPredictionSimulator.OnPlayWrapper` | 出牌后补抽没有挂载点 | 待做 |
 | `CardChoiceSupport.RemovalPriority` 的排序口径 | 移除类选择按**单卡**估值排，不看牌库其余部分；弃牌那一侧已经是「源牌堆平均值减本牌估值」的相对口径，消耗与转变没有。表现为求解器不会为了压出无限而主动烧牌。起手牌那一层已由 §2.7 打开，相对口径这一层仍然封闭 | 待做 |
 | `ContinuationStamp.AppendCard` 的 `private=` 段与 `CombatBeamSolver.CaptureCardStateFingerprintForTesting` 的 `switch (preview)` | **卡牌**的隐藏字段按原版类型写死（利爪、基因算法、巨锤、狂暴、镰刀、疯狂科学），第三方卡牌的私有计数进不了指纹。Power 那一侧已有 `PowerHiddenStateMirrors`，见 §2.6 | 待做 |

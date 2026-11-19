@@ -915,12 +915,11 @@ internal static class PlayerTurnSetupCoordinator
                     $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_RESUME " +
                     $"turn={player.PlayerCombatState!.TurnNumber}");
                 DisposeActive(active);
-                await SolverController.ResumeAfterTurnSetupAsync(
+                SolverController.ResumeAfterTurnSetup(
                     host,
                     active.Combat,
                     active.LifecycleGeneration,
-                    player.PlayerCombatState.TurnNumber,
-                    token: active.Token);
+                    player.PlayerCombatState.TurnNumber);
                 return;
             }
 
@@ -934,15 +933,14 @@ internal static class PlayerTurnSetupCoordinator
                     : $"[CombatSolver/Test] TURN_SETUP_PLAYER_CHOICE_COMPLETED turn={player.PlayerCombatState!.TurnNumber} " +
                       "search=false");
                 DisposeActive(active);
-                await SolverController.ResumeAfterTurnSetupAsync(
+                SolverController.ResumeAfterTurnSetup(
                     host,
                     active.Combat,
                     active.LifecycleGeneration,
                     player.PlayerCombatState.TurnNumber,
                     deployWhenReady: deployAfterSetup,
                     waitForDeploymentDelay: solverDriven
-                        && (deployAfterSetup || SolverController.FullAutoEnabled),
-                    token: active.Token);
+                        && (deployAfterSetup || SolverController.FullAutoEnabled));
                 return;
             }
 
@@ -951,13 +949,12 @@ internal static class PlayerTurnSetupCoordinator
                 Entry.Logger.Info(
                     $"[CombatSolver/Test] TURN_SETUP_NO_VISIBLE_CHOICE turn={player.PlayerCombatState!.TurnNumber}");
                 DisposeActive(active);
-                await SolverController.ResumeAfterTurnSetupAsync(
+                SolverController.ResumeAfterTurnSetup(
                     host,
                     active.Combat,
                     active.LifecycleGeneration,
                     player.PlayerCombatState.TurnNumber,
-                    waitForDeploymentDelay: SolverController.FullAutoEnabled,
-                    token: active.Token);
+                    waitForDeploymentDelay: SolverController.FullAutoEnabled);
                 return;
             }
 
@@ -979,12 +976,11 @@ internal static class PlayerTurnSetupCoordinator
                     $"[CombatSolver/Test] TURN_SETUP_STATE_MISMATCH turn={player.PlayerCombatState!.TurnNumber} " +
                     expected.DescribeFirstDifference(actual));
                 DisposeActive(active);
-                await SolverController.ResumeAfterTurnSetupAsync(
+                SolverController.ResumeAfterTurnSetup(
                     host,
                     active.Combat,
                     active.LifecycleGeneration,
-                    player.PlayerCombatState.TurnNumber,
-                    token: active.Token);
+                    player.PlayerCombatState.TurnNumber);
                 return;
             }
             Entry.Logger.Info(

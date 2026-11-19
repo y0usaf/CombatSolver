@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Powers;
@@ -321,12 +320,6 @@ internal sealed partial class CombatBeamSolver
         bool IsPure,
         double NormalizedValue);
 
-    [InlineArray(10)]
-    private struct HandFingerprintBuffer
-    {
-        private StateFingerprint _element0;
-    }
-
     private sealed record RouteAnnotations(
         IReadOnlyDictionary<int, int> HpLostByTurn,
         IReadOnlyDictionary<int, int> HpRecoveredByTurn,
@@ -379,6 +372,8 @@ internal sealed partial class CombatBeamSolver
         SearchRouteTraits Traits,
         SearchBoundaryReason BoundaryReason)
     {
+        public bool ForfeitsEncounterGold { get; init; }
+
         public static SearchFeatures Capture(SearchNode node)
         {
             SimulationSnapshot snapshot = node.Snapshot;
@@ -418,7 +413,10 @@ internal sealed partial class CombatBeamSolver
                 node.ActionCount,
                 node.Score,
                 node.Traits,
-                snapshot.BoundaryReason);
+                snapshot.BoundaryReason)
+            {
+                ForfeitsEncounterGold = snapshot.ForfeitsEncounterGold,
+            };
         }
     }
 
