@@ -86,6 +86,9 @@ internal static partial class CardOnPlayMirrors
         registry.Register<TrickShot>(FoolArrowCardMirrors.Shoot);
         registry.Register<Nock>(FoolArrowCardMirrors.Nock);
         registry.Register<Quiver>(FoolArrowCardMirrors.Quiver);
+        registry.Register<Mimic>(BespokeCardMirrors.MimicOnPlay);
+        registry.Register<Intercept>(BespokeCardMirrors.InterceptOnPlay);
+        registry.Register<DemonicShield>(BespokeCardMirrors.DemonicShieldOnPlay);
         registry.Register<ExpectAFight>(BespokeCardMirrors.ExpectAFightOnPlay);
         registry.Register<MementoMori>(BespokeCardMirrors.MementoMoriOnPlay);
 

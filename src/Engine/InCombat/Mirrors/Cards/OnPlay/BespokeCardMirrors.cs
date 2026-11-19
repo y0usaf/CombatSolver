@@ -278,6 +278,35 @@ internal static class BespokeCardMirrors
         }
     }
 
+    public static void MimicOnPlay(Mimic card, CardOnPlayMirrorContext context)
+    {
+        decimal amount = context.Calculate(card.DynamicVars.CalculatedBlock);
+        context.GainBlock(card.Owner.Creature, amount, card.DynamicVars.CalculatedBlock.Props);
+    }
+
+    public static void InterceptOnPlay(Intercept card, CardOnPlayMirrorContext context)
+    {
+        decimal amount = context.Calculate(card.DynamicVars.Block);
+        context.GainBlock(card.Owner.Creature, amount, card.DynamicVars.Block.Props);
+    }
+
+    public static void DemonicShieldOnPlay(DemonicShield card, CardOnPlayMirrorContext context)
+    {
+        context.Simulator.Damage(
+            [card.Owner.Creature],
+            card.DynamicVars.HpLoss.IntValue,
+            MegaCrit.Sts2.Core.ValueProps.ValueProp.Unblockable
+                | MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered
+                | MegaCrit.Sts2.Core.ValueProps.ValueProp.Move,
+            card.Owner.Creature,
+            context.Card,
+            context.CardPlay);
+        if (context.Simulator.HasPendingChoice || context.Target is null)
+            return;
+        decimal amount = context.Calculate(card.DynamicVars.CalculatedBlock);
+        context.GainBlock(context.Target, amount, card.DynamicVars.CalculatedBlock.Props);
+    }
+
     private static int GetPowerAmount<TPower>(CardOnPlayMirrorContext context, Creature owner)
         where TPower : PowerModel
     {

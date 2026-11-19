@@ -216,5 +216,8 @@ internal static partial class CardOnPlaySupport
         if (simulator.HasPendingChoice)
             return;
         ApplyBatch043(simulator, combat, playedCard, target, processedEnemyDeaths);
+        if (simulator.HasPendingChoice)
+            return;
+        ApplyCoop(simulator, combat, playedCard, target);
     }
 }

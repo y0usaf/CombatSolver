@@ -28,6 +28,27 @@ internal static partial class SolverController
         return previous;
     }
     internal static int DeployedActionCountForTesting => _deployedActionCount;
+    internal static int UnEndTurnCountForTesting => _combat.UnEndTurnCountThisTurn;
+    internal static string? LastUnEndTriggerFingerprintForTesting => _combat.LastUnEndTriggerFingerprint;
+
+    internal static void BeginCombatForTesting(CombatState state, bool fullAuto)
+    {
+        _combat = new SolverCombatSession
+        {
+            State = state,
+            FullAutoEnabled = fullAuto,
+        };
+    }
+
+    internal static void ResetUnEndTurnStateForTesting()
+    {
+        _combat.ReadyToEndTurnTurn = null;
+        _combat.ReadyToEndTurnBaselineFingerprint = null;
+        _combat.LastUnEndTriggerFingerprint = null;
+        _combat.UnEndTurnCountThisTurn = 0;
+        _combat.UnEndTurnInFlight = false;
+        _combat.EvaluatedUnEndFingerprintsThisTurn.Clear();
+    }
 
     // Unattended validation installs a frozen result at the normal deployment boundary.
     internal static void StartPredictedRouteForTesting(NGame host, CombatState state, SolverResult result, Action<CombatState> onCombatEnd)
