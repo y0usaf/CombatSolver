@@ -112,6 +112,7 @@ public static class Entry
         patcher.RegisterPatch<UnattendedCombatStartReplayPatch>();
         patcher.RegisterPatch<CombatShowcaseSaveIsolationPatch>();
         patcher.RegisterPatch<CombatShowcaseCleanupPatch>();
+        patcher.RegisterPatch<MultiplayerHandshakeModListPatch>();
         RitsuLibFramework.ApplyRequiredPatcher(patcher, DisableMod);
 
         if (Enabled)

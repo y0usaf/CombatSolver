@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Rngs;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Odds;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Random;
@@ -164,6 +165,7 @@ internal static class FairObservationChecks
         object decisionGc = CheckDecisionGcIsolation(combat, loop, Check);
         object knownPositions = CheckKnownPositions(combat, player, loop, Check);
         object setupDraws = CheckRevealedSetupDraws(combat, player, loop, Check);
+        object handshake = CheckMultiplayerHandshakeModList(Check);
 
         File.WriteAllText(Path.Combine(options.OutputDirectory, "fair-observation-checks.json"), JsonSerializer.Serialize(new
         {
@@ -178,6 +180,7 @@ internal static class FairObservationChecks
             samples,
             knownPositions,
             setupDraws,
+            handshake,
             decisionGc,
             multiSampleDecisions,
             liveDrawA = Field(liveA, "D"),
@@ -185,6 +188,47 @@ internal static class FairObservationChecks
             sanitizedDraw = Field(rootA.Stamp, "D"),
         }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"FAIR_OBSERVATION_CHECKS Passed checks={checks} search_seeds={searchSeeds} identical_routes={identicalRoutes} distinct_routes={distinctRoutes.Count} distinct_first_actions={firstActionsA.Count}");
+    }
+
+    private static object CheckMultiplayerHandshakeModList(Action<bool, string> check)
+    {
+        var targets = MultiplayerHandshakeModListPatch.GetTargets();
+        check(targets.Length == 1, "multiplayer handshake patch resolves PeerVersionInfo.LocalDefault");
+
+        PeerVersionInfo onlySolver = MultiplayerHandshakeModListPatch.Sanitize(new PeerVersionInfo
+        {
+            version = "0.111.1",
+            gameplayAffectingMods = [],
+            otherMods = ["CombatSolver-0.50.1+fair.1", "STS2-RitsuLib-0.6.14"],
+        });
+        check(onlySolver.otherMods == null, "handshake omits CombatSolver and STS2-RitsuLib when sole mods");
+        check(onlySolver.gameplayAffectingMods == null, "handshake clears empty gameplay mod list when unmodded");
+        check(!onlySolver.IsModded(), "sanitized PeerVersionInfo reports unmodded when only solver and RitsuLib are loaded");
+
+        PeerVersionInfo withOtherNonGameplay = MultiplayerHandshakeModListPatch.Sanitize(new PeerVersionInfo
+        {
+            version = "0.111.1",
+            gameplayAffectingMods = [],
+            otherMods = ["CombatSolver-0.50.1+fair.1", "STS2-RitsuLib-0.6.14", "MintySpire-1.2.3"],
+        });
+        check(withOtherNonGameplay.otherMods is ["MintySpire-1.2.3"], "handshake preserves unrelated non-gameplay mods");
+
+        PeerVersionInfo withGameplayMod = MultiplayerHandshakeModListPatch.Sanitize(new PeerVersionInfo
+        {
+            version = "0.111.1",
+            gameplayAffectingMods = ["ContentMod-2.0.0"],
+            otherMods = ["CombatSolver-0.50.1+fair.1", "STS2-RitsuLib-0.6.14"],
+        });
+        check(withGameplayMod.otherMods == null, "handshake omits solver and RitsuLib alongside gameplay mods");
+        check(withGameplayMod.gameplayAffectingMods is ["ContentMod-2.0.0"], "handshake preserves gameplay-affecting mods");
+
+        return new
+        {
+            targetCount = targets.Length,
+            onlySolverIsModded = onlySolver.IsModded(),
+            preservedOtherMods = withOtherNonGameplay.otherMods,
+            preservedGameplayMods = withGameplayMod.gameplayAffectingMods,
+        };
     }
 
     private static object CheckDecisionGcIsolation(CombatState combat, MainLoopContext loop, Action<bool, string> check)
