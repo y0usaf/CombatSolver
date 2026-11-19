@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using CombatSolver;
+using CombatSolver.NewSolver;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
@@ -98,13 +99,14 @@ internal static class FairPlay
 
     internal static void Run(CombatState combat, HarnessOptions options, MainLoopContext loop, string mode)
     {
-        if (mode is not ("v2" or "clairvoyant"))
-            throw new ArgumentException($"OFFLINE_HARNESS_FAIR_PLAY must be v2 or clairvoyant, not {mode}.");
+        if (mode is not ("v2" or "v3" or "clairvoyant"))
+            throw new ArgumentException($"OFFLINE_HARNESS_FAIR_PLAY must be v2, v3, or clairvoyant, not {mode}.");
         InstallPlayBypasses();
-        Player player = combat.Players.Single();
-        FairPlannerSettings settings = FairPlannerSettings.For(
-            Enum.Parse<SolverSpeed>(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_SPEED") ?? nameof(SolverSpeed.Normal)))
-            with { MaxParallelism = int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DOP") ?? "0") };
+        Player player = LocalContext.GetMe(combat) ?? combat.Players[0];
+        SolverSpeed fairSpeed = Enum.Parse<SolverSpeed>(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_SPEED") ?? nameof(SolverSpeed.Normal));
+        int fairDop = int.Parse(Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DOP") ?? "0");
+        FairPlannerSettings settings = FairPlannerSettings.For(fairSpeed) with { MaxParallelism = fairDop };
+        NewSolverConfig v3Config = NewSolverConfig.For(fairSpeed) with { MaxParallelism = fairDop };
         bool determinismCheck = Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_DETERMINISM") == "1";
         int determinismMismatches = 0;
         SolverSettingsSnapshot solverSettings = SolverSettings.Capture();
@@ -217,6 +219,48 @@ internal static class FairPlay
                     + $"death={score.DeathRate:F2} sd={score.StandardDeviation:F1} proposals={score.Proposals} valid={score.ValidSamples}").ToArray();
                 ownPhaseMs = decision?.OwnPhaseMilliseconds ?? 0;
                 slowestSolveMs = decision?.SlowestSolveMilliseconds ?? 0;
+                forcedDecision = forced;
+            }
+            else if (mode == "v3")
+            {
+                ulong decisionSeed = NewFairSolver.VisibleSeed(combat, player);
+                bool forced = FairDecisionPlanner.IsForcedEndTurn(player);
+                int knownTop = FairDrawPileKnowledge.Capture(player.PlayerCombatState!.DrawPile).KnownTop;
+                int sampleCount = forced ? 1 : v3Config.Samples;
+                CombatRootSnapshot[] roots = [.. Enumerable.Range(0, sampleCount).Select(index =>
+                    CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(decisionSeed + (ulong)index)))];
+                NewSolverDecision RunV3(CombatRootSnapshot[] decisionRoots, NewSolverConfig cfg)
+                {
+                    Task<NewSolverDecision> decide = Task.Run(() =>
+                        NewFairSolver.DecideFromWorlds(decisionRoots, names, knownTop, cfg, CancellationToken.None));
+                    loop.RunUntilCompleted(decide, TimeSpan.FromMinutes(10), "fair v3 decision");
+                    return decide.GetAwaiter().GetResult();
+                }
+                string SignatureV3(NewSolverDecision made) => string.Join('|', made.CommittedActions.Select(CombatStepEngine.ActionKey))
+                    + " :: " + string.Join(';', made.Candidates.Take(5).Select(c => $"{c.Key}:{c.CvarUtility:R}:{c.DeathRate:R}"));
+                NewSolverDecision decision = RunV3(roots, v3Config);
+                if (determinismCheck)
+                {
+                    ulong repeatSeed = NewFairSolver.VisibleSeed(combat, player);
+                    CombatRootSnapshot[] repeatRoots = [.. Enumerable.Range(0, roots.Length).Select(index =>
+                        CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(repeatSeed + (ulong)index)))];
+                    NewSolverDecision repeat = RunV3(repeatRoots, v3Config with { MaxParallelism = 3 });
+                    if (SignatureV3(repeat) != SignatureV3(decision))
+                    {
+                        determinismMismatches++;
+                        Console.WriteLine($"DETERMINISM_MISMATCH turn={turn} first={SignatureV3(decision)} repeat={SignatureV3(repeat)}");
+                    }
+                }
+                route = decision.CommittedActions;
+                if (forced && route.FirstOrDefault()?.Kind != PlanActionKind.EndTurn)
+                    throw new InvalidOperationException($"forced end turn solved to {route.FirstOrDefault()?.Kind}");
+                solves = decision.Stats.DeterministicNodesExpanded + decision.Stats.ContinuationNodesExpanded;
+                candidates = decision.Candidates.Count;
+                meanUtility = decision.Candidates.FirstOrDefault()?.MeanUtility;
+                scores = decision.Candidates.Take(6).Select(score =>
+                    $"{score.Key} mean={score.MeanUtility:F2} cvar={score.CvarUtility:F2} death={score.DeathRate:F2} win={score.WinRate:F2} worlds={score.EvaluatedWorlds}").ToArray();
+                ownPhaseMs = decision.Stats.ElapsedMilliseconds;
+                slowestSolveMs = decision.Stats.ElapsedMilliseconds;
                 forcedDecision = forced;
             }
             else

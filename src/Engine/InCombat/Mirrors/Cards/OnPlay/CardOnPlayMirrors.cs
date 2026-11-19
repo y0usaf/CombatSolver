@@ -71,6 +71,9 @@ internal static partial class CardOnPlayMirrors
     private static Registry CreateRegistry()
     {
         var registry = new Registry(OnPlay);
+        registry.Register<Mimic>(BespokeCardMirrors.MimicOnPlay);
+        registry.Register<Intercept>(BespokeCardMirrors.InterceptOnPlay);
+        registry.Register<DemonicShield>(BespokeCardMirrors.DemonicShieldOnPlay);
 
         registry.Register<HowlFromBeyond>(GeneralCardMirrors.GeneralAttackOnPlay);
         registry.Register<Mangle>(GeneralCardMirrors.GeneralAttackOnPlay);

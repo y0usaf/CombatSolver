@@ -92,6 +92,15 @@ internal static class ModifyDamageMirrors
     {
         var registry = new Registry(ModifyDamageMultiplicative);
 
+        registry.Register<InterceptPower>((power, c) =>
+        {
+            if (c.Target != power.Owner || !c.Props.IsPoweredAttack())
+                return 1m;
+            int covered = ((SimulatedCombatState)c.CombatState).EffectivePowers()
+                .OfType<CoveredPower>()
+                .Count(item => item.Amount > 0 && item.Applier == power.Owner);
+            return covered + 1m;
+        });
         registry.Register<FlutterPower>(HandleFlutterPower);
         registry.Register<GigantificationPower>(GigantificationPowerMirrors.ModifyDamageMultiplicative);
         registry.Register<ColossusPower>(HandleColossusPower);

@@ -76,6 +76,11 @@ internal static class CardOnPlayCompensationCatalog
         typeof(PrimalForce), typeof(Prowess), typeof(Putrefy), typeof(Rage), typeof(RefineBlade), typeof(Rupture),
         typeof(SentryMode), typeof(SerpentForm), typeof(SharedFate), typeof(Shockwave), typeof(Sidestep),
         typeof(Spinner), typeof(Storm), typeof(StormOfSteel), typeof(Tracking), typeof(WraithForm),
+        typeof(BeaconOfHope), typeof(BelieveInYou), typeof(BladeSymphony), typeof(Blaze), typeof(Compost),
+        typeof(Concoct), typeof(Coordinate), typeof(CoveringFire), typeof(EnergySurge), typeof(Enrapture),
+        typeof(Ensemble), typeof(Fade), typeof(Flanking), typeof(GlimpseBeyond), typeof(HammerTime),
+        typeof(Hibernate), typeof(Intercept), typeof(LegionOfBone), typeof(OneForAll), typeof(Outrage),
+        typeof(ImitationLearning), typeof(Plot), typeof(SelfDeprecate), typeof(Sneaky), typeof(Soulbound), typeof(Tank), typeof(Underworld), typeof(Yoga),
     ];
 
     public static IReadOnlyCollection<Type> SupportedTypes => Types;

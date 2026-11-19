@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CombatSolver.NewSolver;
 using System.Runtime;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
@@ -1077,7 +1078,9 @@ internal static partial class SolverController
             setupStage = "combat_root_snapshot";
             long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
             CombatRootSnapshot rootSnapshot;
-            ulong fairSeed = FairDecisionPlanner.VisibleSeed(state, LocalContext.GetMe(state)!);
+            Player localFairPlayer = LocalContext.GetMe(state)!;
+            ulong fairSeed = NewFairSolver.VisibleSeed(state, localFairPlayer);
+            int fairKnownTop = FairDrawPileKnowledge.Capture(localFairPlayer.PlayerCombatState!.DrawPile).KnownTop;
             try
             {
                 rootSnapshot = CombatRootSnapshot.Capture(state, settings.PredictPotionReward,
@@ -1092,9 +1095,9 @@ internal static partial class SolverController
                     "combat_root_snapshot",
                     settings.EnableNoGcRegion);
             }
-            bool fairForcedEndTurn = FairDecisionPlanner.IsForcedEndTurn(LocalContext.GetMe(state)!);
-            CombatRootSnapshot[] fairSamples = [rootSnapshot, .. Enumerable.Range(1,
-                    fairForcedEndTurn ? 0 : FairPlannerSettings.For(settings.Speed).Samples - 1)
+            bool fairForcedEndTurn = NewFairSolver.IsForcedEndTurnLive(localFairPlayer);
+            int fairSampleCount = fairForcedEndTurn ? 1 : NewSolverConfig.For(settings.Speed).Samples;
+            CombatRootSnapshot[] fairSamples = [rootSnapshot, .. Enumerable.Range(1, Math.Max(0, fairSampleCount - 1))
                 .Select(index => CombatRootSnapshot.Capture(state, settings.PredictPotionReward,
                     FairObservation.FromSeed(fairSeed + (ulong)index)))];
             searchPolicy = searchPolicy with
@@ -1163,7 +1166,7 @@ internal static partial class SolverController
                     using ISearchGcScope admittedGcPolicy = gcPolicy =
                         FairDecisionPlanner.EnterGcScope(settings.NoGcRegionBudgetBytes, token);
                     SolverResult result = SolveFairDecision(
-                        fairSamples, fairForcedEndTurn, settings.Speed, displayNames, battleDamage, searchPolicy, generation, token);
+                        fairSamples, fairForcedEndTurn, fairKnownTop, settings.Speed, displayNames, battleDamage, searchPolicy, generation, token);
                     finalizedResult = search.Interaction.FinalizeWorkerResult(result);
                     token.ThrowIfCancellationRequested();
                     return finalizedResult;
@@ -2081,6 +2084,7 @@ internal static partial class SolverController
             else
                 SolverOverlay.RefreshControls();
         }
+        PollReadyToEndTurnWatcher(current);
     }
 
     public static void ObserveMainThreadFrameGap(TimeSpan gap)
@@ -2179,6 +2183,7 @@ internal static partial class SolverController
     private static SolverResult SolveFairDecision(
         IReadOnlyList<CombatRootSnapshot> samples,
         bool forcedEndTurn,
+        int knownTop,
         SolverSpeed speed,
         SolverDisplayNames displayNames,
         BattleDamageSnapshot battleDamage,
@@ -2186,35 +2191,50 @@ internal static partial class SolverController
         int generation,
         CancellationToken token)
     {
-        FairPlannerSettings plannerSettings = FairPlannerSettings.For(speed) with { Samples = samples.Count };
-        SearchPolicySnapshot isolated = FairDecisionPlanner.IsolatedPolicy(
-            searchPolicy, plannerSettings.Profile(searchPolicy.Profile));
-        if (forcedEndTurn)
-            isolated = FairDecisionPlanner.ForcedEndTurnPolicy(isolated);
+        NewSolverConfig config = NewSolverConfig.For(speed) with
+        {
+            Samples = samples.Count,
+            MaxParallelism = searchPolicy.MaxDegreeOfParallelism,
+        };
         Stopwatch stopwatch = Stopwatch.StartNew();
         long allocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
+        int gen0AtStart = GC.CollectionCount(0);
+        int gen1AtStart = GC.CollectionCount(1);
+        int gen2AtStart = GC.CollectionCount(2);
         TimeSpan gcPauseAtStart = GC.GetTotalPauseDuration();
-        FairDecision? decision = FairDecisionPlanner.Decide(
-            samples,
-            (root, prefix) => FairDecisionPlanner.Solve(root, displayNames, battleDamage, isolated, prefix, token),
-            (root, action) => FairDecisionPlanner.RevealedVariants(root, displayNames, battleDamage, isolated, action, token),
-            (root, actions) => FairDecisionPlanner.RevealFreeLength(root, displayNames, battleDamage, isolated, actions, token),
-            plannerSettings,
-            token);
-        SolverResult route = decision?.Route
-            ?? FairDecisionPlanner.Solve(samples[0], displayNames, battleDamage, isolated, null, token);
-        route.FairCommitActionLimit = decision?.CommitCount ?? 1;
+
+        NewSolverDecision decision = NewFairSolver.DecideFromWorlds(
+            samples, displayNames, knownTop, config, token);
+
+        TimeSpan elapsed = stopwatch.Elapsed;
+        long allocatedBytes = Math.Max(0L, GC.GetTotalAllocatedBytes(precise: false) - allocatedAtStart);
+        int gen0 = Math.Max(0, GC.CollectionCount(0) - gen0AtStart);
+        int gen1 = Math.Max(0, GC.CollectionCount(1) - gen1AtStart);
+        int gen2 = Math.Max(0, GC.CollectionCount(2) - gen2AtStart);
+        TimeSpan gcPause = GC.GetTotalPauseDuration() - gcPauseAtStart;
+
+        SolverResult route = NewSolverResultAdapter.ToSolverResult(
+            decision,
+            samples[0],
+            knownTop,
+            battleDamage,
+            searchPolicy,
+            allocatedBytes,
+            gen0,
+            gen1,
+            gen2,
+            gcPause,
+            elapsed);
+
         Entry.Logger.Info(
-            $"[CombatSolver/Fair] MULTI_SAMPLE_DECISION generation={generation} speed={speed} samples={samples.Count} " +
-            $"solves={decision?.Solves ?? 1} elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F0} " +
-            $"own_phase_ms={decision?.OwnPhaseMilliseconds ?? 0} slowest_solve_ms={decision?.SlowestSolveMilliseconds ?? 0} " +
-            $"allocated_mb={(GC.GetTotalAllocatedBytes(precise: false) - allocatedAtStart) / (1024 * 1024)} " +
-            $"gc_pause_ms={(GC.GetTotalPauseDuration() - gcPauseAtStart).TotalMilliseconds:F0} forced_end_turn={forcedEndTurn} " +
-            $"commit_actions={route.FairCommitActionLimit} safety_stops={decision?.SafetyStops ?? 0} " +
-            $"chosen={(decision == null ? "-" : FairDecisionPlanner.Key(decision.Action))} candidates=" +
-            string.Join(' ', decision?.Candidates.Select(score =>
-                $"[{score.Key} mean={score.MeanUtility:F1} death={score.DeathRate:F2} sd={score.StandardDeviation:F1} " +
-                $"proposals={score.Proposals} valid={score.ValidSamples}]") ?? []));
+            $"[CombatSolver/Fair] NEW_SOLVER_DECISION generation={generation} speed={speed} samples={samples.Count} " +
+            $"players={samples[0].PlayerCount} det_nodes={decision.Stats.DeterministicNodesExpanded} " +
+            $"cont_nodes={decision.Stats.ContinuationNodesExpanded} elapsed_ms={elapsed.TotalMilliseconds:F0} " +
+            $"allocated_mb={allocatedBytes / (1024 * 1024)} gc_pause_ms={gcPause.TotalMilliseconds:F0} " +
+            $"forced_end_turn={forcedEndTurn} commit_actions={route.FairCommitActionLimit} " +
+            $"committed={string.Join(" -> ", decision.CommittedActions.Select(a => $"{a.Kind}:{a.CardId}{a.PotionId}>{a.TargetCombatId}"))} " +
+            $"candidates=" + string.Join(' ', decision.Candidates.Take(5).Select(c =>
+                $"[mean={c.MeanUtility:F1} cvar={c.CvarUtility:F1} death={c.DeathRate:F2} win={c.WinRate:F2} worlds={c.EvaluatedWorlds}]")));
         return route;
     }
 
@@ -2683,7 +2703,7 @@ internal static partial class SolverController
 
                 Player player = LocalContext.GetMe(state)!;
                 FairObservation.RevealCursor revealCursor = FairObservation.CaptureReveal(state, player);
-                Creature? target = state.GetCreature(action.TargetCombatId);
+                Creature? target = ResolveLiveActionTarget(state, action);
                 List<PlanCardChoice> actionChoices = CaptureDeploymentActionChoices(action);
                 PlanCardChoice[] phaseChoices = CaptureDeploymentEndTurnChoices(action);
                 actionChoices.AddRange(phaseChoices);
@@ -2730,6 +2750,20 @@ internal static partial class SolverController
                         Entry.Logger.Warn(
                             $"[CombatSolver/Test] DEPLOY_REPLAN turn={turn} reason=potion_mismatch " +
                             $"slot={action.PotionSlot} actual={potion.Id.Entry} expected={action.PotionId}");
+                        _combat.ContinuationSource = null;
+                        CompleteDeployment(deployment);
+                        RequestSearch(
+                            host,
+                            state,
+                            SearchReason.DeploymentDrift,
+                            deployWhenReady: !_combat.FullAutoEnabled);
+                        return;
+                    }
+                    if (!IsValidLivePotionTarget(player, potion, target))
+                    {
+                        Entry.Logger.Warn(
+                            $"[CombatSolver/Test] DEPLOY_REPLAN turn={turn} reason=potion_target_invalid " +
+                            $"potion={action.PotionId} slot={action.PotionSlot} target={action.TargetCombatId?.ToString() ?? "-"}");
                         _combat.ContinuationSource = null;
                         CompleteDeployment(deployment);
                         RequestSearch(
@@ -2964,6 +2998,7 @@ internal static partial class SolverController
                     CombatManager.Instance.OnEndedTurnLocally();
                     RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, turn));
                 }
+                RecordLocalReadyToEndTurnBaseline(state, player, turn);
                 SolverOverlay.RefreshControls();
                 string deploymentEndMessage =
                     $"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} end_turn=true " +

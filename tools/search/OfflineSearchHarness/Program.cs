@@ -148,6 +148,10 @@ internal static class Program
                 InfusedCoreChecks.Run(combat!, options.OutputDirectory);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS") == "1")
                 FairObservationChecks.Run(combat!, options, loop);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_NEW_SOLVER_CHECKS") is { Length: > 0 } newSolverCheck)
+                NewSolverChecks.Run(combat!, options, loop, newSolverCheck);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_COOP_EVAL") is { Length: > 0 } coopEvalArg)
+                CoopEvalSuite.Run(combat!, options, loop, coopEvalArg);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_PLAY") is { Length: > 0 } fairPlayMode)
                 FairPlay.Run(combat!, options, loop, fairPlayMode);
             payload["budget"] = DescribeBudget(options);
