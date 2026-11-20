@@ -710,6 +710,7 @@ internal static class CombatStepEngine
         int turnBefore = combat.GetPlayerTurnNumber(player);
         int historyStart = sim.History.Entries.Count;
         int shufflesBefore = sim.ShuffleEventCount;
+        int hittableBefore = combat.HittableEnemies.Count;
         RngStamp rngBefore = RngStamp.Capture(sim, player);
 
         if (action.Kind == PlanActionKind.EndTurn)
@@ -760,7 +761,7 @@ internal static class CombatStepEngine
                 state.KnownTopRemaining = 0;
                 return true;
             }
-            revealed = DetectInformationReveal(state, player, historyStart, shufflesBefore, rngBefore, turnBefore);
+            revealed = DetectInformationReveal(state, player, historyStart, shufflesBefore, rngBefore, turnBefore, hittableBefore);
             return true;
         }
 
@@ -804,7 +805,7 @@ internal static class CombatStepEngine
             return true;
         }
 
-        revealed = DetectInformationReveal(state, player, historyStart, shufflesBefore, rngBefore, turnBefore);
+        revealed = DetectInformationReveal(state, player, historyStart, shufflesBefore, rngBefore, turnBefore, hittableBefore);
         return true;
     }
 
@@ -860,7 +861,8 @@ internal static class CombatStepEngine
         int historyStart,
         int shufflesBefore,
         RngStamp rngBefore,
-        int turnBefore)
+        int turnBefore,
+        int hittableBefore)
     {
         CombatPredictionSimulator sim = state.Simulator;
         SimulatedCombatState combat = state.Combat;
@@ -907,7 +909,7 @@ internal static class CombatStepEngine
         if (rngAfter != rngBefore)
         {
             bool onlyTargetRngChanged = rngAfter with { Targets = rngBefore.Targets } == rngBefore;
-            if (!onlyTargetRngChanged || combat.HittableEnemies.Count > 1)
+            if (!onlyTargetRngChanged || Math.Max(hittableBefore, combat.HittableEnemies.Count) > 1)
                 revealEvent = true;
         }
 

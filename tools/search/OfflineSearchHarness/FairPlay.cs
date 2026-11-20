@@ -288,8 +288,11 @@ internal static class FairPlay
                 committed.Add(action.Kind + ":" + action.CardId + action.PotionId + ">" + action.TargetCombatId);
                 if (action.Kind == PlanActionKind.EndTurn || !CombatManager.Instance.IsInProgress)
                     break;
-                if (FairObservation.DescribeReveal(cursor, combat, player) != null)
+                if (FairObservation.DescribePlanInvalidation(cursor, combat, player) is { } reveal)
+                {
+                    Trace($"reveal after {action.Kind}:{action.CardId}{action.PotionId} {reveal}");
                     break;
+                }
             }
             if (committed.Count == 0)
             {

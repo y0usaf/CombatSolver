@@ -1,4 +1,14 @@
+using System.Diagnostics;
+
 namespace CombatSolver.NewSolver;
+
+internal readonly record struct SearchDeadline(long Timestamp)
+{
+    public bool IsExpired => Timestamp > 0 && Stopwatch.GetTimestamp() >= Timestamp;
+
+    public static SearchDeadline FromNow(long milliseconds)
+        => new(Stopwatch.GetTimestamp() + Math.Max(1, milliseconds) * Stopwatch.Frequency / 1000);
+}
 
 internal sealed record NewSolverConfig(
     int Samples,

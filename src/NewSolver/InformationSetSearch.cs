@@ -15,6 +15,19 @@ internal static class InformationSetSearch
         double ImmediateScore,
         bool EndsTurn);
 
+    private sealed record EndTurnBranch(string Key, PlanAction Action, double Value, bool Died, bool Won);
+
+    private readonly record struct WorldEvaluation(
+        bool Ok,
+        double Value,
+        bool Died,
+        bool Won,
+        int Nodes,
+        List<EndTurnBranch>? Branches = null);
+
+    private const long NodesPerBudgetMillisecond = 8;
+    private const long HardBudgetMultiplier = 2;
+
     public static NewSolverDecision Decide(
         IReadOnlyList<CombatRootSnapshot> worlds,
         SolverDisplayNames names,
@@ -25,6 +38,9 @@ internal static class InformationSetSearch
         Stopwatch sw = Stopwatch.StartNew();
         if (worlds.Count == 0)
             throw new ArgumentException("At least one world is required.", nameof(worlds));
+        long softBudgetMs = Math.Max(1, config.SoftTimeBudgetMs);
+        long nodeBudget = softBudgetMs * NodesPerBudgetMillisecond;
+        SearchDeadline hardDeadline = SearchDeadline.FromNow(softBudgetMs * HardBudgetMultiplier);
 
         Player player = worlds[0].PlayerIdentity;
         SimStepState world0Root = CombatStepEngine.CreateRoot(worlds[0], initialKnownTop);
@@ -51,7 +67,8 @@ internal static class InformationSetSearch
             config.MaxRevealCandidates,
             config.MaxChoiceBranches,
             includePotions: allowPotions,
-            token);
+            token,
+            hardDeadline);
 
         if (det.BestVictory is { } immediateWin && IsOptimalImmediateVictory(immediateWin, baseline))
         {
@@ -86,6 +103,7 @@ internal static class InformationSetSearch
         bool[,] valid = new bool[candidates.Count, worldCount];
         bool[,] died = new bool[candidates.Count, worldCount];
         bool[,] won = new bool[candidates.Count, worldCount];
+        List<EndTurnBranch>?[,] branches = new List<EndTurnBranch>?[candidates.Count, worldCount];
         int totalContNodes = 0;
 
         for (int c = 0; c < candidates.Count; c++)
@@ -105,7 +123,9 @@ internal static class InformationSetSearch
             ? config.PilotSamples
             : worldCount;
 
-        void RunBatch(List<(int CandIdx, int WorldIdx)> batch, long budgetMs, int minJobsBeforeBudget)
+        long spentNodes = det.NodesExpanded;
+
+        void RunBatch(List<(int CandIdx, int WorldIdx)> batch, int mandatoryJobs)
         {
             if (batch.Count == 0)
                 return;
@@ -117,41 +137,97 @@ internal static class InformationSetSearch
                 CancellationToken = token,
                 MaxDegreeOfParallelism = Math.Max(1, dop),
             };
-            Parallel.For(0, batch.Count, opts, idx =>
+            WorldEvaluation[] results = new WorldEvaluation[batch.Count];
+            bool[] finished = new bool[batch.Count];
+            object gate = new();
+            int launched = 0;
+            bool stopped = false;
+            long budget = Math.Max(0, nodeBudget - spentNodes);
+
+            int NextJob()
             {
-                if (sw.ElapsedMilliseconds >= budgetMs && idx >= minJobsBeforeBudget)
-                    return;
-                (int cIdx, int wIdx) = batch[idx];
-                (bool ok, double val, bool isDead, bool isWin, int nodes) = EvaluateCandidateInWorld(
-                    worlds[wIdx], candidates[cIdx], player, names, baseline, initialKnownTop, config, token);
-                Interlocked.Add(ref totalContNodes, nodes);
-                if (ok)
+                lock (gate)
                 {
-                    scores[cIdx, wIdx] = val;
-                    valid[cIdx, wIdx] = true;
-                    died[cIdx, wIdx] = isDead;
-                    won[cIdx, wIdx] = isWin;
+                    if (stopped || launched >= batch.Count || token.IsCancellationRequested || hardDeadline.IsExpired)
+                        return -1;
+                    if (launched >= mandatoryJobs)
+                    {
+                        long finishedBefore = 0;
+                        for (int j = 0; j < launched; j++)
+                        {
+                            if (finished[j])
+                                finishedBefore += results[j].Nodes;
+                        }
+                        if (finishedBefore >= budget)
+                        {
+                            stopped = true;
+                            return -1;
+                        }
+                    }
+                    return launched++;
+                }
+            }
+
+            Parallel.For(0, Math.Max(1, dop), opts, _ =>
+            {
+                for (int idx = NextJob(); idx >= 0; idx = NextJob())
+                {
+                    (int cIdx, int wIdx) = batch[idx];
+                    WorldEvaluation result = EvaluateCandidateInWorld(
+                        worlds[wIdx], candidates[cIdx], player, names, baseline, initialKnownTop, config, hardDeadline, token);
+                    Interlocked.Add(ref totalContNodes, result.Nodes);
+                    lock (gate)
+                    {
+                        results[idx] = result;
+                        finished[idx] = true;
+                    }
                 }
             });
+
+            long prefix = 0;
+            for (int idx = 0; idx < launched; idx++)
+            {
+                if (idx >= mandatoryJobs && prefix >= budget)
+                    break;
+                prefix += results[idx].Nodes;
+                if (!results[idx].Ok)
+                    continue;
+                (int cIdx, int wIdx) = batch[idx];
+                scores[cIdx, wIdx] = results[idx].Value;
+                valid[cIdx, wIdx] = true;
+                died[cIdx, wIdx] = results[idx].Died;
+                won[cIdx, wIdx] = results[idx].Won;
+                branches[cIdx, wIdx] = results[idx].Branches;
+            }
+            spentNodes += prefix;
         }
 
         List<(int CandIdx, int WorldIdx)> stage1Jobs = new(candidates.Count * pilotWorlds);
+        int searchedCandidates = 0;
         for (int c = 0; c < candidates.Count; c++)
         {
-            if (candidates[c].IsImmediateVictory)
-                continue;
-            for (int w = 0; w < pilotWorlds; w++)
-                stage1Jobs.Add((c, w));
+            if (!candidates[c].IsImmediateVictory)
+                searchedCandidates++;
         }
-        long emergencyBudgetMs = Math.Max(config.SoftTimeBudgetMs * 4L, 12_000L);
-        RunBatch(stage1Jobs, emergencyBudgetMs, stage1Jobs.Count);
+        for (int w = 0; w < pilotWorlds; w++)
+        {
+            for (int c = 0; c < candidates.Count; c++)
+            {
+                if (!candidates[c].IsImmediateVictory)
+                    stage1Jobs.Add((c, w));
+            }
+        }
+        RunBatch(stage1Jobs, searchedCandidates);
 
         if (pilotWorlds < worldCount)
         {
+            NewSolverCandidate[] pilot = new NewSolverCandidate[candidates.Count];
+            for (int c = 0; c < candidates.Count; c++)
+                pilot[c] = AggregateCandidate(c, candidates[c], scores, valid, died, won, pilotWorlds);
             List<int> scoredIndices = Enumerable.Range(0, candidates.Count)
-                .OrderByDescending(c => AggregateCandidate(c, candidates[c], scores, valid, died, won, pilotWorlds).EvaluatedWorlds > 0)
-                .ThenBy(c => Math.Round(AggregateCandidate(c, candidates[c], scores, valid, died, won, pilotWorlds).DeathRate, 4))
-                .ThenByDescending(c => Math.Round(AggregateCandidate(c, candidates[c], scores, valid, died, won, pilotWorlds).CvarUtility, 4))
+                .OrderByDescending(c => pilot[c].EvaluatedWorlds > 0)
+                .ThenBy(c => Math.Round(pilot[c].DeathRate, 4))
+                .ThenByDescending(c => Math.Round(pilot[c].CvarUtility, 4))
                 .ThenBy(c => candidates[c].Key, StringComparer.Ordinal)
                 .ToList();
 
@@ -160,15 +236,20 @@ internal static class InformationSetSearch
             if (bestReveal >= 0 && candidates[bestReveal.Value].IsReveal)
                 survivors.Add(bestReveal.Value);
 
-            List<(int CandIdx, int WorldIdx)> stage2Jobs = [];
-            foreach (int c in survivors.OrderBy(x => x))
+            int[] stage2Candidates = [.. survivors.Where(c => !candidates[c].IsImmediateVictory).OrderBy(x => x)];
+            List<(int CandIdx, int WorldIdx)> stage2Jobs = new(stage2Candidates.Length * (worldCount - pilotWorlds));
+            for (int w = pilotWorlds; w < worldCount; w++)
             {
-                if (candidates[c].IsImmediateVictory)
-                    continue;
-                for (int w = pilotWorlds; w < worldCount; w++)
+                foreach (int c in stage2Candidates)
                     stage2Jobs.Add((c, w));
             }
-            RunBatch(stage2Jobs, emergencyBudgetMs, stage2Jobs.Count);
+            RunBatch(stage2Jobs, 0);
+        }
+
+        for (int c = 0; c < candidates.Count; c++)
+        {
+            if (candidates[c].EndsTurn)
+                candidates[c] = ResolveEndTurnChoices(c, candidates[c], branches, scores, valid, died, won, worldCount);
         }
 
         List<NewSolverCandidate> ranked = new(candidates.Count);
@@ -176,6 +257,19 @@ internal static class InformationSetSearch
             ranked.Add(AggregateCandidate(c, candidates[c], scores, valid, died, won, worldCount));
 
         int maxEvaluated = ranked.Max(c => c.EvaluatedWorlds);
+        if (maxEvaluated == 0)
+        {
+            CandidateSpec fallback = candidates
+                .Where(c => !c.IsReveal)
+                .DefaultIfEmpty(candidates[0])
+                .OrderByDescending(c => c.ImmediateScore)
+                .ThenBy(c => c.Key, StringComparer.Ordinal)
+                .First();
+            return new NewSolverDecision(
+                fallback.Actions.Count > 0 ? fallback.Actions : [new PlanAction(PlanActionKind.EndTurn, turn)],
+                ranked,
+                new NewSolverStats(det.NodesExpanded, totalContNodes, candidates.Count, worldCount, false, sw.ElapsedMilliseconds));
+        }
         int quorum = Math.Max(1, (maxEvaluated * 3 + 3) / 4);
         NewSolverCandidate[] eligible = ranked.Where(c => c.EvaluatedWorlds >= quorum).ToArray();
         if (eligible.Length == 0)
@@ -310,7 +404,75 @@ internal static class InformationSetSearch
         return list;
     }
 
-    private static (bool Ok, double Value, bool Died, bool Won, int Nodes) EvaluateCandidateInWorld(
+    private static CandidateSpec ResolveEndTurnChoices(
+        int c,
+        CandidateSpec spec,
+        List<EndTurnBranch>?[,] branches,
+        double[,] scores,
+        bool[,] valid,
+        bool[,] died,
+        bool[,] won,
+        int worldCount)
+    {
+        Dictionary<string, (PlanAction Action, double Sum, int Count)> totals = new(StringComparer.Ordinal);
+        for (int w = 0; w < worldCount; w++)
+        {
+            if (!valid[c, w] || branches[c, w] is not { } list)
+                continue;
+            foreach (EndTurnBranch branch in list)
+            {
+                totals.TryGetValue(branch.Key, out var t);
+                totals[branch.Key] = (t.Action ?? branch.Action, t.Sum + branch.Value, t.Count + 1);
+            }
+        }
+        if (totals.Count == 0 || totals.Count == 1 && totals.ContainsKey(""))
+            return spec;
+
+        int maxCount = totals.Values.Max(t => t.Count);
+        string chosenKey = totals
+            .Where(t => t.Value.Count == maxCount)
+            .OrderByDescending(t => Math.Round(t.Value.Sum / t.Value.Count, 6))
+            .ThenBy(t => t.Key, StringComparer.Ordinal)
+            .First().Key;
+
+        for (int w = 0; w < worldCount; w++)
+        {
+            if (!valid[c, w] || branches[c, w] is not { } list)
+                continue;
+            EndTurnBranch? match = list.FirstOrDefault(b => string.Equals(b.Key, chosenKey, StringComparison.Ordinal));
+            if (match == null)
+            {
+                valid[c, w] = false;
+                continue;
+            }
+            scores[c, w] = match.Value;
+            died[c, w] = match.Died;
+            won[c, w] = match.Won;
+        }
+
+        PlanAction chosen = totals[chosenKey].Action;
+        PlanAction endTurn = new(PlanActionKind.EndTurn, chosen.Turn)
+        {
+            TurnStartChoices = chosen.TurnStartChoices?.Where(IsCommittedEndPhaseChoice).ToArray(),
+        };
+        PlanAction[] actions = [.. spec.Actions];
+        actions[^1] = endTurn;
+        return spec with { Actions = actions };
+    }
+
+    private static bool IsCommittedEndPhaseChoice(PlanCardChoice choice)
+        => choice.Timing is PlanChoiceTiming.PlayerTurnEnd or PlanChoiceTiming.EnemyTurn;
+
+    private static string EndPhaseChoiceKey(PlanAction endTurn)
+    {
+        if (endTurn.TurnStartChoices is not { Count: > 0 } choices)
+            return "";
+        return string.Join(';', choices.Where(IsCommittedEndPhaseChoice).Select(choice =>
+            choice.Effect + ":" + string.Join(',', choice.Cards.Select(card =>
+                $"{card.CardId}+{card.UpgradeLevel}#{card.OptionOccurrence}"))));
+    }
+
+    private static WorldEvaluation EvaluateCandidateInWorld(
         CombatRootSnapshot world,
         CandidateSpec cand,
         Player player,
@@ -318,11 +480,13 @@ internal static class InformationSetSearch
         PartyRootBaseline baseline,
         int initialKnownTop,
         NewSolverConfig config,
+        SearchDeadline deadline,
         CancellationToken token)
     {
         SimStepState state = CombatStepEngine.CreateRoot(world, initialKnownTop);
         int startTurn = state.Combat.GetPlayerTurnNumber(player);
         int nodes = 0;
+        WorldEvaluation failed = new(false, double.NegativeInfinity, true, false, 0);
 
         int deterministicCount = cand.IsReveal ? cand.Actions.Count - 1 : cand.Actions.Count;
         for (int i = 0; i < deterministicCount; i++)
@@ -333,27 +497,31 @@ internal static class InformationSetSearch
                 List<StepOutcome> endOutcomes = CombatStepEngine.ExpandAction(
                     state, act, player, names, Math.Min(3, config.MaxChoiceBranches), baseline);
                 if (endOutcomes.Count == 0)
-                    return (false, double.NegativeInfinity, true, false, nodes);
-                double bestEndVal = double.NegativeInfinity;
-                bool bestDead = true;
-                bool bestWon = false;
+                    return failed;
+                List<EndTurnBranch> branchValues = new(endOutcomes.Count);
+                EndTurnBranch? best = null;
                 foreach (StepOutcome eo in endOutcomes)
                 {
-                    (double v, bool d, bool w, int n) = SolveContinuation(
-                        eo.State, player, names, baseline, startTurn, config, token);
+                    (double v, bool d, bool w, int n, bool truncated) = SolveContinuation(
+                        eo.State, player, names, baseline, startTurn, config, deadline, token);
                     nodes += n;
-                    if (v > bestEndVal)
-                    {
-                        bestEndVal = v;
-                        bestDead = d;
-                        bestWon = w;
-                    }
+                    if (truncated)
+                        return failed with { Nodes = nodes };
+                    string key = EndPhaseChoiceKey(eo.Action);
+                    int existing = branchValues.FindIndex(b => string.Equals(b.Key, key, StringComparison.Ordinal));
+                    EndTurnBranch branch = new(key, eo.Action, v, d, w);
+                    if (existing < 0)
+                        branchValues.Add(branch);
+                    else if (v > branchValues[existing].Value)
+                        branchValues[existing] = branch;
+                    if (best == null || v > best.Value)
+                        best = branch;
                 }
-                return (true, bestEndVal, bestDead, bestWon, nodes);
+                return new WorldEvaluation(true, best!.Value, best.Died, best.Won, nodes, branchValues);
             }
 
             if (!CombatStepEngine.TryReplayAction(state, act, player, out _, out _))
-                return (false, double.NegativeInfinity, true, false, nodes);
+                return failed with { Nodes = nodes };
         }
 
         if (cand.IsReveal)
@@ -365,16 +533,18 @@ internal static class InformationSetSearch
             List<StepOutcome> revOutcomes = CombatStepEngine.ExpandAction(
                 state, baseReveal, player, names, config.MaxChoiceBranches, baseline);
             if (revOutcomes.Count == 0)
-                return (false, double.NegativeInfinity, true, false, nodes);
+                return failed with { Nodes = nodes };
 
             double bestVal = double.NegativeInfinity;
             bool bestDead = true;
             bool bestWon = false;
             foreach (StepOutcome ro in revOutcomes)
             {
-                (double v, bool d, bool w, int n) = SolveContinuation(
-                    ro.State, player, names, baseline, startTurn, config, token);
+                (double v, bool d, bool w, int n, bool truncated) = SolveContinuation(
+                    ro.State, player, names, baseline, startTurn, config, deadline, token);
                 nodes += n;
+                if (truncated)
+                    return failed with { Nodes = nodes };
                 if (v > bestVal)
                 {
                     bestVal = v;
@@ -382,32 +552,35 @@ internal static class InformationSetSearch
                     bestWon = w;
                 }
             }
-            return (true, bestVal, bestDead, bestWon, nodes);
+            return new WorldEvaluation(true, bestVal, bestDead, bestWon, nodes);
         }
 
-        (double finalVal, bool finalDead, bool finalWon, int finalNodes) = SolveContinuation(
-            state, player, names, baseline, startTurn, config, token);
-        return (true, finalVal, finalDead, finalWon, nodes + finalNodes);
+        (double finalVal, bool finalDead, bool finalWon, int finalNodes, bool finalTruncated) = SolveContinuation(
+            state, player, names, baseline, startTurn, config, deadline, token);
+        if (finalTruncated)
+            return failed with { Nodes = nodes + finalNodes };
+        return new WorldEvaluation(true, finalVal, finalDead, finalWon, nodes + finalNodes);
     }
 
-    private static (double Value, bool Died, bool Won, int Nodes) SolveContinuation(
+    private static (double Value, bool Died, bool Won, int Nodes, bool Truncated) SolveContinuation(
         SimStepState initialState,
         Player player,
         SolverDisplayNames names,
         PartyRootBaseline baseline,
         int rootTurn,
         NewSolverConfig config,
+        SearchDeadline deadline,
         CancellationToken token)
     {
         int totalNodes = 0;
         if (IsTerminal(initialState, player, out bool initDead, out bool initWon))
         {
             return (PartyEvaluator.EvaluateExactUtilityForAggregation(initialState, baseline),
-                initDead, initWon, 0);
+                initDead, initWon, 0, false);
         }
 
         int horizonTurn = rootTurn + config.LookaheadTurns;
-        List<SimStepState> frontier = [initialState];
+        List<(SimStepState State, double Score)> frontier = [(initialState, double.NaN)];
         double bestOverall = double.NegativeInfinity;
         bool bestOverallDead = true;
         bool bestOverallWon = false;
@@ -419,9 +592,11 @@ internal static class InformationSetSearch
         {
             if (token.IsCancellationRequested)
                 break;
+            if (deadline.IsExpired)
+                return (bestOverall, bestOverallDead, bestOverallWon, totalNodes, true);
 
-            List<SimStepState> nextTurnFrontier = [];
-            Dictionary<ulong, double> nextTurnSeen = [];
+            List<(SimStepState State, double Score)> nextTurnFrontier = [];
+            Dictionary<ulong, int> nextTurnSeen = [];
             int turnWidth = iter switch
             {
                 0 => config.ContinuationTurnWidth,
@@ -437,11 +612,13 @@ internal static class InformationSetSearch
                 _ => Math.Max(18, config.ContinuationNodeCap * 2 / 5),
             };
 
-            foreach (SimStepState state in frontier)
+            foreach ((SimStepState state, double knownScore) in frontier)
             {
                 if (IsTerminal(state, player, out bool d0, out bool w0))
                 {
-                    double termScore = PartyEvaluator.EvaluateExactUtilityForAggregation(state, baseline);
+                    double termScore = double.IsNaN(knownScore)
+                        ? PartyEvaluator.EvaluateExactUtilityForAggregation(state, baseline)
+                        : knownScore;
                     UpdateBest(termScore, d0, w0, ref bestOverall, ref bestOverallDead, ref bestOverallWon, ref bestVictory, ref foundVictory);
                     continue;
                 }
@@ -449,15 +626,18 @@ internal static class InformationSetSearch
                 int curTurn = state.Combat.GetPlayerTurnNumber(player);
                 if (curTurn >= horizonTurn)
                 {
-                    double hScore = PartyEvaluator.EvaluateExactUtilityForAggregation(state, baseline);
+                    double hScore = double.IsNaN(knownScore)
+                        ? PartyEvaluator.EvaluateExactUtilityForAggregation(state, baseline)
+                        : knownScore;
                     UpdateBest(hScore, false, false, ref bestOverall, ref bestOverallDead, ref bestOverallWon, ref bestVictory, ref foundVictory);
                     continue;
                 }
 
                 (DeterministicEndpoint? win, List<SimStepState> endStates, int segNodes) = SolveSingleTurnInWorld(
-                    state, player, names, baseline, segNodeCap, turnWidth, config.MaxChoiceBranches,
-                    allowMidTurnDraws: iter <= 2, token);
+                    state, player, names, baseline, segNodeCap, turnWidth, config.MaxChoiceBranches, deadline, token);
                 totalNodes += segNodes;
+                if (deadline.IsExpired)
+                    return (bestOverall, bestOverallDead, bestOverallWon, totalNodes, true);
 
                 if (win != null)
                 {
@@ -472,41 +652,46 @@ internal static class InformationSetSearch
                         preEnd, endAct, player, names, Math.Min(2, config.MaxChoiceBranches), baseline);
                     foreach (StepOutcome eo in afterEnd)
                     {
+                        double evalScore = PartyEvaluator.EvaluateExactUtilityForAggregation(eo.State, baseline);
                         if (IsTerminal(eo.State, player, out bool ed, out bool ew))
                         {
-                            double tScore = PartyEvaluator.EvaluateExactUtilityForAggregation(eo.State, baseline);
-                            UpdateBest(tScore, ed, ew, ref bestOverall, ref bestOverallDead, ref bestOverallWon, ref bestVictory, ref foundVictory);
+                            UpdateBest(evalScore, ed, ew, ref bestOverall, ref bestOverallDead, ref bestOverallWon, ref bestVictory, ref foundVictory);
                             continue;
                         }
                         ulong nh = StateHash.Compute(eo.State.Simulator, eo.State.Combat, player, eo.State.KnownTopRemaining);
-                        double evalScore = PartyEvaluator.EvaluateExactUtilityForAggregation(eo.State, baseline);
-                        if (!nextTurnSeen.TryGetValue(nh, out double prev) || evalScore > prev)
+                        if (!nextTurnSeen.TryGetValue(nh, out int seenIndex))
                         {
-                            nextTurnSeen[nh] = evalScore;
-                            nextTurnFrontier.Add(eo.State);
+                            nextTurnSeen[nh] = nextTurnFrontier.Count;
+                            nextTurnFrontier.Add((eo.State, evalScore));
+                        }
+                        else if (evalScore > nextTurnFrontier[seenIndex].Score)
+                        {
+                            nextTurnFrontier[seenIndex] = (eo.State, evalScore);
                         }
                     }
                 }
             }
 
             frontier = nextTurnFrontier
-                .OrderByDescending(s => PartyEvaluator.EvaluateExactUtilityForAggregation(s, baseline))
+                .OrderByDescending(s => s.Score)
                 .Take(turnWidth)
                 .ToList();
         }
 
-        foreach (SimStepState survivor in frontier)
+        foreach ((SimStepState survivor, double survivorScore) in frontier)
         {
             bool sDead = survivor.Simulator.State.GetCreature(player.Creature).IsDead || survivor.Combat.BattlewornDummyTimedOut;
             bool sWon = !sDead && AllEnemiesDead(survivor.Simulator, survivor.Combat);
-            double hScore = PartyEvaluator.EvaluateExactUtilityForAggregation(survivor, baseline);
+            double hScore = double.IsNaN(survivorScore)
+                ? PartyEvaluator.EvaluateExactUtilityForAggregation(survivor, baseline)
+                : survivorScore;
             UpdateBest(hScore, sDead, sWon, ref bestOverall, ref bestOverallDead, ref bestOverallWon, ref bestVictory, ref foundVictory);
         }
 
         if (foundVictory && bestVictory >= bestOverall)
-            return (bestVictory, false, true, totalNodes);
+            return (bestVictory, false, true, totalNodes, false);
 
-        return (bestOverall, bestOverallDead, bestOverallWon, totalNodes);
+        return (bestOverall, bestOverallDead, bestOverallWon, totalNodes, false);
     }
 
     private static (DeterministicEndpoint? Victory, List<SimStepState> EndStates, int Nodes) SolveSingleTurnInWorld(
@@ -517,7 +702,7 @@ internal static class InformationSetSearch
         int nodeCap,
         int keepWidth,
         int maxChoiceBranches,
-        bool allowMidTurnDraws,
+        SearchDeadline deadline,
         CancellationToken token)
     {
         DeterministicSegmentResult seg = DeterministicSegmentSolver.Solve(
@@ -526,63 +711,22 @@ internal static class InformationSetSearch
             names,
             baseline,
             nodeCap,
-            maxEndTurnEndpoints: keepWidth + 1,
-            maxRevealBranches: allowMidTurnDraws ? 2 : 0,
+            maxEndTurnEndpoints: keepWidth,
+            maxRevealBranches: 0,
             maxChoiceBranches: Math.Min(3, maxChoiceBranches),
             includePotions: false,
-            token);
+            token,
+            deadline,
+            expandReveals: true);
 
-        int nodes = seg.NodesExpanded;
-        DeterministicEndpoint? bestWin = seg.BestVictory;
-        List<(SimStepState State, double Score)> candidates = [];
+        List<SimStepState> kept = new(seg.EndTurnEndpoints.Count);
+        foreach (DeterministicEndpoint ep in seg.EndTurnEndpoints.OrderByDescending(c => c.HeuristicScore))
+            kept.Add(ep.State);
 
-        foreach (DeterministicEndpoint ep in seg.EndTurnEndpoints)
-            candidates.Add((ep.State, ep.HeuristicScore));
-
-        if (allowMidTurnDraws && seg.RevealBranches.Count > 0)
-        {
-            int curTurn = startState.Combat.GetPlayerTurnNumber(player);
-            int subCap = Math.Max(18, nodeCap / 2);
-            foreach (RevealBranch rev in seg.RevealBranches.Take(2))
-            {
-                if (rev.PostRevealState.Combat.GetPlayerTurnNumber(player) != curTurn)
-                    continue;
-                DeterministicSegmentResult sub = DeterministicSegmentSolver.Solve(
-                    rev.PostRevealState,
-                    player,
-                    names,
-                    baseline,
-                    subCap,
-                    maxEndTurnEndpoints: keepWidth,
-                    maxRevealBranches: 0,
-                    maxChoiceBranches: Math.Min(2, maxChoiceBranches),
-                    includePotions: false,
-                    token);
-                nodes += sub.NodesExpanded;
-                if (sub.BestVictory != null && (bestWin == null || sub.BestVictory.HeuristicScore > bestWin.HeuristicScore))
-                    bestWin = sub.BestVictory;
-                foreach (DeterministicEndpoint ep in sub.EndTurnEndpoints)
-                    candidates.Add((ep.State, ep.HeuristicScore));
-            }
-        }
-
-        List<SimStepState> kept = [];
-        HashSet<ulong> seen = [];
-        foreach ((SimStepState st, _) in candidates.OrderByDescending(c => c.Score))
-        {
-            ulong h = StateHash.Compute(st.Simulator, st.Combat, player, st.KnownTopRemaining);
-            if (seen.Add(h))
-            {
-                kept.Add(st);
-                if (kept.Count >= keepWidth)
-                    break;
-            }
-        }
-
-        if (kept.Count == 0 && bestWin == null)
+        if (kept.Count == 0 && seg.BestVictory == null)
             kept.Add(startState);
 
-        return (bestWin, kept, nodes);
+        return (seg.BestVictory, kept, seg.NodesExpanded);
     }
 
     private static bool IsOptimalImmediateVictory(DeterministicEndpoint win, PartyRootBaseline baseline)

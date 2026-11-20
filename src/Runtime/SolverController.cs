@@ -2896,7 +2896,7 @@ internal static partial class SolverController
                     observedCoopBoard = CoopBoardStamp.Capture(state);
                 if (CombatManager.Instance.IsInProgress
                     && IsSamePlayableTurn(state, turn)
-                    && (FairObservation.DescribeReveal(revealCursor, state, player)
+                    && (FairObservation.DescribePlanInvalidation(revealCursor, state, player)
                         ?? (actionIndex + 1 >= result.FairCommitActionLimit
                             ? $"commit_limit={result.FairCommitActionLimit}"
                             : null)) is { } revealed)

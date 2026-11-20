@@ -26,6 +26,18 @@
 
 ## 下一版本（开发中）
 
+### v3 公平求解器：确定性预算、`WATERFALL_GIANT` 爆发与评估修正
+
+- 预算：`InformationSetSearch` 的批次闸门原先以全部作业为最低数量，软预算从不生效（Thorough 单次决策 20–36 s，6 场整局超时）。现在 `(候选, 样本)` 作业按样本优先排列，首个样本对全部候选必跑；其后按节点数累计判定：只计入「按序号前缀累计节点 < `SoftTimeBudgetMs × 8`」的作业，并行完成顺序不影响结果，决策仍确定。根段求解、续搜回合与段求解另受 `SoftTimeBudgetMs × 2` 硬墙钟上限约束（只在极端局面触发；截断的作业整体丢弃）。
+- 续搜：样本内续搜的段求解直接展开抽牌/随机分支（`expandReveals`），不再为同一回合另开两次子搜；同哈希的下回合状态原地替换，不再重复入列；开放队列只保留剩余弹出次数能取到的节点。
+- `WATERFALL_GIANT`：`AboutToBlow`/`Explode` 阶段、以及无数字无限生命的存活敌人不再算作已击杀；段求解只在没有存活/复活敌人时判胜；来袭伤害包含强制 `EXPLODE_MOVE` 伤害，`SteamEruptionPower` 层数与已准备的爆发伤害按待承受威胁扣分。
+- 结束回合选择：结束回合候选在各样本中的 `PlayerTurnEnd`/`EnemyTurn` 选择按同一键聚合，选均值最高的一组写回提交的 `EndTurn.TurnStartChoices`；`PlayerTurnStart` 选择仍留到抽牌后再定。
+- 重算：执行端改用 `FairObservation.DescribePlanInvalidation`——单一可命中敌人时的目标 RNG 前进、以及抽到已知顶牌不再中断计划；随机目标是否无害改为同时检查动作前后的可命中敌人数（原先只看动作后，打死其一会被误判为无害）。`DescribeReveal` 的描述合同不变。
+- 分配：去掉段求解根节点的多余 Fork、出队重复估值与提前哈希；评估/哈希热路径改为索引遍历并单次扫描 Power 列表；`StateHash` 加入敌人当前/强制意图。
+- 评估：补充约 30 种己方 Power 与敌方仪式/人工制品/镀层/荆棘/`SteamEruptionPower` 的估值；状态/诅咒牌按剩余回合的预期废抽扣分；重放价值按「本牌被抽到的概率」折算（原先随克隆牌数量无上限增长，`real-09` 会因此拖到回合上限）。
+- 验证（离线 harness，`OFFLINE_HARNESS_FAIR_PLAY=v3`、Thorough、8 并发、32 个实战局面）：完成 26→31（剩余 `real-06` 为 `MadScience` 镜像遇到 `TinkerTimeType=None` 抛异常，非超时），胜 22→26；同一批 26 场胜 22→23、平均损血 33.50→29.38；全部决策 p99 20002→10947 ms、最大 36300→11208 ms，平均分配 2157→1715 MB、p90 4501→3179 MB；每决策节点均值 35.5k→28.6k、最大 197k→60k。`OFFLINE_HARNESS_NEW_SOLVER_CHECKS` 13 组、`OFFLINE_HARNESS_FAIR_OBSERVATION_CHECKS` 全部通过；`OFFLINE_HARNESS_COOP_EVAL` v3 胜场 8/10→9/10。
+- 未验证：可见游戏内的实机耗时；本轮基准运行时宿主另有游戏进程占用约 7 核，墙钟数字偏保守。
+
 ### 联机自动模式的节奏选择：自由行动／等待队友
 
 - 问题：联机 Auto 固定「最后出牌」——必须等每名队友结束本回合、动作队列空闲后才求解并部署。真实对局里这不像在玩牌，像在排队。

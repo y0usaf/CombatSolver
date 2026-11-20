@@ -36,7 +36,7 @@ internal static class DeterministicSegmentSolver
         SimStepState State,
         IReadOnlyList<PlanAction> Actions,
         ulong Hash,
-        double Priority,
+        double Score,
         int Depth);
 
     public static DeterministicSegmentResult Solve(
@@ -49,16 +49,19 @@ internal static class DeterministicSegmentSolver
         int maxRevealBranches,
         int maxChoiceBranches,
         bool includePotions,
-        CancellationToken token)
+        CancellationToken token,
+        SearchDeadline deadline = default,
+        bool expandReveals = false)
     {
         int startTurn = root.Combat.GetPlayerTurnNumber(player);
         Dictionary<ulong, double> visited = new(Math.Min(nodeCap * 2, 1024));
-        PriorityQueue<OpenNode, double> open = new();
+        PriorityQueue<OpenNode, (double Priority, long Sequence)> open = new();
+        long sequence = 0;
 
         double rootScore = PartyEvaluator.EvaluateTerminalOrHorizon(root, baseline, includePendingIncomingThreat: true);
         ulong rootHash = StateHash.Compute(root.Simulator, root.Combat, player, root.KnownTopRemaining);
         visited[rootHash] = rootScore;
-        open.Enqueue(new OpenNode(root.Fork(), [], rootHash, rootScore, 0), -rootScore);
+        open.Enqueue(new OpenNode(root, [], rootHash, rootScore, 0), (-rootScore, sequence++));
 
         DeterministicEndpoint? bestVictory = null;
         Dictionary<ulong, DeterministicEndpoint> endTurnByHash = [];
@@ -67,7 +70,7 @@ internal static class DeterministicSegmentSolver
 
         while (open.Count > 0 && expanded < nodeCap)
         {
-            if (token.IsCancellationRequested)
+            if (token.IsCancellationRequested || deadline.IsExpired)
                 break;
 
             OpenNode current = open.Dequeue();
@@ -80,7 +83,7 @@ internal static class DeterministicSegmentSolver
                 continue;
 
             int enemyHp = TotalAliveEnemyHp(sim, combat);
-            if (enemyHp == 0)
+            if (!PartyEvaluator.AnyEnemyStanding(sim, combat))
             {
                 double winScore = PartyEvaluator.EvaluateTerminalOrHorizon(current.State, baseline, includePendingIncomingThreat: false);
                 if (bestVictory == null || winScore > bestVictory.HeuristicScore)
@@ -95,7 +98,7 @@ internal static class DeterministicSegmentSolver
 
             int energyBefore = sim.State.GetPlayerCombatState(player).Energy;
             int unblocked = TotalProjectedUnblockedPartyDamage(sim, combat);
-            double endScore = PartyEvaluator.EvaluateTerminalOrHorizon(current.State, baseline, includePendingIncomingThreat: true);
+            double endScore = current.Score;
             if (!endTurnByHash.TryGetValue(current.Hash, out DeterministicEndpoint? prevEp)
                 || endScore > prevEp.HeuristicScore + 1e-6
                 || (Math.Abs(endScore - prevEp.HeuristicScore) <= 1e-6 && current.Actions.Count < prevEp.Actions.Count))
@@ -130,14 +133,12 @@ internal static class DeterministicSegmentSolver
                     if (nextSim.State.GetCreature(player.Creature).IsDead || nextCombat.BattlewornDummyTimedOut)
                         continue;
 
-                    int nextEnemyHp = TotalAliveEnemyHp(nextSim, nextCombat);
-                    ulong nextHash = StateHash.Compute(nextSim, nextCombat, player, outcome.State.KnownTopRemaining);
-                    if (nextEnemyHp == 0)
+                    if (!PartyEvaluator.AnyEnemyStanding(nextSim, nextCombat))
                     {
                         double winScore = PartyEvaluator.EvaluateTerminalOrHorizon(outcome.State, baseline, includePendingIncomingThreat: false);
                         if (bestVictory == null || winScore > bestVictory.HeuristicScore)
                         {
-                            bestVictory = new DeterministicEndpoint(nextActions, outcome.State, nextHash, winScore, 0, 0, 0, 0, 0, IsVictory: true);
+                            bestVictory = new DeterministicEndpoint(nextActions, outcome.State, 0, winScore, 0, 0, 0, 0, 0, IsVictory: true);
                         }
                         continue;
                     }
@@ -145,7 +146,7 @@ internal static class DeterministicSegmentSolver
                     if (outcome.AdvancedTurn || nextCombat.GetPlayerTurnNumber(player) != startTurn)
                     {
                         double turnAdvScore = PartyEvaluator.EvaluateTerminalOrHorizon(outcome.State, baseline, includePendingIncomingThreat: false);
-                        string advKey = "ADV|" + CombatStepEngine.PrefixKey(nextActions);
+                        string advKey = $"ADV|{current.Hash:x16}|{CombatStepEngine.ActionKey(outcome.Action)}";
                         if (!revealMap.TryGetValue(advKey, out RevealBranch? existingAdv) || turnAdvScore > existingAdv.HeuristicScore)
                         {
                             revealMap[advKey] = new RevealBranch(
@@ -154,7 +155,7 @@ internal static class DeterministicSegmentSolver
                         continue;
                     }
 
-                    if (outcome.RevealedInformation)
+                    if (outcome.RevealedInformation && !expandReveals)
                     {
                         double revScore = PartyEvaluator.EvaluateTerminalOrHorizon(outcome.State, baseline, includePendingIncomingThreat: true);
                         string actionSig = CombatStepEngine.HasRevealedChoice(outcome.Action)
@@ -170,6 +171,7 @@ internal static class DeterministicSegmentSolver
                         continue;
                     }
 
+                    ulong nextHash = StateHash.Compute(nextSim, nextCombat, player, outcome.State.KnownTopRemaining);
                     double nextScore = PartyEvaluator.EvaluateTerminalOrHorizon(outcome.State, baseline, includePendingIncomingThreat: true);
                     if (visited.TryGetValue(nextHash, out double seenScore) && seenScore >= nextScore - 1e-6)
                         continue;
@@ -177,9 +179,13 @@ internal static class DeterministicSegmentSolver
 
                     int nextEnergy = nextSim.State.GetPlayerCombatState(player).Energy;
                     double priorityScore = nextScore + nextEnergy * 0.4;
-                    open.Enqueue(new OpenNode(outcome.State, nextActions, nextHash, priorityScore, current.Depth + 1), -priorityScore);
+                    open.Enqueue(new OpenNode(outcome.State, nextActions, nextHash, nextScore, current.Depth + 1), (-priorityScore, sequence++));
                 }
             }
+
+            int remainingPops = nodeCap - expanded;
+            if (open.Count > remainingPops * 2 + 16)
+                TrimOpen(open, remainingPops);
         }
 
         IReadOnlyList<DeterministicEndpoint> selectedEndTurns = SelectDiverseEndpoints(endTurnByHash.Values.ToList(), maxEndTurnEndpoints);
@@ -191,6 +197,15 @@ internal static class DeterministicSegmentSolver
             .ToArray();
 
         return new DeterministicSegmentResult(bestVictory, selectedEndTurns, selectedReveals, expanded);
+    }
+
+    private static void TrimOpen(PriorityQueue<OpenNode, (double Priority, long Sequence)> open, int keep)
+    {
+        (OpenNode Node, (double Priority, long Sequence) Key)[] items = [.. open.UnorderedItems];
+        Array.Sort(items, static (a, b) => a.Key.CompareTo(b.Key));
+        open.Clear();
+        for (int i = 0; i < keep && i < items.Length; i++)
+            open.Enqueue(items[i].Node, items[i].Key);
     }
 
     private static IReadOnlyList<DeterministicEndpoint> SelectDiverseEndpoints(
@@ -276,9 +291,10 @@ internal static class DeterministicSegmentSolver
         CombatPredictionSimulator sim = state.Simulator;
         SimulatedCombatState combat = state.Combat;
         double optimistic = 0;
-        foreach (Player p in combat.Players)
+        IReadOnlyList<Player> players = combat.Players;
+        for (int i = 0; i < players.Count; i++)
         {
-            SimCreatureState cs = sim.State.GetCreature(p.Creature);
+            SimCreatureState cs = sim.State.GetCreature(players[i].Creature);
             if (cs.IsDead)
                 optimistic += PartyEvaluator.TeammateImmediateDeathPenalty;
         }
@@ -288,25 +304,21 @@ internal static class DeterministicSegmentSolver
     private static int TotalAliveEnemyHp(CombatPredictionSimulator sim, SimulatedCombatState combat)
     {
         int hp = 0;
-        foreach (Creature enemy in combat.Enemies)
-        {
-            SimCreatureState es = sim.State.GetCreature(enemy);
-            int effHp = combat.EffectiveEnemyHp(enemy, es);
-            if (es.IsAlive || effHp > 0)
-                hp += Math.Max(0, effHp);
-        }
+        IReadOnlyList<Creature> enemies = combat.Enemies;
+        for (int i = 0; i < enemies.Count; i++)
+            hp += PartyEvaluator.KillableHp(combat, enemies[i], sim.State.GetCreature(enemies[i]));
         return hp;
     }
 
     private static int MinAliveEnemyHp(CombatPredictionSimulator sim, SimulatedCombatState combat)
     {
         int min = int.MaxValue;
-        foreach (Creature enemy in combat.Enemies)
+        IReadOnlyList<Creature> enemies = combat.Enemies;
+        for (int i = 0; i < enemies.Count; i++)
         {
-            SimCreatureState es = sim.State.GetCreature(enemy);
-            int effHp = combat.EffectiveEnemyHp(enemy, es);
-            if (effHp > 0 && effHp < min)
-                min = effHp;
+            int hp = PartyEvaluator.KillableHp(combat, enemies[i], sim.State.GetCreature(enemies[i]));
+            if (hp > 0 && hp < min)
+                min = hp;
         }
         return min == int.MaxValue ? 0 : min;
     }
@@ -314,8 +326,10 @@ internal static class DeterministicSegmentSolver
     private static int TotalProjectedUnblockedPartyDamage(CombatPredictionSimulator sim, SimulatedCombatState combat)
     {
         int total = 0;
-        foreach (Player p in combat.Players)
+        IReadOnlyList<Player> players = combat.Players;
+        for (int i = 0; i < players.Count; i++)
         {
+            Player p = players[i];
             SimCreatureState cs = sim.State.GetCreature(p.Creature);
             if (cs.IsDead)
                 continue;
