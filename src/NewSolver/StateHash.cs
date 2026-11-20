@@ -35,9 +35,10 @@ internal static class StateHash
 
         ulong handXor = 0;
         ulong handSum = 0;
-        foreach (PredictedCard card in localState.Hand.Cards)
+        IReadOnlyList<PredictedCard> hand = localState.Hand.Cards;
+        for (int i = 0; i < hand.Count; i++)
         {
-            ulong ch = CardHash(simulator, localState, card);
+            ulong ch = CardHash(simulator, localState, hand[i]);
             handXor ^= ch;
             handSum += ch;
         }
@@ -48,8 +49,10 @@ internal static class StateHash
         for (int i = 0; i < topCount; i++)
             Mix(ref h, CardHash(simulator, localState, localState.DrawPile.Cards[i]));
 
-        foreach (OrbModel orb in localState.OrbQueue.Orbs)
+        IReadOnlyList<OrbModel> orbs = localState.OrbQueue.Orbs;
+        for (int i = 0; i < orbs.Count; i++)
         {
+            OrbModel orb = orbs[i];
             MixString(ref h, orb.Id.Entry);
             Mix(ref h, (ulong)(int)OrbMirrors.GetPassiveValue(simulator, orb));
             Mix(ref h, (ulong)(int)OrbMirrors.GetEvokeValue(simulator, orb));
@@ -64,8 +67,10 @@ internal static class StateHash
             }
         }
 
-        foreach (Player p in combat.Players)
+        IReadOnlyList<Player> players = combat.Players;
+        for (int i = 0; i < players.Count; i++)
         {
+            Player p = players[i];
             Creature c = p.Creature;
             SimCreatureState cs = simulator.State.GetCreature(c);
             Mix(ref h, c.CombatId ?? 0);
@@ -90,19 +95,25 @@ internal static class StateHash
             }
         }
 
-        foreach (Creature enemy in combat.Enemies)
+        IReadOnlyList<Creature> enemies = combat.Enemies;
+        for (int i = 0; i < enemies.Count; i++)
         {
+            Creature enemy = enemies[i];
             SimCreatureState es = simulator.State.GetCreature(enemy);
             Mix(ref h, enemy.CombatId ?? 0);
             Mix(ref h, (ulong)es.CurrentHp);
             Mix(ref h, (ulong)es.Block);
             Mix(ref h, es.IsAlive ? 1UL : 0UL);
+            if (es.IsAlive && enemy.Monster != null)
+                MixString(ref h, combat.TryGetForcedMoveId(enemy, out string forced) ? forced : combat.GetPredictedMoveId(enemy));
         }
 
         ulong powerXor = 0;
         ulong powerSum = 0;
-        foreach (PowerModel power in combat.EffectivePowers())
+        IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
+        for (int i = 0; i < powers.Count; i++)
         {
+            PowerModel power = powers[i];
             if (power.Amount == 0)
                 continue;
             ulong ph = FnvOffset;

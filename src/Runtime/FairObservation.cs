@@ -113,27 +113,42 @@ internal sealed class FairObservation
         return [.. before.DrawPile.Take(drawn), .. reshuffled];
     }
 
-    internal readonly record struct RevealCursor(PredictionRngState[] Streams, CardModel[] DrawPile);
+    internal readonly record struct RevealCursor(PredictionRngState[] Streams, CardModel[] DrawPile, int KnownTop, int Hittable);
 
     internal static RevealCursor CaptureReveal(CombatState state, Player player)
-        => new(CaptureStreams(state.RunState.Rng), [.. DrawPileOf(player).Cards]);
+        => new(
+            CaptureStreams(state.RunState.Rng),
+            [.. DrawPileOf(player).Cards],
+            FairDrawPileKnowledge.Capture(DrawPileOf(player)).KnownTop,
+            CountHittableEnemies(state));
 
     internal static string? DescribeReveal(RevealCursor before, CombatState state, Player player)
+        => Describe(before, state, player, ignoreForcedOutcomes: false);
+
+    internal static string? DescribePlanInvalidation(RevealCursor before, CombatState state, Player player)
+        => Describe(before, state, player, ignoreForcedOutcomes: true);
+
+    private static string? Describe(RevealCursor before, CombatState state, Player player, bool ignoreForcedOutcomes)
     {
         PredictionRngState[] streams = CaptureStreams(state.RunState.Rng);
         RunRngType[] types = Enum.GetValues<RunRngType>();
+        bool forcedTarget = ignoreForcedOutcomes && Math.Max(before.Hittable, CountHittableEnemies(state)) <= 1;
         List<string> rolled = [];
         for (int index = 0; index < types.Length; index++)
         {
-            if (streams[index] != before.Streams[index])
+            if (streams[index] != before.Streams[index] && !(forcedTarget && types[index] == RunRngType.CombatTargets))
                 rolled.Add(types[index].ToString());
         }
         IReadOnlyList<CardModel> drawPile = DrawPileOf(player).Cards;
         int left = before.DrawPile.Count(card => !drawPile.Contains(card));
-        if (rolled.Count == 0 && left == 0)
+        int unknownLeft = ignoreForcedOutcomes ? Math.Max(0, left - before.KnownTop) : left;
+        if (rolled.Count == 0 && unknownLeft == 0)
             return null;
         return $"rng=[{string.Join(',', rolled)}] draw_pile_left={left}";
     }
+
+    private static int CountHittableEnemies(CombatState state)
+        => state.Enemies.Count(enemy => enemy.IsAlive && enemy.IsHittable);
 
     private static CardPile DrawPileOf(Player player)
         => (player.PlayerCombatState

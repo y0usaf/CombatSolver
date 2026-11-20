@@ -238,12 +238,7 @@ internal static class NewSolverResultAdapter
     {
         int hp = 0;
         foreach (Creature enemy in combat.Enemies)
-        {
-            SimCreatureState es = sim.State.GetCreature(enemy);
-            int eff = combat.EffectiveEnemyHp(enemy, es);
-            if (es.IsAlive || eff > 0)
-                hp += Math.Max(0, eff);
-        }
+            hp += PartyEvaluator.KillableHp(combat, enemy, sim.State.GetCreature(enemy));
         return hp;
     }
 

@@ -1,6 +1,8 @@
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors.Orbs;
 using CombatSolver.Engine.InCombat.Simulation;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
@@ -88,15 +90,23 @@ internal static class PartyEvaluator
         int remainingEnemyHp = 0;
         int remainingEnemyBlock = 0;
         int aliveEnemies = 0;
-        foreach (Creature enemy in combat.Enemies)
+        int minAliveEnemyHp = int.MaxValue;
+        IReadOnlyList<Creature> enemies = combat.Enemies;
+        for (int i = 0; i < enemies.Count; i++)
         {
+            Creature enemy = enemies[i];
             SimCreatureState es = sim.State.GetCreature(enemy);
             int effHp = combat.EffectiveEnemyHp(enemy, es);
-            if (es.IsAlive || effHp > 0)
+            if (!es.IsAlive && effHp <= 0)
+                continue;
+            aliveEnemies++;
+            int killable = KillableHp(es, effHp);
+            remainingEnemyHp += killable;
+            if (killable > 0)
             {
-                aliveEnemies++;
-                remainingEnemyHp += Math.Max(0, effHp);
                 remainingEnemyBlock += Math.Max(0, es.Block);
+                if (killable < minAliveEnemyHp)
+                    minAliveEnemyHp = killable;
             }
         }
         bool allEnemiesDead = aliveEnemies == 0 && !combat.BattlewornDummyTimedOut;
@@ -113,11 +123,13 @@ internal static class PartyEvaluator
             return LocalDeathPenalty - localLost - remainingEnemyHp * 0.4 - potionCost + teammateSupport;
         }
 
+        IReadOnlyList<Player> players = combat.Players;
         if (allEnemiesDead)
         {
             double utility = 0;
-            foreach (Player p in combat.Players)
+            for (int pi = 0; pi < players.Count; pi++)
             {
+                Player p = players[pi];
                 SimCreatureState cs = sim.State.GetCreature(p.Creature);
                 uint id = p.Creature.CombatId ?? 0;
                 if (cs.IsDead)
@@ -148,9 +160,11 @@ internal static class PartyEvaluator
 
         double expectedTurnsLeft = Math.Clamp(remainingEnemyHp / 18.0, 1.0, 6.0);
         double score = 0;
+        IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
 
-        foreach (Player p in combat.Players)
+        for (int pi = 0; pi < players.Count; pi++)
         {
+            Player p = players[pi];
             Creature c = p.Creature;
             SimCreatureState cs = sim.State.GetCreature(c);
             uint id = c.CombatId ?? 0;
@@ -190,7 +204,7 @@ internal static class PartyEvaluator
 
             if (includePendingIncomingThreat)
             {
-                int incoming = EstimateIncomingDamage(sim, combat, c);
+                int incoming = EstimateIncomingDamage(sim, combat, c, powers);
                 int effectiveShield = cs.Block;
                 if (combat.GetOsty(p) is { } shieldOsty)
                 {
@@ -215,7 +229,7 @@ internal static class PartyEvaluator
                 score += cs.Block * 0.35;
             }
 
-            score += EvaluatePlayerPowers(combat, c, expectedTurnsLeft);
+            score += EvaluatePlayerPowers(powers, c, expectedTurnsLeft);
 
             if (ReferenceEquals(p, baseline.LocalPlayer))
             {
@@ -224,22 +238,13 @@ internal static class PartyEvaluator
             }
         }
 
-        int minAliveEnemyHp = int.MaxValue;
-        foreach (Creature enemy in combat.Enemies)
-        {
-            SimCreatureState es = sim.State.GetCreature(enemy);
-            int effHp = combat.EffectiveEnemyHp(enemy, es);
-            if (effHp > 0 && effHp < minAliveEnemyHp)
-                minAliveEnemyHp = effHp;
-        }
-
         score -= remainingEnemyHp * EnemyHpWeight;
         if (aliveEnemies > 1 && minAliveEnemyHp < int.MaxValue)
             score -= minAliveEnemyHp * 0.06;
         score -= remainingEnemyBlock * 0.04;
         score -= aliveEnemies * 1.1;
         score += teammateSupport;
-        score += EvaluateEnemyDebuffs(sim, combat, expectedTurnsLeft);
+        score += EvaluateEnemyPowers(sim, combat, expectedTurnsLeft, includePendingIncomingThreat);
         score -= potionCost;
         score -= maxHpLossCost;
         score += growthBonus;
@@ -260,12 +265,15 @@ internal static class PartyEvaluator
     {
         double turnsLeft = Math.Clamp(remainingEnemyHp / 18.0, 1.0, 6.0);
         double score = 0;
-        foreach (Player p in combat.Players)
+        IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
+        IReadOnlyList<Player> players = combat.Players;
+        for (int i = 0; i < players.Count; i++)
         {
+            Player p = players[i];
             SimCreatureState cs = sim.State.GetCreature(p.Creature);
             if (cs.IsDead)
                 continue;
-            score += EvaluatePlayerPowers(combat, p.Creature, turnsLeft);
+            score += EvaluatePlayerPowers(powers, p.Creature, turnsLeft);
             if (ReferenceEquals(p, localPlayer))
                 score += EvaluateLocalResources(sim, combat, p, sim.State.GetPlayerCombatState(p), turnsLeft);
         }
@@ -273,7 +281,30 @@ internal static class PartyEvaluator
     }
 
     public static double EvaluateTeammateBuffPowers(SimulatedCombatState combat, Creature c)
-        => EvaluatePlayerPowers(combat, c, 3.0);
+        => EvaluatePlayerPowers(combat.EffectivePowers(), c, 3.0);
+
+    public static bool IsEnemyStanding(CombatPredictionSimulator sim, SimulatedCombatState combat, Creature enemy)
+    {
+        SimCreatureState es = sim.State.GetCreature(enemy);
+        return es.IsAlive || combat.EffectiveEnemyHp(enemy, es) > 0;
+    }
+
+    public static bool AnyEnemyStanding(CombatPredictionSimulator sim, SimulatedCombatState combat)
+    {
+        IReadOnlyList<Creature> enemies = combat.Enemies;
+        for (int i = 0; i < enemies.Count; i++)
+        {
+            if (IsEnemyStanding(sim, combat, enemies[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public static int KillableHp(SimulatedCombatState combat, Creature enemy, SimCreatureState es)
+        => KillableHp(es, combat.EffectiveEnemyHp(enemy, es));
+
+    private static int KillableHp(SimCreatureState es, int effectiveHp)
+        => es.IsAlive && es.HpDisplay == HpDisplay.InfiniteWithoutNumbers ? 0 : Math.Max(0, effectiveHp);
 
     private static double TeammateDeathPenaltyAtTurn(SimStepState state, uint combatId, int rootTurn, int startHp)
     {
@@ -287,38 +318,90 @@ internal static class PartyEvaluator
         CombatPredictionSimulator sim,
         SimulatedCombatState combat,
         Creature target)
+        => EstimateIncomingDamage(sim, combat, target, combat.EffectivePowers());
+
+    private static int EstimateIncomingDamage(
+        CombatPredictionSimulator sim,
+        SimulatedCombatState combat,
+        Creature target,
+        IReadOnlyList<PowerModel> powers)
     {
         SimCreatureState targetState = sim.State.GetCreature(target);
         if (targetState.IsDead)
             return 0;
 
-        bool covered = combat.GetAmount<CoveredPower>(target) > 0;
-        bool intangible = combat.GetAmount<IntangiblePower>(target) > 0;
-        int buffers = combat.GetAmount<BufferPower>(target);
-        bool targetVuln = combat.GetAmount<VulnerablePower>(target) > 0;
-        int guardedCount = combat.EffectivePowers()
-            .OfType<GuardedPower>()
-            .Count(p => p.Amount > 0 && ReferenceEquals(p.Owner, target));
-        bool isTank = combat.GetAmount<TankPower>(target) > 0;
-        int interceptCovered = combat.GetAmount<InterceptPower>(target) > 0
-            ? combat.EffectivePowers().OfType<CoveredPower>().Count(p => p.Amount > 0 && ReferenceEquals(p.Applier, target))
-            : 0;
+        bool covered = false;
+        bool intangible = false;
+        bool targetVuln = false;
+        bool isTank = false;
+        bool intercepts = false;
+        int buffers = 0;
+        int guardedCount = 0;
+        int interceptCovered = 0;
+        for (int i = 0; i < powers.Count; i++)
+        {
+            PowerModel power = powers[i];
+            if (power.Amount <= 0)
+                continue;
+            if (ReferenceEquals(power.Owner, target))
+            {
+                switch (power)
+                {
+                    case CoveredPower:
+                        covered = true;
+                        break;
+                    case IntangiblePower:
+                        intangible = true;
+                        break;
+                    case BufferPower:
+                        buffers += power.Amount;
+                        break;
+                    case VulnerablePower:
+                        targetVuln = true;
+                        break;
+                    case GuardedPower:
+                        guardedCount++;
+                        break;
+                    case TankPower:
+                        isTank = true;
+                        break;
+                    case InterceptPower:
+                        intercepts = true;
+                        break;
+                }
+            }
+            else if (power is CoveredPower && ReferenceEquals(power.Applier, target))
+            {
+                interceptCovered++;
+            }
+        }
+        if (covered)
+            return 0;
+        if (!intercepts)
+            interceptCovered = 0;
 
         int total = 0;
-        foreach (Creature enemy in combat.Enemies)
+        IReadOnlyList<Creature> enemies = combat.Enemies;
+        for (int e = 0; e < enemies.Count; e++)
         {
+            Creature enemy = enemies[e];
             if (!combat.CanPerformMonsterMove(sim, enemy))
-                continue;
-            ForecastMove move = combat.CurrentMonsterMove(enemy);
-            if (move.AttackHits.Count == 0)
                 continue;
             int enemyStr = combat.GetAmount<StrengthPower>(enemy);
             bool enemyWeak = combat.GetAmount<WeakPower>(enemy) > 0;
-            foreach (ForecastAttackHit hit in move.AttackHits)
+            if (combat.TryGetForcedMoveId(enemy, out string forcedMove))
             {
-                if (covered)
-                    continue;
-                int baseDmg = combat.AdjustMonsterMoveDamage(enemy, move.Move.Id, hit.BaseDamage);
+                if (forcedMove == "EXPLODE_MOVE" && combat.TryGetForcedAttackDamage(enemy, out int forcedDamage))
+                    total += ProjectHit(forcedDamage);
+                continue;
+            }
+            ForecastMove move = combat.CurrentMonsterMove(enemy);
+            IReadOnlyList<ForecastAttackHit> hits = move.AttackHits;
+            for (int h = 0; h < hits.Count; h++)
+                total += ProjectHit(combat.AdjustMonsterMoveDamage(enemy, move.Move.Id, hits[h].BaseDamage));
+
+            int ProjectHit(int baseDmg)
+            {
                 double dmg = Math.Max(0, baseDmg + enemyStr);
                 if (enemyWeak)
                     dmg *= 0.75;
@@ -338,18 +421,20 @@ internal static class PartyEvaluator
                     buffers--;
                     hitDmg = 0;
                 }
-                total += hitDmg;
+                return hitDmg;
             }
         }
         return total;
     }
 
-    private static double EvaluatePlayerPowers(SimulatedCombatState combat, Creature c, double turnsLeft)
+    private static double EvaluatePlayerPowers(IReadOnlyList<PowerModel> powers, Creature c, double turnsLeft)
     {
         double v = 0;
         double scale = Math.Min(turnsLeft, 4.5);
-        foreach (PowerModel power in combat.EffectivePowers())
+        double shortScale = Math.Min(turnsLeft, 3.0);
+        for (int i = 0; i < powers.Count; i++)
         {
+            PowerModel power = powers[i];
             if (power.Amount == 0 || !ReferenceEquals(power.Owner, c))
                 continue;
             int amt = power.Amount;
@@ -361,7 +446,7 @@ internal static class PartyEvaluator
                 VigorPower => amt * 0.25,
                 StretchPower => amt * 0.25,
                 PlatingPower => amt * 0.30 * scale,
-                RegenPower => amt * 0.45 * Math.Min(turnsLeft, 3.0),
+                RegenPower => amt * 0.45 * shortScale,
                 BufferPower => amt * 3.5,
                 IntangiblePower => amt * 5.0,
                 BarricadePower => 1.5 * scale,
@@ -395,10 +480,43 @@ internal static class PartyEvaluator
                 InterceptPower => -0.9,
                 UnderworldPower => 1.2,
                 ImitationLearningPower => amt * 0.85 * Math.Min(turnsLeft, 3.5),
+                AccelerantPower => amt * 0.60 * scale,
+                EnvenomPower => amt * 0.70 * scale,
+                ReaperFormPower => amt * 1.10 * scale,
+                CrueltyPower => amt * 0.03 * scale,
+                PanachePower => amt * 0.25 * scale,
+                ThunderPower => amt * 0.35 * scale,
+                HailstormPower => amt * 0.30 * scale,
+                SmokestackPower => amt * 0.20 * scale,
+                NecroMasteryPower => amt * 0.60 * scale,
+                StormPower => amt * 0.60 * scale,
+                SpinnerPower => amt * 0.90 * scale,
+                LightningRodPower => Math.Min(amt, turnsLeft) * 1.1,
+                StampedePower => amt * 1.00 * scale,
+                JugglingPower => amt * 0.90 * scale,
+                SubroutinePower => amt * 0.80 * scale,
+                LoopPower => amt * 0.80 * scale,
+                PyrePower => amt * 1.00 * scale,
+                VoidFormPower => amt * 1.00 * scale,
+                MachineLearningPower => amt * 0.85 * scale,
+                IterationPower => amt * 0.40 * scale,
+                MasterPlannerPower => 1.0 * scale,
+                WellLaidPlansPower => amt * 0.60 * scale,
+                FurnacePower => amt * 0.35 * scale,
+                ChildOfTheStarsPower => amt * 0.25 * scale,
+                FastenPower => amt * 0.30 * scale,
+                CrimsonMantlePower => amt * 0.25 * scale,
+                UnmovablePower => 1.2 * scale,
+                ParryPower => amt * 0.20 * scale,
+                PrepTimePower => amt * 0.30 * scale,
+                CountdownPower => amt * 0.40 * scale,
+                ToricToughnessPower => amt * 0.30 * shortScale,
                 WeakPower => -amt * 0.4,
                 VulnerablePower => -amt * 0.9,
                 FrailPower => -amt * 0.55,
                 PoisonPower => -amt * 0.5,
+                ConstrictPower => -amt * 0.8 * shortScale,
+                DisintegrationPower => -amt * 0.9 * shortScale,
                 _ => 0,
             };
         }
@@ -415,8 +533,10 @@ internal static class PartyEvaluator
         double v = 0;
         v += ps.Stars * 0.42;
 
-        foreach (OrbModel orb in ps.OrbQueue.Orbs)
+        IReadOnlyList<OrbModel> orbs = ps.OrbQueue.Orbs;
+        for (int i = 0; i < orbs.Count; i++)
         {
+            OrbModel orb = orbs[i];
             int passive = Math.Max(0, (int)OrbMirrors.GetPassiveValue(sim, orb));
             int evoke = Math.Max(0, (int)OrbMirrors.GetEvokeValue(sim, orb));
             v += orb switch
@@ -429,74 +549,120 @@ internal static class PartyEvaluator
             };
         }
 
-        int sovereignDamage = 0;
-        int maxEnergy = Math.Max(1, PersistentPowerSupport.GetModifiedMaxEnergy(combat, player));
-        foreach (PredictedCard card in ps.AllCards)
-        {
-            if (ps.ExhaustPile.Cards.Contains(card))
-                continue;
-            if (card.Preview is SovereignBlade sb)
-            {
-                int dmg = sb.DynamicVars.Damage.IntValue;
-                if (dmg > sovereignDamage)
-                    sovereignDamage = dmg;
-            }
-            if (card.Preview.BaseReplayCount > 0)
-            {
-                int cost = card.Preview.EnergyCost.CostsX ? 0 : card.GetEnergyCostWithModifiers(sim, ps);
-                if (cost <= maxEnergy)
-                {
-                    double replayWeight = card.Preview.Type == MegaCrit.Sts2.Core.Entities.Cards.CardType.Power
-                        ? 1.2 * Math.Min(turnsLeft, 4.5)
-                        : 0.7 * Math.Min(turnsLeft, 3.0);
-                    v += card.Preview.BaseReplayCount * replayWeight;
-                }
-            }
-        }
-        if (sovereignDamage > 10)
-            v += (sovereignDamage - 10) * 0.14;
+        CardScan scan = new(Math.Max(1, PersistentPowerSupport.GetModifiedMaxEnergy(combat, player)), turnsLeft);
+        scan.Add(sim, ps, ps.Hand.Cards);
+        scan.Add(sim, ps, ps.DrawPile.Cards);
+        scan.Add(sim, ps, ps.DiscardPile.Cards);
+        scan.Add(sim, ps, ps.PlayPile.Cards);
+        if (scan.Cards > 0)
+            v += scan.Value * Math.Min(1.0, (double)CombatManager.baseHandDrawCount / scan.Cards);
+        if (scan.SovereignDamage > 10)
+            v += (scan.SovereignDamage - 10) * 0.14;
+        if (scan.Clutter > 0)
+            v -= 0.85 * Math.Min(turnsLeft, 3.0) * CombatManager.baseHandDrawCount * scan.Clutter / scan.Cards;
 
         return v;
     }
 
-    private static double EvaluateEnemyDebuffs(
+    private struct CardScan(int maxEnergy, double turnsLeft)
+    {
+        public double Value;
+        public int SovereignDamage;
+        public int Clutter;
+        public int Cards;
+
+        public void Add(CombatPredictionSimulator sim, SimPlayerCombatState ps, IReadOnlyList<PredictedCard> cards)
+        {
+            Cards += cards.Count;
+            for (int i = 0; i < cards.Count; i++)
+            {
+                PredictedCard card = cards[i];
+                CardModel preview = card.Preview;
+                if (preview.Type is CardType.Status or CardType.Curse)
+                    Clutter++;
+                if (preview is SovereignBlade sb)
+                {
+                    int dmg = sb.DynamicVars.Damage.IntValue;
+                    if (dmg > SovereignDamage)
+                        SovereignDamage = dmg;
+                }
+                if (preview.BaseReplayCount > 0)
+                {
+                    int cost = preview.EnergyCost.CostsX ? 0 : card.GetEnergyCostWithModifiers(sim, ps);
+                    if (cost <= maxEnergy)
+                    {
+                        double replayWeight = preview.Type == CardType.Power
+                            ? 1.2 * Math.Min(turnsLeft, 4.5)
+                            : 0.7 * Math.Min(turnsLeft, 3.0);
+                        Value += preview.BaseReplayCount * replayWeight;
+                    }
+                }
+            }
+        }
+    }
+
+    private static double EvaluateEnemyPowers(
         CombatPredictionSimulator sim,
         SimulatedCombatState combat,
-        double turnsLeft)
+        double turnsLeft,
+        bool incomingThreatCounted)
     {
         double v = 0;
-        foreach (Creature enemy in combat.Enemies)
+        double scale = Math.Min(turnsLeft, 4.0);
+        IReadOnlyList<Creature> enemies = combat.Enemies;
+        for (int i = 0; i < enemies.Count; i++)
         {
+            Creature enemy = enemies[i];
             SimCreatureState es = sim.State.GetCreature(enemy);
             if (!es.IsAlive)
+                continue;
+            int eruption = combat.GetAmount<SteamEruptionPower>(enemy);
+            if (eruption > 0)
+                v -= eruption * 0.35;
+            if (!incomingThreatCounted && combat.TryGetForcedAttackDamage(enemy, out int forcedDamage))
+                v -= forcedDamage * 0.35;
+            int hp = KillableHp(combat, enemy, es);
+            if (hp <= 0)
                 continue;
             int poison = combat.GetAmount<PoisonPower>(enemy);
             if (poison > 0)
             {
                 double ticks = Math.Min(turnsLeft, Math.Max(1.0, poison * 0.6));
-                double poisonDmg = Math.Min(es.CurrentHp, poison * ticks);
+                double poisonDmg = Math.Min(hp, poison * ticks);
                 v += poisonDmg * 0.25;
             }
             int doom = combat.GetAmount<DoomPower>(enemy);
             if (doom > 0)
             {
-                if (doom >= es.CurrentHp)
-                    v += es.CurrentHp * 0.26 + 2.0;
+                if (doom >= hp)
+                    v += hp * 0.26 + 2.0;
                 else
                     v += doom * 0.18;
             }
             int vuln = combat.GetAmount<VulnerablePower>(enemy);
             if (vuln > 0)
-                v += Math.Min(vuln, 3) * Math.Min(es.CurrentHp, 40) * 0.025;
+                v += Math.Min(vuln, 3) * Math.Min(hp, 40) * 0.025;
             int weak = combat.GetAmount<WeakPower>(enemy);
             if (weak > 0)
                 v += Math.Min(weak, 3) * 0.9;
             int flanking = combat.GetAmount<FlankingPower>(enemy);
             if (flanking > 0)
-                v += Math.Min(es.CurrentHp, 60) * 0.04;
+                v += Math.Min(hp, 60) * 0.04;
             int str = combat.GetAmount<StrengthPower>(enemy);
             if (str != 0)
-                v -= str * 0.65 * Math.Min(turnsLeft, 4.0);
+                v -= str * 0.65 * scale;
+            int ritual = combat.GetAmount<RitualPower>(enemy);
+            if (ritual > 0)
+                v -= ritual * 0.35 * scale;
+            int artifact = combat.GetAmount<ArtifactPower>(enemy);
+            if (artifact > 0)
+                v -= Math.Min(artifact, 3) * 0.6;
+            int plating = combat.GetAmount<PlatingPower>(enemy);
+            if (plating > 0)
+                v -= plating * 0.15 * scale;
+            int thorns = combat.GetAmount<ThornsPower>(enemy);
+            if (thorns > 0)
+                v -= thorns * 0.2 * scale;
         }
         return v;
     }
