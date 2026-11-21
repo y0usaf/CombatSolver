@@ -48,7 +48,7 @@ internal sealed class SimCreatureState
 
     public decimal DamageBlock(decimal amount, ValueProp props)
     {
-        var blockedDamage = props.HasFlag(ValueProp.Unblockable)
+        var blockedDamage = (props & ValueProp.Unblockable) != 0
             ? 0m
             : Math.Min(Block, amount);
 
