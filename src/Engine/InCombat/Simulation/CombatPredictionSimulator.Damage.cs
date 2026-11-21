@@ -200,7 +200,7 @@ internal sealed partial class CombatPredictionSimulator
         ActionRelicTriggers?.RecordHealth("damage", unblockedDamageTarget.CombatId, source,
             amount, unblockedDamage, hpBefore, unblockedDamageTargetState.CurrentHp);
         var wasBlockBroken = originalTargetState.Block <= 0 && blockedDamage > 0m;
-        var wasFullyBlocked = !props.HasFlag(ValueProp.Unblockable) &&
+        var wasFullyBlocked = (props & ValueProp.Unblockable) == 0 &&
             (blockedDamage > 0m || originalTargetState.Block > 0) &&
             (int)unblockedDamage == 0;
 
