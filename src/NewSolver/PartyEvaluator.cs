@@ -92,6 +92,22 @@ internal static class PartyEvaluator
     public const double TeammateImmediateDeathPenalty = -160.0;
     public const double EnemyHpWeight = 0.27;
     public const double DeathDelayCreditPerTurn = 6.0;
+    public const double PowerValueKnee = 0.75;
+
+    // Full value up to knee * E, then knee * E + (1 - knee) * E * (1 - exp(-(p - knee * E) / ((1 - knee) * E))):
+    // continuous with slope 1 at the knee, strictly below E, and the score keeps a negative slope in E.
+    internal static double SaturatePowerValue(double powerValue, double enemyPenalty)
+    {
+        if (powerValue <= 0)
+            return powerValue;
+        if (enemyPenalty <= 0)
+            return 0.0;
+        double knee = PowerValueKnee * enemyPenalty;
+        if (powerValue <= knee)
+            return powerValue;
+        double span = enemyPenalty - knee;
+        return knee + span * (1.0 - Math.Exp(-(powerValue - knee) / span));
+    }
 
     public static double EvaluateTerminalOrHorizon(
         SimStepState stepState,
@@ -179,7 +195,7 @@ internal static class PartyEvaluator
 
         double expectedTurnsLeft = Math.Clamp(remainingEnemyHp / 18.0, 1.0, 6.0);
         double score = 0;
-        double futureValue = 0;
+        double powerValue = 0;
         IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
 
         for (int pi = 0; pi < players.Count; pi++)
@@ -219,7 +235,7 @@ internal static class PartyEvaluator
             {
                 SimCreatureState os = sim.State.GetCreature(osty);
                 if (os.IsAlive)
-                    futureValue += os.CurrentHp * 0.55 + 0.8;
+                    score += os.CurrentHp * 0.55 + 0.8;
             }
 
             if (includePendingIncomingThreat)
@@ -249,26 +265,24 @@ internal static class PartyEvaluator
                 score += cs.Block * 0.35;
             }
 
-            futureValue += EvaluatePlayerPowers(powers, c, expectedTurnsLeft);
+            powerValue += EvaluatePlayerPowers(powers, c, expectedTurnsLeft);
 
             if (ReferenceEquals(p, baseline.LocalPlayer))
             {
                 SimPlayerCombatState ps = sim.State.GetPlayerCombatState(p);
-                futureValue += EvaluateLocalResources(sim, combat, p, ps, expectedTurnsLeft);
+                score += EvaluateLocalResources(sim, combat, p, ps, expectedTurnsLeft);
             }
         }
 
         double enemyPenalty = remainingEnemyHp * EnemyHpWeight + remainingEnemyBlock * 0.04 + aliveEnemies * 1.1;
         if (aliveEnemies > 1 && minAliveEnemyHp < int.MaxValue)
             enemyPenalty += minAliveEnemyHp * 0.06;
-        // Powers, orbs, Osty and deck value only pay off while the remaining enemies are alive, so their future
-        // value saturates below the enemy penalty it offsets: E * (1 - exp(-f / E)) is ~f while small and never
-        // reaches E. A hard min(f, E) let a horizon with stacked powers (Creative AI, Echo Form) or a pumped Osty
-        // tie or beat winning now and flattened the score so further damage was worth nothing; the smooth form
-        // keeps every point of enemy HP worth something.
-        score += futureValue > 0 && enemyPenalty > 0
-            ? enemyPenalty * (1.0 - Math.Exp(-futureValue / enemyPenalty))
-            : Math.Min(futureValue, 0.0);
+        // Player powers are priced per remaining turn, so stacks grow without bound while the enemies stay alive.
+        // Their total may not make a horizon with living enemies look better than winning now: it counts at full
+        // value up to PowerValueKnee of the enemy penalty E and then saturates smoothly towards E, so further
+        // enemy damage always still counts. Only powers are bounded: Osty HP, orbs and deck value are present
+        // resources (a93c8412 pricing); bounding them too damped the Osty/Hidden Gem engine in real-09.
+        score += SaturatePowerValue(powerValue, enemyPenalty);
         score -= enemyPenalty;
         score += teammateSupport;
         score += EvaluateEnemyPowers(sim, combat, expectedTurnsLeft, includePendingIncomingThreat);
