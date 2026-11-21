@@ -47,8 +47,6 @@ internal sealed partial class SimulatedCombatState
     {
         if (affliction is Hexed or Entangled or Ringing)
             _hasRemovableAffliction = true;
-        else if (affliction is Tainted)
-            _hasTaintedAffliction = true;
     }
 
     public void RecordCardExhausted(Creature actor)

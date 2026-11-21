@@ -31,9 +31,7 @@ internal sealed partial class SimulatedCombatState
     private bool _swordSageCardsInitialized;
     private bool _afflictionsNormalized;
     private bool _hasRemovableAffliction;
-    private bool _hasTaintedAffliction;
     private bool _hasSovereignBlade;
-    private bool _hasUncheckedEntryCard = true;
     private int? _lastNormalizedVitalSparkAmount;
     private ForkableSet<Creature>? _skillsPlayedThisTurn;
 
@@ -193,9 +191,6 @@ internal sealed partial class SimulatedCombatState
             _lastNormalizedVitalSparkAmount is int previousVitalSparkAmount
             && previousVitalSparkAmount != vitalSparkAmount;
         _lastNormalizedVitalSparkAmount = vitalSparkAmount;
-        if (!_hasUncheckedEntryCard && !_hasTaintedAffliction && !vitalSparkAmountChanged)
-            return;
-        bool anyTainted = false;
         IReadOnlyList<Player> players = Players;
         for (int playerIndex = 0; playerIndex < players.Count; playerIndex++)
         {
@@ -220,13 +215,9 @@ internal sealed partial class SimulatedCombatState
                     // VitalSparkPower.AfterRemoved 会清掉所有污染。
                     if (!hasVitalSpark)
                         card.ClearAffliction();
-                    else
-                    {
-                        anyTainted = true;
-                        // AfterPowerAmountChanged 会把所有污染拍平成新的数量，包括叠高了的那些。
-                        if (vitalSparkAmountChanged && tainted.Amount != vitalSparkAmount)
-                            card.MutablePreview.Affliction!.Amount = vitalSparkAmount;
-                    }
+                    // AfterPowerAmountChanged 会把所有污染拍平成新的数量，包括叠高了的那些。
+                    else if (vitalSparkAmountChanged && tainted.Amount != vitalSparkAmount)
+                        card.MutablePreview.Affliction!.Amount = vitalSparkAmount;
                     continue;
                 }
                 if (card.Preview.Affliction != null || !enteredCombat)
@@ -244,8 +235,7 @@ internal sealed partial class SimulatedCombatState
                     }
                     if (power is VitalSparkPower && card.Preview.Type == CardType.Skill)
                     {
-                        if (simulator.Afflict<Tainted>(card, vitalSparkAmount) != null)
-                            anyTainted = true;
+                        simulator.Afflict<Tainted>(card, vitalSparkAmount);
                         break;
                     }
                     if (power is SmoggyPower
@@ -261,8 +251,6 @@ internal sealed partial class SimulatedCombatState
                 }
             }
         }
-        _hasUncheckedEntryCard = false;
-        _hasTaintedAffliction = anyTainted;
     }
 
     private void NormalizeSwordSageReplays(CombatPredictionSimulator simulator)
