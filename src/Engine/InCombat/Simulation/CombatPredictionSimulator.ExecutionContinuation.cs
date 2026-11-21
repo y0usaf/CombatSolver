@@ -224,8 +224,12 @@ internal sealed partial class CombatPredictionSimulator
         var child = new CombatPredictionSimulator(trace, state, Rng.Fork(), store, history,
             IsInProgress, IsAboutToLose, TerminalStamp, ShuffleEventCount, null) { _revealedDraws = _revealedDraws };
         child._preparedExecutionContinuation = continuation;
-        foreach (var (play, block) in _blockGainedByCardPlay)
-            child._blockGainedByCardPlay.Add(context.RequireRemap(play), block);
+        if (_blockGainedByCardPlay is { Count: > 0 } blockMap)
+        {
+            child._blockGainedByCardPlay = new(blockMap.Count);
+            foreach (var (play, block) in blockMap)
+                child._blockGainedByCardPlay.Add(context.RequireRemap(play), block);
+        }
         return child;
     }
 

@@ -1,14 +1,14 @@
-using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Rngs;
+using MegaCrit.Sts2.Core.Random;
 using CombatSolver.Engine.Common;
 
 namespace CombatSolver.Engine.InCombat.Simulation;
 
-/// <summary>
-/// A branch owns each materialized RNG. Fork shares only immutable captured values;
-/// fingerprint and continuation readers do not materialize the nine native streams.
-/// </summary>
+// Branch-local copy of the combat RNG streams that simulation mutates. Each stream keeps an
+// immutable state handle across forks until a branch first writes to it, avoiding eager
+// Rng allocations for untouched streams.
 internal sealed class CombatPredictionRngSet
 {
     private sealed class FrozenStream(PredictionRngState state)
@@ -23,6 +23,7 @@ internal sealed class CombatPredictionRngSet
 
         private Stream(FrozenStream frozen) => _frozen = frozen;
 
+        public readonly bool IsMutable => _mutable is not null;
         public Rng Mutable => _mutable ??= State.ToRng();
         public readonly PredictionRngState State => _mutable is { } rng
             ? rng.CaptureState() : _frozen!.State;
@@ -36,17 +37,51 @@ internal sealed class CombatPredictionRngSet
         public static Stream Capture(PredictionRngState state) => new(new FrozenStream(state));
     }
 
-    private readonly Dictionary<Player, Stream> _nonCombatGeneration;
+    private readonly struct PlayerStream(Player player, Stream stream)
+    {
+        public readonly Player Player = player;
+        public readonly Stream Stream = stream;
+    }
+
+    private PlayerStream[] _nonCombatGeneration;
+    private volatile bool _nonCombatShared;
+    private bool _nonCombatHasMutable;
 
     public Rng NonCombatGeneration(Player player)
     {
-        Stream stream = _nonCombatGeneration[player];
-        Rng rng = stream.Mutable;
-        _nonCombatGeneration[player] = stream;
-        return rng;
+        if (_nonCombatShared)
+        {
+            PlayerStream[] copy = new PlayerStream[_nonCombatGeneration.Length];
+            for (int i = 0; i < _nonCombatGeneration.Length; i++)
+                copy[i] = new PlayerStream(_nonCombatGeneration[i].Player, _nonCombatGeneration[i].Stream.Fork());
+            _nonCombatGeneration = copy;
+            _nonCombatShared = false;
+            _nonCombatHasMutable = false;
+        }
+        for (int i = 0; i < _nonCombatGeneration.Length; i++)
+        {
+            if (ReferenceEquals(_nonCombatGeneration[i].Player, player))
+            {
+                Stream stream = _nonCombatGeneration[i].Stream;
+                Rng rng = stream.Mutable;
+                _nonCombatGeneration[i] = new PlayerStream(player, stream);
+                _nonCombatHasMutable = true;
+                return rng;
+            }
+        }
+        throw new KeyNotFoundException($"Player {player} was not present in the combat RNG set.");
     }
 
-    public PredictionRngState NonCombatGenerationState(Player player) => _nonCombatGeneration[player].State;
+    public PredictionRngState NonCombatGenerationState(Player player)
+    {
+        PlayerStream[] arr = _nonCombatGeneration;
+        for (int i = 0; i < arr.Length; i++)
+        {
+            if (ReferenceEquals(arr[i].Player, player))
+                return arr[i].Stream.State;
+        }
+        throw new KeyNotFoundException($"Player {player} was not present in the combat RNG set.");
+    }
 
     private Stream _shuffle;
     public Rng Shuffle => _shuffle.Mutable;
@@ -86,7 +121,11 @@ internal sealed class CombatPredictionRngSet
 
     private CombatPredictionRngSet(RunRngSet rng, IReadOnlyDictionary<Player, PredictionRngState> playerRngs)
     {
-        _nonCombatGeneration = playerRngs.ToDictionary(pair => pair.Key, pair => Stream.Capture(pair.Value));
+        PlayerStream[] arr = new PlayerStream[playerRngs.Count];
+        int index = 0;
+        foreach ((Player player, PredictionRngState state) in playerRngs)
+            arr[index++] = new PlayerStream(player, Stream.Capture(state));
+        _nonCombatGeneration = arr;
         _shuffle = Stream.Capture(rng.Shuffle);
         _combatCardGeneration = Stream.Capture(rng.CombatCardGeneration);
         _combatPotionGeneration = Stream.Capture(rng.CombatPotionGeneration);
@@ -100,7 +139,20 @@ internal sealed class CombatPredictionRngSet
 
     private CombatPredictionRngSet(CombatPredictionRngSet source)
     {
-        _nonCombatGeneration = source._nonCombatGeneration.ToDictionary(pair => pair.Key, pair => pair.Value.Fork());
+        if (!source._nonCombatHasMutable)
+        {
+            source._nonCombatShared = true;
+            _nonCombatGeneration = source._nonCombatGeneration;
+            _nonCombatShared = true;
+        }
+        else
+        {
+            PlayerStream[] src = source._nonCombatGeneration;
+            PlayerStream[] copy = new PlayerStream[src.Length];
+            for (int i = 0; i < src.Length; i++)
+                copy[i] = new PlayerStream(src[i].Player, src[i].Stream.Fork());
+            _nonCombatGeneration = copy;
+        }
         _shuffle = source._shuffle.Fork();
         _combatCardGeneration = source._combatCardGeneration.Fork();
         _combatPotionGeneration = source._combatPotionGeneration.Fork();

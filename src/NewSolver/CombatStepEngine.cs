@@ -157,21 +157,31 @@ internal static class CombatStepEngine
             return actions;
 
         SimPlayerCombatState ps = sim.State.GetPlayerCombatState(player);
-        HashSet<string> seenStateKeys = new(StringComparer.Ordinal);
-        Dictionary<string, int> idCounts = new(StringComparer.Ordinal);
-        Dictionary<string, int> stateKeyCounts = new(StringComparer.Ordinal);
+        IReadOnlyList<PredictedCard> handCards = ps.Hand.Cards;
+        int handCount = handCards.Count;
+        string[]? seenKeys = handCount > 0 ? new string[handCount] : null;
+        string[]? seenIds = handCount > 0 ? new string[handCount] : null;
 
-        foreach (PredictedCard card in ps.Hand.Cards)
+        for (int handIdx = 0; handIdx < handCount; handIdx++)
         {
+            PredictedCard card = handCards[handIdx];
             string cardId = card.Preview.Id.Entry;
             string stateKey = CardChoiceSupport.ChoiceCardKey(card);
-            int cardOcc = idCounts.GetValueOrDefault(cardId, 0);
-            idCounts[cardId] = cardOcc + 1;
-            int stateOcc = stateKeyCounts.GetValueOrDefault(stateKey, 0);
-            stateKeyCounts[stateKey] = stateOcc + 1;
+            int cardOcc = 0;
+            bool dupStateKey = false;
+            for (int prev = 0; prev < handIdx; prev++)
+            {
+                if (string.Equals(seenIds![prev], cardId, StringComparison.Ordinal))
+                    cardOcc++;
+                if (string.Equals(seenKeys![prev], stateKey, StringComparison.Ordinal))
+                    dupStateKey = true;
+            }
+            seenIds![handIdx] = cardId;
+            seenKeys![handIdx] = stateKey;
 
-            if (!seenStateKeys.Add(stateKey))
+            if (dupStateKey)
                 continue;
+            int stateOcc = 0;
             if (!combat.CanPlayCard(sim, card) || CardChoiceSupport.RequiresUnsupportedExistingChoice(card.Preview))
                 continue;
 
@@ -276,7 +286,7 @@ internal static class CombatStepEngine
         int maxChoiceDepth = 3)
     {
         List<StepOutcome> results = [];
-        ExpandActionRecursive(parent, baseAction, player, names, maxChoiceBranches, baseline, maxChoiceDepth, results);
+        ExpandActionRecursive(parent, baseAction, player, names, maxChoiceBranches, baseline, maxChoiceDepth, results, skipCanPlayCheck: true);
         return results;
     }
 
@@ -288,7 +298,8 @@ internal static class CombatStepEngine
         int maxChoiceBranches,
         PartyRootBaseline? baseline,
         int remainingDepth,
-        List<StepOutcome> results)
+        List<StepOutcome> results,
+        bool skipCanPlayCheck = false)
     {
         SimStepState next = parent.Fork();
         bool completed;
@@ -296,7 +307,7 @@ internal static class CombatStepEngine
         bool advancedTurn;
         try
         {
-            completed = ExecuteSingleAction(next, action, player, out revealed, out advancedTurn);
+            completed = ExecuteSingleAction(next, action, player, out revealed, out advancedTurn, skipCanPlayCheck);
         }
         catch (InvalidPlannedChoiceBranchException)
         {
@@ -697,7 +708,8 @@ internal static class CombatStepEngine
         PlanAction action,
         Player player,
         out bool revealed,
-        out bool advancedTurn)
+        out bool advancedTurn,
+        bool skipCanPlayCheck = false)
     {
         CombatPredictionSimulator sim = state.Simulator;
         SimulatedCombatState combat = state.Combat;
@@ -767,7 +779,7 @@ internal static class CombatStepEngine
 
         SimPlayerCombatState ps = sim.State.GetPlayerCombatState(player);
         PredictedCard? card = FindCard(ps.Hand.Cards, action);
-        if (card == null || !combat.CanPlayCard(sim, card))
+        if (card == null || (!skipCanPlayCheck && !combat.CanPlayCard(sim, card)))
             return false;
 
         (int Energy, int Hand, int Deck)[]? allyBefore = CaptureAllyResources(sim, combat, player);
