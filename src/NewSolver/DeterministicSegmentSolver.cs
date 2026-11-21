@@ -121,7 +121,7 @@ internal static class DeterministicSegmentSolver
                     continue;
 
                 List<StepOutcome> outcomes = CombatStepEngine.ExpandAction(
-                    current.State, baseAction, player, names, maxChoiceBranches, baseline);
+                    current.State, baseAction, player, names, maxChoiceBranches, baseline, skipCanPlayCheck: true);
 
                 foreach (StepOutcome outcome in outcomes)
                 {

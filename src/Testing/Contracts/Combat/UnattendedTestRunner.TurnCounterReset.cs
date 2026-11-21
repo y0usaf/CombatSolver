@@ -13,21 +13,23 @@ internal sealed partial class UnattendedTestRunner
         AssertRootColorlessGenerationPoolCache(parent, player);
         parentState.BeginSideTurn(player.Creature);
         FieldInfo counterField = typeof(SimulatedCombatState).GetField(
-            "_cardsPlayedThisTurn", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var parentCounters = (ForkableDictionary<MegaCrit.Sts2.Core.Entities.Creatures.Creature, int>)
-            counterField.GetValue(parentState)!;
-        parentCounters[player.Creature] = 7;
+            "_creatureTurnCounters", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        MethodInfo setCounter = typeof(SimulatedCombatState).GetMethod(
+            "SetCreatureTurnCounter", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Type counterEnum = typeof(SimulatedCombatState).GetNestedType(
+            "CreatureTurnCounter", BindingFlags.NonPublic)!;
+        object cardsPlayedEnum = Enum.Parse(counterEnum, "CardsPlayed");
+        setCounter.Invoke(parentState, [player.Creature, cardsPlayedEnum, 7]);
         CombatPredictionSimulator child = parent.Fork();
         SimulatedCombatState childState = (SimulatedCombatState)child.State.CombatState;
         childState.BeginSideTurn(player.Creature);
-        var childCounters = (ForkableDictionary<MegaCrit.Sts2.Core.Entities.Creatures.Creature, int>)
-            counterField.GetValue(childState)!;
-        if (parentCounters[player.Creature] != 7 || childCounters[player.Creature] != 0)
+        if (parentState.GetCardsPlayedThisTurn(player.Creature) != 7
+            || childState.GetCardsPlayedThisTurn(player.Creature) != 0)
             throw new InvalidOperationException("回合计数重置未保持父子隔离或显式零。");
         CombatPredictionSimulator grandchild = child.Fork();
         SimulatedCombatState grandchildState = (SimulatedCombatState)grandchild.State.CombatState;
-        var grandchildCounters = (ForkableDictionary<MegaCrit.Sts2.Core.Entities.Creatures.Creature, int>)
-            counterField.GetValue(grandchildState)!;
+        object childCounters = counterField.GetValue(childState)!;
+        object grandchildCounters = counterField.GetValue(grandchildState)!;
         FieldInfo storage = childCounters.GetType().GetField(
             "_storage", BindingFlags.NonPublic | BindingFlags.Instance)!;
         StateFingerprintBuilder before = new();
@@ -38,8 +40,10 @@ internal sealed partial class UnattendedTestRunner
         if (before.Finish() != after.Finish()
             || !ReferenceEquals(storage.GetValue(childCounters), storage.GetValue(grandchildCounters)))
             throw new InvalidOperationException("已有零计数的回合重置改变状态或复制共享存储。");
-        grandchildCounters[player.Creature] = 3;
-        if (childCounters[player.Creature] != 0 || parentCounters[player.Creature] != 7)
+        setCounter.Invoke(grandchildState, [player.Creature, cardsPlayedEnum, 3]);
+        if (childState.GetCardsPlayedThisTurn(player.Creature) != 0
+            || parentState.GetCardsPlayedThisTurn(player.Creature) != 7
+            || grandchildState.GetCardsPlayedThisTurn(player.Creature) != 3)
             throw new InvalidOperationException("省略零写入后后续计数写入破坏了 Fork 隔离。");
     }
 }
