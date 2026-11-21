@@ -35,6 +35,8 @@ internal static class StretchPowerMirrors
 
     internal static void Cleanup(CombatPredictionSimulator simulator, CardPlay play, bool completed)
     {
+        if (!simulator.StateStore.HasEntries<State>())
+            return;
         foreach ((AbstractModel model, State state) in simulator.StateStore.ReadEntries<State>())
             Complete(simulator, (StretchPower)model, state, play, completed);
     }

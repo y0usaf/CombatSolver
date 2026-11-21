@@ -131,9 +131,11 @@ internal sealed partial class PredictionStateStore
 
     public IEnumerable<(AbstractModel Model, TState State)> ReadEntries<TState>()
         where TState : class, IPredictionStateForkable
+        => !HasEntries<TState>() ? Array.Empty<(AbstractModel, TState)>() : ReadEntriesCore<TState>();
+
+    private IEnumerable<(AbstractModel Model, TState State)> ReadEntriesCore<TState>()
+        where TState : class, IPredictionStateForkable
     {
-        if (!HasEntries<TState>())
-            yield break;
         foreach (((AbstractModel model, Type stateType), object state) in _states!)
         {
             if (stateType == typeof(TState))
