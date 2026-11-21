@@ -43,6 +43,8 @@ internal static partial class SolverController
     internal static void ResetUnEndTurnStateForTesting()
     {
         _combat.ReadyToEndTurnTurn = null;
+        _combat.SolverEndedTurn = null;
+        _combat.SolverEndedTurnSeenReady = false;
         _combat.ReadyToEndTurnBaselineFingerprint = null;
         _combat.LastUnEndTriggerFingerprint = null;
         _combat.UnEndTurnCountThisTurn = 0;

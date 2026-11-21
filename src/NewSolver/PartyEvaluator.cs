@@ -27,6 +27,20 @@ internal sealed record PartyRootBaseline(
     PostCombatRelicHealProfile LocalPostCombatHeal,
     bool IsActEndingBoss)
 {
+    /// <summary>More than one player alive at the root. Rollouts treat teammates as idle, which is pessimistic.</summary>
+    public bool IsCoop { get; } = CountLiving(InitialPlayerHp) > 1;
+
+    private static int CountLiving(IReadOnlyDictionary<uint, int> hp)
+    {
+        int living = 0;
+        foreach (int value in hp.Values)
+        {
+            if (value > 0)
+                living++;
+        }
+        return living;
+    }
+
     public static PartyRootBaseline Capture(CombatRootSnapshot root, CombatPredictionSimulator sim)
     {
         SimulatedCombatState combat = (SimulatedCombatState)sim.State.CombatState;
@@ -77,6 +91,7 @@ internal static class PartyEvaluator
     public const double LocalDeathPenalty = -250.0;
     public const double TeammateImmediateDeathPenalty = -160.0;
     public const double EnemyHpWeight = 0.27;
+    public const double DeathDelayCreditPerTurn = 6.0;
 
     public static double EvaluateTerminalOrHorizon(
         SimStepState stepState,
@@ -120,7 +135,11 @@ internal static class PartyEvaluator
         if (localDead || combat.BattlewornDummyTimedOut)
         {
             int localLost = baseline.InitialPlayerHp.GetValueOrDefault(baseline.LocalPlayer.Creature.CombatId ?? 0, 0);
-            return LocalDeathPenalty - localLost - remainingEnemyHp * 0.4 - potionCost + teammateSupport;
+            // Co-op: among lines that die inside the horizon, a later death is better, because the rollouts treat
+            // teammates as idle and so overstate how long enemies live. Without this term a party position that
+            // looks lost in every world only maximises damage and drops block.
+            return LocalDeathPenalty - localLost - remainingEnemyHp * 0.4 - potionCost + teammateSupport
+                + (baseline.IsCoop ? turnsElapsed * DeathDelayCreditPerTurn : 0);
         }
 
         IReadOnlyList<Player> players = combat.Players;
@@ -160,6 +179,7 @@ internal static class PartyEvaluator
 
         double expectedTurnsLeft = Math.Clamp(remainingEnemyHp / 18.0, 1.0, 6.0);
         double score = 0;
+        double futureValue = 0;
         IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
 
         for (int pi = 0; pi < players.Count; pi++)
@@ -199,7 +219,7 @@ internal static class PartyEvaluator
             {
                 SimCreatureState os = sim.State.GetCreature(osty);
                 if (os.IsAlive)
-                    score += os.CurrentHp * 0.55 + 0.8;
+                    futureValue += os.CurrentHp * 0.55 + 0.8;
             }
 
             if (includePendingIncomingThreat)
@@ -229,20 +249,27 @@ internal static class PartyEvaluator
                 score += cs.Block * 0.35;
             }
 
-            score += EvaluatePlayerPowers(powers, c, expectedTurnsLeft);
+            futureValue += EvaluatePlayerPowers(powers, c, expectedTurnsLeft);
 
             if (ReferenceEquals(p, baseline.LocalPlayer))
             {
                 SimPlayerCombatState ps = sim.State.GetPlayerCombatState(p);
-                score += EvaluateLocalResources(sim, combat, p, ps, expectedTurnsLeft);
+                futureValue += EvaluateLocalResources(sim, combat, p, ps, expectedTurnsLeft);
             }
         }
 
-        score -= remainingEnemyHp * EnemyHpWeight;
+        double enemyPenalty = remainingEnemyHp * EnemyHpWeight + remainingEnemyBlock * 0.04 + aliveEnemies * 1.1;
         if (aliveEnemies > 1 && minAliveEnemyHp < int.MaxValue)
-            score -= minAliveEnemyHp * 0.06;
-        score -= remainingEnemyBlock * 0.04;
-        score -= aliveEnemies * 1.1;
+            enemyPenalty += minAliveEnemyHp * 0.06;
+        // Powers, orbs, Osty and deck value only pay off while the remaining enemies are alive, so their future
+        // value saturates below the enemy penalty it offsets: E * (1 - exp(-f / E)) is ~f while small and never
+        // reaches E. A hard min(f, E) let a horizon with stacked powers (Creative AI, Echo Form) or a pumped Osty
+        // tie or beat winning now and flattened the score so further damage was worth nothing; the smooth form
+        // keeps every point of enemy HP worth something.
+        score += futureValue > 0 && enemyPenalty > 0
+            ? enemyPenalty * (1.0 - Math.Exp(-futureValue / enemyPenalty))
+            : Math.Min(futureValue, 0.0);
+        score -= enemyPenalty;
         score += teammateSupport;
         score += EvaluateEnemyPowers(sim, combat, expectedTurnsLeft, includePendingIncomingThreat);
         score -= potionCost;
@@ -510,6 +537,8 @@ internal static class PartyEvaluator
                 ParryPower => amt * 0.20 * scale,
                 PrepTimePower => amt * 0.30 * scale,
                 CountdownPower => amt * 0.40 * scale,
+                // +amt% on the owner's first powered attack each turn: ~6 base damage per turn at EnemyHpWeight.
+                LethalityPower => amt / 100.0 * 6.0 * EnemyHpWeight * scale,
                 ToricToughnessPower => amt * 0.30 * shortScale,
                 WeakPower => -amt * 0.4,
                 VulnerablePower => -amt * 0.9,
@@ -638,6 +667,13 @@ internal static class PartyEvaluator
                     v += hp * 0.26 + 2.0;
                 else
                     v += doom * 0.18;
+            }
+            int hang = combat.GetAmount<HangPower>(enemy);
+            if (hang > 1)
+            {
+                // The next Hang on this enemy deals hang x its base damage (~10); credit half of the extra
+                // damage for the chance another Hang is drawn and played before the fight ends.
+                v += Math.Min(hp, (hang - 1) * 10.0) * EnemyHpWeight * 0.5;
             }
             int vuln = combat.GetAmount<VulnerablePower>(enemy);
             if (vuln > 0)

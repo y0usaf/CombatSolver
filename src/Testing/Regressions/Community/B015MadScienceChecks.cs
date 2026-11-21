@@ -74,9 +74,7 @@ internal sealed partial class UnattendedTestRunner
                 PlaySimulatedCard(invalid, (SimulatedCombatState)invalid.State.CombatState,
                     Card(invalid), null, live.Enemies);
             }
-            catch (ArgumentOutOfRangeException error) when (
-                error.ParamName == nameof(MadScience.TinkerTimeType)
-                && error.ActualValue is CardType.None)
+            catch (PredictionUnsupportedException)
             {
                 rejectedNone = true;
             }

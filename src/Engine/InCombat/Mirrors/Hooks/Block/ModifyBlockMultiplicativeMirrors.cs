@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Hooks;
@@ -90,10 +91,18 @@ internal static class ModifyBlockMultiplicativeMirrors
         return earlierEvents < power.Amount ? 2m : 1m;
     }
 
+    /// <summary>
+    /// Vanilla scales only enemy block (primary or secondary enemies, i.e. the enemy side) and only powered
+    /// card/monster-move block. Player and Osty block is never multiplied by the party size.
+    /// </summary>
     private static decimal HandleMultiplayerScaling(
         MultiplayerScalingModel _,
         ModifyBlockMultiplicativeMirrorContext context)
     {
+        if (context.Target != null && context.Target.Side != CombatSide.Enemy)
+            return 1m;
+        if (!context.Props.IsPoweredCardOrMonsterMoveBlock())
+            return 1m;
         SimulatedCombatState combat = context.State.CombatState as SimulatedCombatState
             ?? throw new InvalidOperationException("Multiplayer block scaling requires SimulatedCombatState.");
         int playerCount = combat.Players.Count;

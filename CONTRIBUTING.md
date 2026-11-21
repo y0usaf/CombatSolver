@@ -25,7 +25,7 @@
 
 ## 环境与构建
 
-开发需要 .NET 9 SDK、正版游戏和 RitsuLib。游戏与 RitsuLib 的最低版本见[安装与兼容性](README.md#安装与兼容性)，声明值见 [CombatSolver.json](CombatSolver.json)。
+开发需要 .NET 9 SDK、正版游戏和 RitsuLib。游戏与 RitsuLib 的最低版本见[README](README.md)，声明值见 [CombatSolver.json](CombatSolver.json)。
 
 Windows 命令需要 PowerShell 7.4 或更高版本。Linux 使用 Bash 入口。分类工具另需 Python 3。
 

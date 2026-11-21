@@ -1,4 +1,5 @@
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Events;
 using CombatSolver.Engine.Common;
@@ -123,6 +124,27 @@ internal static class CardGenerationCardMirrors
         context.Simulator.AddGeneratedCardsToCombat(cards, PileType.Hand, card.Owner);
     }
 
+    /// <summary>
+    /// Mad Science's card type and rider come from the Tinker Time event and are saved on the card. A copy whose
+    /// type is still <see cref="CardType.None"/> has no vanilla play effect: <c>MadScience.OnPlay</c> throws for
+    /// it. Such a combat is outside the semantics we can mirror, so root capture rejects it explicitly instead of
+    /// failing mid-search when a rollout first plays the card.
+    /// </summary>
+    public static void RequireConfiguredTinkerTime(IEnumerable<CardModel> cards)
+    {
+        foreach (CardModel card in cards)
+        {
+            if (card is MadScience madScience && !HasConfiguredTinkerTime(madScience))
+                throw UnconfiguredTinkerTime(madScience);
+        }
+    }
+
+    private static bool HasConfiguredTinkerTime(MadScience card)
+        => card.TinkerTimeType is CardType.Attack or CardType.Skill or CardType.Power;
+
+    private static PredictionUnsupportedException UnconfiguredTinkerTime(MadScience card)
+        => new($"疯狂科学缺少 Tinker Time 卡牌类型（{card.TinkerTimeType}/{card.TinkerTimeRider}）；原版 OnPlay 对此抛出异常，无法预测其打出效果。");
+
     public static void MadScienceOnPlay(MadScience card, CardOnPlayMirrorContext context)
     {
         if (context.CombatState is not ICombatPredictionEffectSink effects)
@@ -176,7 +198,7 @@ internal static class CardGenerationCardMirrors
                 }
                 break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(card.TinkerTimeType), card.TinkerTimeType, null);
+                throw UnconfiguredTinkerTime(card);
         }
         if (context.Simulator.HasPendingChoice)
             return;

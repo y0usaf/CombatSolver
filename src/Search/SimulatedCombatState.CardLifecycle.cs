@@ -101,7 +101,7 @@ internal sealed partial class SimulatedCombatState
             osty = existingOsty!;
         }
         SimCreatureState state = simulator.State.GetCreature(osty);
-        int currentMax = _simulatedOstyMaxHp?.GetValueOrDefault(osty) ?? state.MaxHp;
+        int currentMax = SimulatedOstyMaxHp(osty, state);
         if (!created && state.IsAlive)
         {
             currentMax += amount;
@@ -122,7 +122,7 @@ internal sealed partial class SimulatedCombatState
         Creature osty = GetOsty(player)
             ?? throw new InvalidOperationException("治疗奥斯蒂时，玩家没有可供模拟的奥斯蒂实例。");
         SimCreatureState state = simulator.State.GetCreature(osty);
-        int maxHp = _simulatedOstyMaxHp?.GetValueOrDefault(osty) ?? state.MaxHp;
+        int maxHp = SimulatedOstyMaxHp(osty, state);
         state.CurrentHp = Math.Min(maxHp, state.CurrentHp + Math.Max(0, amount));
     }
 
@@ -131,9 +131,13 @@ internal sealed partial class SimulatedCombatState
         Creature? osty = GetOsty(player);
         if (osty == null)
             return 0;
-        return _simulatedOstyMaxHp?.GetValueOrDefault(osty)
-            ?? simulator.State.GetCreature(osty).MaxHp;
+        return SimulatedOstyMaxHp(osty, simulator.State.GetCreature(osty));
     }
+
+    // Each player's Osty has its own entry. A missing key means this Osty has not been resized in the branch
+    // yet, so its root max HP applies; GetValueOrDefault would return 0 once any other Osty has an entry.
+    private int SimulatedOstyMaxHp(Creature osty, SimCreatureState state)
+        => _simulatedOstyMaxHp != null && _simulatedOstyMaxHp.TryGetValue(osty, out int maxHp) ? maxHp : state.MaxHp;
 
     public bool IsOstyHittable(CombatPredictionSimulator simulator, Player player)
     {
