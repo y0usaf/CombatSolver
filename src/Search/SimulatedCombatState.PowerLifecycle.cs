@@ -29,6 +29,11 @@ internal sealed partial class SimulatedCombatState
     // Captured once and never mutated. Fork shares only this frozen root membership.
     private HashSet<CardModel>? _liveCardsAtSnapshot;
     private bool _swordSageCardsInitialized;
+    private bool _afflictionsNormalized;
+    private bool _hasRemovableAffliction;
+    private bool _hasTaintedAffliction;
+    private bool _hasSovereignBlade;
+    private bool _hasUncheckedEntryCard = true;
     private int? _lastNormalizedVitalSparkAmount;
     private ForkableSet<Creature>? _skillsPlayedThisTurn;
 
@@ -188,6 +193,9 @@ internal sealed partial class SimulatedCombatState
             _lastNormalizedVitalSparkAmount is int previousVitalSparkAmount
             && previousVitalSparkAmount != vitalSparkAmount;
         _lastNormalizedVitalSparkAmount = vitalSparkAmount;
+        if (!_hasUncheckedEntryCard && !_hasTaintedAffliction && !vitalSparkAmountChanged)
+            return;
+        bool anyTainted = false;
         IReadOnlyList<Player> players = Players;
         for (int playerIndex = 0; playerIndex < players.Count; playerIndex++)
         {
@@ -195,8 +203,13 @@ internal sealed partial class SimulatedCombatState
             Creature owner = player.Creature;
             // Vital Spark is owned by Infested Prism but its vanilla hooks afflict every player
             // Skill, not creatures on the Power owner's side.
-            foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).AllCards)
+            SimPlayerCombatState ps = simulator.State.GetPlayerCombatState(player);
+            for (int pileIndex = 0; pileIndex < 5; pileIndex++)
             {
+                IReadOnlyList<PredictedCard> cards = ps.GetPileByEnumerationIndex(pileIndex).Cards;
+                for (int cardIndex = 0; cardIndex < cards.Count; cardIndex++)
+                {
+                    PredictedCard card = cards[cardIndex];
                 // Root identity never changes. Both root and generated wrappers need
                 // this membership lookup only on their first normalization; the bit
                 // survives Fork, while a new Clone is independently inspected.
@@ -207,9 +220,13 @@ internal sealed partial class SimulatedCombatState
                     // VitalSparkPower.AfterRemoved 会清掉所有污染。
                     if (!hasVitalSpark)
                         card.ClearAffliction();
-                    // AfterPowerAmountChanged 会把所有污染拍平成新的数量，包括叠高了的那些。
-                    else if (vitalSparkAmountChanged && tainted.Amount != vitalSparkAmount)
-                        card.MutablePreview.Affliction!.Amount = vitalSparkAmount;
+                    else
+                    {
+                        anyTainted = true;
+                        // AfterPowerAmountChanged 会把所有污染拍平成新的数量，包括叠高了的那些。
+                        if (vitalSparkAmountChanged && tainted.Amount != vitalSparkAmount)
+                            card.MutablePreview.Affliction!.Amount = vitalSparkAmount;
+                    }
                     continue;
                 }
                 if (card.Preview.Affliction != null || !enteredCombat)
@@ -227,7 +244,8 @@ internal sealed partial class SimulatedCombatState
                     }
                     if (power is VitalSparkPower && card.Preview.Type == CardType.Skill)
                     {
-                        simulator.Afflict<Tainted>(card, vitalSparkAmount);
+                        if (simulator.Afflict<Tainted>(card, vitalSparkAmount) != null)
+                            anyTainted = true;
                         break;
                     }
                     if (power is SmoggyPower
@@ -240,12 +258,18 @@ internal sealed partial class SimulatedCombatState
                         break;
                     }
                 }
+                }
             }
         }
+        _hasUncheckedEntryCard = false;
+        _hasTaintedAffliction = anyTainted;
     }
 
     private void NormalizeSwordSageReplays(CombatPredictionSimulator simulator)
     {
+        if (_swordSageCardsInitialized && !_hasSovereignBlade)
+            return;
+        bool anyBlade = false;
         IReadOnlyList<Player> players = Players;
         for (int playerIndex = 0; playerIndex < players.Count; playerIndex++)
         {
@@ -258,25 +282,33 @@ internal sealed partial class SimulatedCombatState
                 : _rootPowerAmounts.GetValueOrDefault((player.Creature, typeof(SwordSagePower)));
             // Record zero bonuses too: a clone already present before the next Power
             // gain needs that delta, while a newly generated clone carries its bonus.
-            foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).AllCards)
+            SimPlayerCombatState ps = simulator.State.GetPlayerCombatState(player);
+            for (int pileIndex = 0; pileIndex < 5; pileIndex++)
             {
-                if (card.Preview is not SovereignBlade)
-                    continue;
-                _swordSageReplayBonuses ??= [];
-                if (!_swordSageReplayBonuses.TryGetValue(card, out int applied))
+                IReadOnlyList<PredictedCard> cards = ps.GetPileByEnumerationIndex(pileIndex).Cards;
+                for (int cardIndex = 0; cardIndex < cards.Count; cardIndex++)
                 {
-                    // A gameplay clone carries its source's replay state on entry. Later
-                    // power changes still affect that instance, just like every other blade.
-                    applied = _swordSageCardsInitialized && card.Preview.IsClone ? desired : rootAmount;
-                    _swordSageReplayBonuses.Add(card, applied);
+                    PredictedCard card = cards[cardIndex];
+                    if (card.Preview is not SovereignBlade)
+                        continue;
+                    anyBlade = true;
+                    _swordSageReplayBonuses ??= [];
+                    if (!_swordSageReplayBonuses.TryGetValue(card, out int applied))
+                    {
+                        // A gameplay clone carries its source's replay state on entry. Later
+                        // power changes still affect that instance, just like every other blade.
+                        applied = _swordSageCardsInitialized && card.Preview.IsClone ? desired : rootAmount;
+                        _swordSageReplayBonuses.Add(card, applied);
+                    }
+                    int delta = desired - applied;
+                    if (delta == 0)
+                        continue;
+                    card.MutablePreview.BaseReplayCount += delta;
+                    _swordSageReplayBonuses[card] = desired;
                 }
-                int delta = desired - applied;
-                if (delta == 0)
-                    continue;
-                card.MutablePreview.BaseReplayCount += delta;
-                _swordSageReplayBonuses[card] = desired;
             }
         }
+        _hasSovereignBlade = anyBlade;
         _swordSageCardsInitialized = true;
     }
 

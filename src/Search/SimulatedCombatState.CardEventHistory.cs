@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Models.Afflictions;
 using System.Text;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Combat.History.Entries;
@@ -44,6 +45,14 @@ internal sealed partial class SimulatedCombatState
 
     internal bool WasCardPlayFinishedBeforePrediction(CardPlay play)
         => _rootHistory.CardPlaysFinished.Any(entry => ReferenceEquals(entry.CardPlay, play));
+
+    public void RecordCardAfflicted(AfflictionModel affliction)
+    {
+        if (affliction is Hexed or Entangled or Ringing)
+            _hasRemovableAffliction = true;
+        else if (affliction is Tainted)
+            _hasTaintedAffliction = true;
+    }
 
     public void RecordCardExhausted(Creature actor)
         => (_cardsExhaustedThisTurn ??= [])[actor] = GetCardsExhaustedThisTurn(actor) + 1;

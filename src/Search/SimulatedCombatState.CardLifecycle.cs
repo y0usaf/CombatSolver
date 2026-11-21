@@ -350,10 +350,14 @@ internal sealed partial class SimulatedCombatState
 
     public MonologuePower[] CapturePendingMonologues(Creature owner)
     {
-        return EffectivePowers()
-            .OfType<MonologuePower>()
-            .Where(power => power.Amount > 0 && ReferenceEquals(power.Owner, owner))
-            .ToArray();
+        IReadOnlyList<PowerModel> powers = EffectivePowers();
+        List<MonologuePower>? found = null;
+        for (int i = 0; i < powers.Count; i++)
+        {
+            if (powers[i] is MonologuePower power && power.Amount > 0 && ReferenceEquals(power.Owner, owner))
+                (found ??= []).Add(power);
+        }
+        return found is null ? [] : found.ToArray();
     }
 
     public void ResolveMonologues(Creature owner, IReadOnlyList<MonologuePower> powers)
@@ -382,11 +386,18 @@ internal sealed partial class SimulatedCombatState
 
     public void SynchronizePanacheState(CombatPredictionSimulator simulator, Creature owner)
     {
-        foreach (PanachePower power in EffectivePowers()
-                     .OfType<PanachePower>()
-                     .Where(candidate => candidate.Amount > 0 && ReferenceEquals(candidate.Owner, owner))
-                     .ToArray())
+        IReadOnlyList<PowerModel> powers = EffectivePowers();
+        List<PanachePower>? found = null;
+        for (int i = 0; i < powers.Count; i++)
         {
+            if (powers[i] is PanachePower candidate && candidate.Amount > 0 && ReferenceEquals(candidate.Owner, owner))
+                (found ??= []).Add(candidate);
+        }
+        if (found is null)
+            return;
+        for (int i = 0; i < found.Count; i++)
+        {
+            PanachePower power = found[i];
             int cardsLeft = simulator.StateStore
                 .GetReadOnly(power, () => new PanachePredictionState(power))
                 .CardsLeft;

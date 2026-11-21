@@ -1589,30 +1589,58 @@ internal sealed partial class SimulatedCombatState
 
     public void NormalizeCardAfflictions(CombatPredictionSimulator simulator)
     {
-        foreach (Player player in Players)
+        IReadOnlyList<Player> players = Players;
+        bool anyRemovable = false;
+        bool mustScan = !_afflictionsNormalized || _hasRemovableAffliction;
+        for (int playerIndex = 0; playerIndex < players.Count; playerIndex++)
         {
+            Player player = players[playerIndex];
             int hex = GetAmount<HexPower>(player.Creature);
             int tangled = GetAmount<TangledPower>(player.Creature);
             int ringing = GetAmount<RingingPower>(player.Creature);
-            foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).AllCards)
+            if (!mustScan && hex <= 0 && tangled <= 0 && ringing <= 0)
+                continue;
+            SimPlayerCombatState ps = simulator.State.GetPlayerCombatState(player);
+            for (int pileIndex = 0; pileIndex < 5; pileIndex++)
             {
-                if (card.Preview.Affliction == null)
+                IReadOnlyList<PredictedCard> cards = ps.GetPileByEnumerationIndex(pileIndex).Cards;
+                for (int cardIndex = 0; cardIndex < cards.Count; cardIndex++)
                 {
-                    if (hex > 0)
-                        simulator.Afflict<Hexed>(card, hex);
-                    else if (tangled > 0 && card.Preview.Type == MegaCrit.Sts2.Core.Entities.Cards.CardType.Attack)
-                        simulator.Afflict<Entangled>(card, 1);
-                    else if (ringing > 0)
-                        simulator.Afflict<Ringing>(card, 1);
-                }
-                else if ((hex <= 0 && card.Preview.Affliction is Hexed)
-                         || (tangled <= 0 && card.Preview.Affliction is Entangled)
-                         || (ringing <= 0 && card.Preview.Affliction is Ringing))
-                {
-                    card.ClearAffliction();
+                    PredictedCard card = cards[cardIndex];
+                    AfflictionModel? affliction = card.Preview.Affliction;
+                    if (affliction == null)
+                    {
+                        if (hex > 0)
+                        {
+                            if (simulator.Afflict<Hexed>(card, hex) != null)
+                                anyRemovable = true;
+                        }
+                        else if (tangled > 0 && card.Preview.Type == MegaCrit.Sts2.Core.Entities.Cards.CardType.Attack)
+                        {
+                            if (simulator.Afflict<Entangled>(card, 1) != null)
+                                anyRemovable = true;
+                        }
+                        else if (ringing > 0)
+                        {
+                            if (simulator.Afflict<Ringing>(card, 1) != null)
+                                anyRemovable = true;
+                        }
+                    }
+                    else if ((hex <= 0 && affliction is Hexed)
+                             || (tangled <= 0 && affliction is Entangled)
+                             || (ringing <= 0 && affliction is Ringing))
+                    {
+                        card.ClearAffliction();
+                    }
+                    else if (affliction is Hexed or Entangled or Ringing)
+                    {
+                        anyRemovable = true;
+                    }
                 }
             }
         }
+        _afflictionsNormalized = true;
+        _hasRemovableAffliction = anyRemovable;
         NormalizePowerCardState(simulator);
     }
 
@@ -2439,6 +2467,13 @@ internal sealed partial class SimulatedCombatState
     {
         if (_registeredCombatCards?.Contains(card) != true)
             (_registeredCombatCards ??= []).Add(card);
+        _hasUncheckedEntryCard = true;
+        if (card.Preview is SovereignBlade)
+            _hasSovereignBlade = true;
+        if (card.Preview.Affliction is Hexed or Entangled or Ringing)
+            _hasRemovableAffliction = true;
+        else if (card.Preview.Affliction is Tainted)
+            _hasTaintedAffliction = true;
         if (_modHookSubscribers.HasBaseLibCardModifiers)
             card.EnableAttachedModelForkIsolation();
         ObserveCardMutations(card);
