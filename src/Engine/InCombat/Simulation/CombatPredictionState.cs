@@ -11,12 +11,18 @@ internal sealed class CombatPredictionState
 {
     public ICombatState CombatState { get; }
 
-    private readonly Dictionary<Creature, SimCreatureState> _creatures;
+    private const int SmallCreatureLimit = 8;
+
+    private SimCreatureState[]? _smallCreatures;
+    private int _smallCreatureCount;
+    private Dictionary<Creature, SimCreatureState>? _creaturesDict;
 
     // 绝大多数分叉里没有任何生物被移出预测名册。惰性建表让 Fork 少一次空 HashSet 分配。
     private HashSet<Creature>? _removedCreatures;
 
-    private readonly Dictionary<Player, SimPlayerCombatState> _playerCombatStates;
+    private Player? _singlePlayer;
+    private SimPlayerCombatState? _singlePlayerState;
+    private Dictionary<Player, SimPlayerCombatState>? _playerCombatStates;
     private HittableEnemyView? _hittableEnemies;
 
     private sealed class HittableEnemyView(CombatPredictionState owner) : IReadOnlyList<Creature>
@@ -26,9 +32,10 @@ internal sealed class CombatPredictionState
             get
             {
                 int count = 0;
-                foreach (Creature enemy in owner.CombatState.Enemies)
+                IReadOnlyList<Creature> enemies = owner.CombatState.Enemies;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    if (owner.IsHittable(enemy))
+                    if (owner.IsHittable(enemies[i]))
                         count++;
                 }
                 return count;
@@ -39,8 +46,10 @@ internal sealed class CombatPredictionState
         {
             get
             {
-                foreach (Creature enemy in owner.CombatState.Enemies)
+                IReadOnlyList<Creature> enemies = owner.CombatState.Enemies;
+                for (int i = 0; i < enemies.Count; i++)
                 {
+                    Creature enemy = enemies[i];
                     if (!owner.IsHittable(enemy))
                         continue;
                     if (index-- == 0)
@@ -52,8 +61,10 @@ internal sealed class CombatPredictionState
 
         public IEnumerator<Creature> GetEnumerator()
         {
-            foreach (Creature enemy in owner.CombatState.Enemies)
+            IReadOnlyList<Creature> enemies = owner.CombatState.Enemies;
+            for (int i = 0; i < enemies.Count; i++)
             {
+                Creature enemy = enemies[i];
                 if (owner.IsHittable(enemy))
                     yield return enemy;
             }
@@ -65,21 +76,27 @@ internal sealed class CombatPredictionState
     public CombatPredictionState(ICombatState combatState)
     {
         CombatState = combatState;
-        _creatures = [];
-        _playerCombatStates = [];
         if (combatState is ICombatPredictionStateOwner owner)
             owner.AttachPredictionState(this);
     }
 
     private CombatPredictionState(
         ICombatState combatState,
-        Dictionary<Creature, SimCreatureState> creatures,
+        SimCreatureState[]? smallCreatures,
+        int smallCreatureCount,
+        Dictionary<Creature, SimCreatureState>? creaturesDict,
         HashSet<Creature>? removedCreatures,
-        Dictionary<Player, SimPlayerCombatState> playerCombatStates)
+        Player? singlePlayer,
+        SimPlayerCombatState? singlePlayerState,
+        Dictionary<Player, SimPlayerCombatState>? playerCombatStates)
     {
         CombatState = combatState;
-        _creatures = creatures;
+        _smallCreatures = smallCreatures;
+        _smallCreatureCount = smallCreatureCount;
+        _creaturesDict = creaturesDict;
         _removedCreatures = removedCreatures;
+        _singlePlayer = singlePlayer;
+        _singlePlayerState = singlePlayerState;
         _playerCombatStates = playerCombatStates;
         if (combatState is ICombatPredictionStateOwner owner)
             owner.AttachPredictionState(this);
@@ -109,14 +126,55 @@ internal sealed class CombatPredictionState
 
     public SimCreatureState GetCreature(Creature creature)
     {
-        if (!_creatures.TryGetValue(creature, out var state))
+        if (_creaturesDict is { } dict)
         {
-            if (CombatState is ICombatPredictionRootCaptureBoundary boundary)
-                boundary.AssertCanCaptureCreature(creature);
-            state = new SimCreatureState(creature);
-            _creatures.Add(creature, state);
+            if (!dict.TryGetValue(creature, out var dictState))
+            {
+                if (CombatState is ICombatPredictionRootCaptureBoundary boundary)
+                    boundary.AssertCanCaptureCreature(creature);
+                dictState = new SimCreatureState(creature);
+                dict.Add(creature, dictState);
+            }
+            return dictState;
         }
-
+        SimCreatureState[]? small = _smallCreatures;
+        int count = _smallCreatureCount;
+        if (small is not null)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (ReferenceEquals(small[i].Creature, creature))
+                    return small[i];
+            }
+        }
+        if (CombatState is ICombatPredictionRootCaptureBoundary rootBoundary)
+            rootBoundary.AssertCanCaptureCreature(creature);
+        var state = new SimCreatureState(creature);
+        if (count < SmallCreatureLimit)
+        {
+            if (small is null)
+            {
+                small = new SimCreatureState[4];
+                _smallCreatures = small;
+            }
+            else if (count >= small.Length)
+            {
+                Array.Resize(ref small, SmallCreatureLimit);
+                _smallCreatures = small;
+            }
+            small[count] = state;
+            _smallCreatureCount = count + 1;
+        }
+        else
+        {
+            var newDict = new Dictionary<Creature, SimCreatureState>(count + 1);
+            for (int i = 0; i < count; i++)
+                newDict.Add(small![i].Creature, small[i]);
+            newDict.Add(creature, state);
+            _creaturesDict = newDict;
+            _smallCreatures = null;
+            _smallCreatureCount = 0;
+        }
         return state;
     }
 
@@ -178,16 +236,41 @@ internal sealed class CombatPredictionState
 
     public SimPlayerCombatState GetPlayerCombatState(Player player)
     {
-        if (!_playerCombatStates.TryGetValue(player, out var state))
+        if (_playerCombatStates is { } dict)
         {
-            if (CombatState is ICombatPredictionRootCaptureBoundary boundary)
-                boundary.AssertCanCapturePlayer(player);
-            var liveState = player.PlayerCombatState
-                ?? throw new InvalidOperationException($"Player {player.Creature.Name} has no combat state to simulate.");
-            state = new SimPlayerCombatState(liveState);
-            _playerCombatStates.Add(player, state);
+            if (!dict.TryGetValue(player, out var dictState))
+            {
+                if (CombatState is ICombatPredictionRootCaptureBoundary boundary)
+                    boundary.AssertCanCapturePlayer(player);
+                var liveState = player.PlayerCombatState
+                    ?? throw new InvalidOperationException($"Player {player.Creature.Name} has no combat state to simulate.");
+                dictState = new SimPlayerCombatState(liveState);
+                dict.Add(player, dictState);
+            }
+            return dictState;
         }
-
+        if (ReferenceEquals(_singlePlayer, player))
+            return _singlePlayerState!;
+        if (CombatState is ICombatPredictionRootCaptureBoundary rootBoundary)
+            rootBoundary.AssertCanCapturePlayer(player);
+        var live = player.PlayerCombatState
+            ?? throw new InvalidOperationException($"Player {player.Creature.Name} has no combat state to simulate.");
+        var state = new SimPlayerCombatState(live);
+        if (_singlePlayer is null)
+        {
+            _singlePlayer = player;
+            _singlePlayerState = state;
+        }
+        else
+        {
+            _playerCombatStates = new Dictionary<Player, SimPlayerCombatState>(2)
+            {
+                [_singlePlayer] = _singlePlayerState!,
+                [player] = state,
+            };
+            _singlePlayer = null;
+            _singlePlayerState = null;
+        }
         return state;
     }
 
@@ -225,13 +308,36 @@ internal sealed class CombatPredictionState
 
     internal CombatPredictionState Fork(PredictionForkContext context)
     {
-        Dictionary<Creature, SimCreatureState> creatures = new(_creatures.Count);
-        foreach ((Creature creature, SimCreatureState state) in _creatures)
-            creatures.Add(creature, state.Fork(context));
+        SimCreatureState[]? smallCreatures = null;
+        int smallCreatureCount = _smallCreatureCount;
+        Dictionary<Creature, SimCreatureState>? creaturesDict = null;
+        if (_creaturesDict is not null)
+        {
+            creaturesDict = new Dictionary<Creature, SimCreatureState>(_creaturesDict.Count);
+            foreach ((Creature creature, SimCreatureState state) in _creaturesDict)
+                creaturesDict.Add(creature, state.Fork(context));
+        }
+        else if (_smallCreatures is not null && smallCreatureCount > 0)
+        {
+            smallCreatures = new SimCreatureState[smallCreatureCount];
+            for (int i = 0; i < smallCreatureCount; i++)
+                smallCreatures[i] = _smallCreatures[i].Fork(context);
+        }
 
-        Dictionary<Player, SimPlayerCombatState> players = new(_playerCombatStates.Count);
-        foreach ((Player player, SimPlayerCombatState state) in _playerCombatStates)
-            players.Add(player, state.Fork(context));
+        Player? singlePlayer = null;
+        SimPlayerCombatState? singlePlayerState = null;
+        Dictionary<Player, SimPlayerCombatState>? players = null;
+        if (_playerCombatStates is not null)
+        {
+            players = new Dictionary<Player, SimPlayerCombatState>(_playerCombatStates.Count);
+            foreach ((Player player, SimPlayerCombatState state) in _playerCombatStates)
+                players.Add(player, state.Fork(context));
+        }
+        else if (_singlePlayer is not null)
+        {
+            singlePlayer = _singlePlayer;
+            singlePlayerState = _singlePlayerState!.Fork(context);
+        }
 
         if (CombatState is not ICombatPredictionForkableState forkableCombatState)
         {
@@ -242,8 +348,12 @@ internal sealed class CombatPredictionState
         ICombatState combatState = forkableCombatState.Fork(context);
         CombatPredictionState fork = new(
             combatState,
-            creatures,
-            _removedCreatures is null ? null : new HashSet<Creature>(_removedCreatures),
+            smallCreatures,
+            smallCreatureCount,
+            creaturesDict,
+            _removedCreatures is { Count: > 0 } ? new HashSet<Creature>(_removedCreatures) : null,
+            singlePlayer,
+            singlePlayerState,
             players);
         context.Register(this, fork);
         return fork;

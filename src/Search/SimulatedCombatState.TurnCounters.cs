@@ -38,7 +38,7 @@ internal sealed partial class SimulatedCombatState
     [InlineArray(14)]
     private struct CreatureCounterValues
     {
-        private int _element0;
+        private ushort _element0;
     }
 
     [InlineArray(4)]
@@ -68,7 +68,7 @@ internal sealed partial class SimulatedCombatState
         {
             int idx = (int)counter;
             PresentMask |= (ushort)(1 << idx);
-            Values[idx] = value;
+            Values[idx] = (ushort)Math.Clamp(value, 0, ushort.MaxValue);
         }
 
         public readonly bool Equals(CreatureTurnCounterBag other)

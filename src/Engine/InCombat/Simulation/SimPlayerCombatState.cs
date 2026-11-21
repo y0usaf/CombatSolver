@@ -16,18 +16,19 @@ internal sealed class SimPlayerCombatState
     private SimCardPile? _exhaustPile;
     private SimCardPile? _playPile;
     private SimCardPile[]? _allPiles;
+    private bool _materialized;
 
     public SimOrbQueue OrbQueue => _orbQueue ??= new SimOrbQueue(_liveState.OrbQueue);
 
-    public SimCardPile Hand => _hand ??= new SimCardPile(_liveState.Hand);
+    public SimCardPile Hand => _hand ??= _materialized ? new SimCardPile(PileType.Hand) : new SimCardPile(_liveState.Hand);
 
-    public SimCardPile DrawPile => _drawPile ??= new SimCardPile(_liveState.DrawPile);
+    public SimCardPile DrawPile => _drawPile ??= _materialized ? new SimCardPile(PileType.Draw) : new SimCardPile(_liveState.DrawPile);
 
-    public SimCardPile DiscardPile => _discardPile ??= new SimCardPile(_liveState.DiscardPile);
+    public SimCardPile DiscardPile => _discardPile ??= _materialized ? new SimCardPile(PileType.Discard) : new SimCardPile(_liveState.DiscardPile);
 
-    public SimCardPile ExhaustPile => _exhaustPile ??= new SimCardPile(_liveState.ExhaustPile);
+    public SimCardPile ExhaustPile => _exhaustPile ??= _materialized ? new SimCardPile(PileType.Exhaust) : new SimCardPile(_liveState.ExhaustPile);
 
-    public SimCardPile PlayPile => _playPile ??= new SimCardPile(_liveState.PlayPile);
+    public SimCardPile PlayPile => _playPile ??= _materialized ? new SimCardPile(PileType.Play) : new SimCardPile(_liveState.PlayPile);
 
     public IReadOnlyList<SimCardPile> AllPiles
         => _allPiles ??= [Hand, DrawPile, DiscardPile, ExhaustPile, PlayPile];
@@ -68,7 +69,10 @@ internal sealed class SimPlayerCombatState
                 return true;
             while (++_pileIndex < 5)
             {
-                _cards = _state.GetPileByEnumerationIndex(_pileIndex).GetEnumerator();
+                SimCardPile? pile = _state.TryGetNonEmptyPileByEnumerationIndex(_pileIndex);
+                if (pile is null)
+                    continue;
+                _cards = pile.GetEnumerator();
                 if (_cards.MoveNext())
                     return true;
             }
@@ -114,7 +118,31 @@ internal sealed class SimPlayerCombatState
         return null;
     }
 
-    private SimCardPile GetPileByEnumerationIndex(int index)
+    internal SimCardPile? TryGetNonEmptyPileByEnumerationIndex(int index)
+    {
+        switch (index)
+        {
+            case 0:
+                if (_hand is not null) return _hand.IsEmpty ? null : _hand;
+                return _materialized || _liveState.Hand.Cards.Count == 0 ? null : Hand;
+            case 1:
+                if (_drawPile is not null) return _drawPile.IsEmpty ? null : _drawPile;
+                return _materialized || _liveState.DrawPile.Cards.Count == 0 ? null : DrawPile;
+            case 2:
+                if (_discardPile is not null) return _discardPile.IsEmpty ? null : _discardPile;
+                return _materialized || _liveState.DiscardPile.Cards.Count == 0 ? null : DiscardPile;
+            case 3:
+                if (_exhaustPile is not null) return _exhaustPile.IsEmpty ? null : _exhaustPile;
+                return _materialized || _liveState.ExhaustPile.Cards.Count == 0 ? null : ExhaustPile;
+            case 4:
+                if (_playPile is not null) return _playPile.IsEmpty ? null : _playPile;
+                return _materialized || _liveState.PlayPile.Cards.Count == 0 ? null : PlayPile;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(index), index, "Unknown combat-pile index.");
+        }
+    }
+
+    internal SimCardPile GetPileByEnumerationIndex(int index)
         => index switch
         {
             0 => Hand,
@@ -178,6 +206,16 @@ internal sealed class SimPlayerCombatState
         _ = OrbQueue;
         foreach (PredictedCard card in AllCards)
             card.MaterializePreview();
+        _materialized = true;
+    }
+
+    private SimCardPile? ForkPile(SimCardPile? pile, CardPile livePile, PredictionForkContext context)
+    {
+        if (pile is null)
+            return null;
+        if (pile.IsEmpty && (_materialized || livePile.Cards.Count == 0))
+            return null;
+        return pile.Fork(context);
     }
 
     internal SimPlayerCombatState Fork(PredictionForkContext context)
@@ -186,12 +224,13 @@ internal sealed class SimPlayerCombatState
         {
             Phase = Phase,
             HooksActive = HooksActive,
+            _materialized = _materialized,
             _orbQueue = _orbQueue?.Fork(context),
-            _hand = _hand?.Fork(context),
-            _drawPile = _drawPile?.Fork(context),
-            _discardPile = _discardPile?.Fork(context),
-            _exhaustPile = _exhaustPile?.Fork(context),
-            _playPile = _playPile?.Fork(context)
+            _hand = ForkPile(_hand, _liveState.Hand, context),
+            _drawPile = ForkPile(_drawPile, _liveState.DrawPile, context),
+            _discardPile = ForkPile(_discardPile, _liveState.DiscardPile, context),
+            _exhaustPile = ForkPile(_exhaustPile, _liveState.ExhaustPile, context),
+            _playPile = ForkPile(_playPile, _liveState.PlayPile, context)
         };
         context.Register(this, fork);
         return fork;
