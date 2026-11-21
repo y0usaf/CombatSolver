@@ -59,9 +59,7 @@ internal sealed partial class SimulatedCombatState
             _swordSageCardsInitialized = _swordSageCardsInitialized,
             _afflictionsNormalized = _afflictionsNormalized,
             _hasRemovableAffliction = _hasRemovableAffliction,
-            _hasTaintedAffliction = _hasTaintedAffliction,
             _hasSovereignBlade = _hasSovereignBlade,
-            _hasUncheckedEntryCard = _hasUncheckedEntryCard,
             _lastNormalizedVitalSparkAmount = _lastNormalizedVitalSparkAmount,
             _skillsPlayedThisTurn = _skillsPlayedThisTurn?.Fork(),
             _potionSlots = _potionSlots?.Fork(),
@@ -95,38 +93,10 @@ internal sealed partial class SimulatedCombatState
         }
         if (_powers is not null)
         {
-            bool allShareable = true;
-            foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature _, Type _), PowerEntry entry) in _powers)
-            {
-                if (!IsCowShareablePower(entry.Power))
-                {
-                    allShareable = false;
-                    break;
-                }
-            }
-            if (allShareable)
-            {
-                foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature _, Type _), PowerEntry entry) in _powers)
-                    entry.Shared = true;
-                fork._powers = _powers.Fork();
-            }
-            else
-            {
-                ForkableDictionary<(MegaCrit.Sts2.Core.Entities.Creatures.Creature Owner, Type Type), PowerEntry> forkedPowers = new();
-                foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature owner, Type type), PowerEntry entry) in _powers)
-                {
-                    if (IsCowShareablePower(entry.Power))
-                    {
-                        entry.Shared = true;
-                        forkedPowers.Add((owner, type), entry);
-                    }
-                    else
-                    {
-                        forkedPowers.Add((owner, type), new PowerEntry(ForkPower(entry.Power, context)));
-                    }
-                }
-                fork._powers = forkedPowers;
-            }
+            ForkableDictionary<(MegaCrit.Sts2.Core.Entities.Creatures.Creature Owner, Type Type), PowerModel> forkedPowers = new();
+            foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature owner, Type type), PowerModel power) in _powers)
+                forkedPowers.Add((owner, type), ForkPower(power, context));
+            fork._powers = forkedPowers;
         }
         if (_powerListenerOrder is not null)
         {

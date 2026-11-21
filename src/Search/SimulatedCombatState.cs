@@ -198,13 +198,7 @@ internal sealed partial class SimulatedCombatState
         Explode,
     }
 
-    private sealed class PowerEntry(PowerModel power)
-    {
-        public PowerModel Power = power;
-        public volatile bool Shared;
-    }
-
-    private ForkableDictionary<(Creature Owner, Type Type), PowerEntry>? _powers;
+    private ForkableDictionary<(Creature Owner, Type Type), PowerModel>? _powers;
     private ForkableList<PowerModel>? _powerListenerOrder;
     private ForkableSet<(Creature Owner, Type Type)>? _retiredRootPowerSlots;
     private Dictionary<PowerModel, PowerModel>? _rootMultiInstancePowerClones;
@@ -873,8 +867,8 @@ internal sealed partial class SimulatedCombatState
     {
         if (CanonicalModels.Power<T>().InstanceType == MegaCrit.Sts2.Core.Entities.Powers.PowerInstanceType.Instanced)
             return GetPower<T>(target)?.Amount ?? 0;
-        if (_powers != null && _powers.TryGetValue((target, typeof(T)), out PowerEntry? entry))
-            return entry.Power.Amount;
+        if (_powers != null && _powers.TryGetValue((target, typeof(T)), out PowerModel? power))
+            return power.Amount;
         if (_rootCreatures.Contains(target))
             return 0;
         return target.GetPower<T>()?.Amount ?? 0;
@@ -884,8 +878,8 @@ internal sealed partial class SimulatedCombatState
     {
         if (CanonicalModels.Power<T>().InstanceType == MegaCrit.Sts2.Core.Entities.Powers.PowerInstanceType.Instanced)
             return EffectivePowers().OfType<T>().FirstOrDefault(power => ReferenceEquals(power.Owner, target));
-        if (_powers != null && _powers.TryGetValue((target, typeof(T)), out PowerEntry? entry))
-            return (T)entry.Power;
+        if (_powers != null && _powers.TryGetValue((target, typeof(T)), out PowerModel? power))
+            return (T)power;
         if (_rootCreatures.Contains(target))
             return null;
         return target.GetPower<T>();
@@ -981,16 +975,16 @@ internal sealed partial class SimulatedCombatState
         }
 
         (Creature, Type) key = (power.Owner, power.GetType());
-        if (_powers != null && _powers.TryGetValue(key, out PowerEntry? existingEntry))
-            return EnsureWritablePower(key, existingEntry);
+        if (_powers != null && _powers.TryGetValue(key, out PowerModel? simulated))
+            return simulated;
 
-        PowerModel simulated = PredictionUtils.CloneModelForSimulation(power);
+        simulated = PredictionUtils.CloneModelForSimulation(power);
         simulated._owner = power.Owner;
         simulated._applier = power.Applier;
         simulated._target = power.Target;
         simulated._amount = power.Amount;
         simulated.AmountOnTurnStart = power.AmountOnTurnStart;
-        (_powers ??= []).Add(key, new PowerEntry(simulated));
+        (_powers ??= []).Add(key, simulated);
         UpdatePowerListenerOrder(simulated, 0, simulated._amount);
         InvalidateHookListeners();
         return simulated;
@@ -1081,63 +1075,14 @@ internal sealed partial class SimulatedCombatState
         return incoming;
     }
 
-    private static bool IsCowShareablePower(PowerModel power)
-        => power is StrengthPower
-            or WeakPower
-            or VulnerablePower
-            or DexterityPower
-            or FrailPower
-            or PoisonPower
-            or ArtifactPower
-            or ThornsPower
-            or RitualPower
-            or FeelNoPainPower
-            or BarricadePower
-            or BlurPower
-            or FocusPower
-            or IntangiblePower
-            or DoomPower
-            or DarkEmbracePower
-            or NoxiousFumesPower
-            or AccuracyPower
-            or EnvenomPower
-            or JuggernautPower
-            or RupturePower
-            or CorruptionPower
-            or DemonFormPower
-            or EnergyNextTurnPower
-            or ReattachPower;
-
-    private PowerModel EnsureWritablePower((Creature Owner, Type Type) key, PowerEntry entry)
-    {
-        if (!entry.Shared)
-            return entry.Power;
-        PowerModel oldPower = entry.Power;
-        PowerModel cloned = PredictionUtils.CloneModelForSimulation(oldPower);
-        cloned._owner = oldPower.Owner;
-        cloned._applier = oldPower.Applier;
-        cloned._target = oldPower.Target;
-        cloned._amount = oldPower.Amount;
-        cloned.AmountOnTurnStart = oldPower.AmountOnTurnStart;
-        (_powers ??= [])[key] = new PowerEntry(cloned);
-        if (_powerListenerOrder is not null)
-        {
-            int idx = _powerListenerOrder.IndexOf(oldPower);
-            if (idx >= 0)
-                _powerListenerOrder[idx] = cloned;
-        }
-        InvalidateHookListeners();
-        return cloned;
-    }
-
     private PowerModel GetOrCreatePower<T>(Creature target, T prototype, Creature? applier)
         where T : PowerModel
     {
         (Creature, Type) key = (target, typeof(T));
-        PowerEntry? existingEntry = null;
-        bool captured = _powers != null && _powers.TryGetValue(key, out existingEntry);
-        if (captured && existingEntry!.Power.Amount != 0)
-            return EnsureWritablePower(key, existingEntry);
+        PowerModel? existing = null;
+        bool captured = _powers != null && _powers.TryGetValue(key, out existing);
+        if (captured && existing!.Amount != 0)
+            return existing;
 
         // A removed power is acquired as a fresh native instance, including its private
         // counters and turn-start amount. The old instance remains owned by prior hooks.
@@ -1151,7 +1096,7 @@ internal sealed partial class SimulatedCombatState
         simulated._amount = existingPower?.Amount ?? 0;
         if (existingPower == null)
             simulated.AmountOnTurnStart = 0;
-        (_powers ??= [])[key] = new PowerEntry(simulated);
+        (_powers ??= [])[key] = simulated;
         InvalidateHookListeners();
         return simulated;
     }
@@ -1172,7 +1117,7 @@ internal sealed partial class SimulatedCombatState
         {
             _powerListenerOrder?.Remove(power);
             var key = (power.Owner, power.GetType());
-            if (_powers?.GetValueOrDefault(key)?.Power == power && _rootPowerAmounts.ContainsKey(key))
+            if (_powers?.GetValueOrDefault(key) == power && _rootPowerAmounts.ContainsKey(key))
                 (_retiredRootPowerSlots ??= []).Add(key);
         }
     }
@@ -2045,7 +1990,7 @@ internal sealed partial class SimulatedCombatState
                 continue;
 
             PowerModel effective = _rootMultiInstancePowerClones?.GetValueOrDefault(power)
-                ?? _powers?.GetValueOrDefault((power.Owner, power.GetType()))?.Power
+                ?? _powers?.GetValueOrDefault((power.Owner, power.GetType()))
                 ?? power;
             if (effective.Amount != 0)
                 listeners.Add(effective);
@@ -2515,13 +2460,10 @@ internal sealed partial class SimulatedCombatState
     {
         if (_registeredCombatCards?.Contains(card) != true)
             (_registeredCombatCards ??= []).Add(card);
-        _hasUncheckedEntryCard = true;
         if (card.Preview is SovereignBlade)
             _hasSovereignBlade = true;
         if (card.Preview.Affliction is Hexed or Entangled or Ringing)
             _hasRemovableAffliction = true;
-        else if (card.Preview.Affliction is Tainted)
-            _hasTaintedAffliction = true;
         if (_modHookSubscribers.HasBaseLibCardModifiers)
             card.EnableAttachedModelForkIsolation();
         ObserveCardMutations(card);
