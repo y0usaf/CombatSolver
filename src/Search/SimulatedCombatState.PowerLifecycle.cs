@@ -106,18 +106,18 @@ internal sealed partial class SimulatedCombatState
     public void RecordSkillPlayed(Creature owner)
     {
         (_skillsPlayedThisTurn ??= []).Add(owner);
-        (_skillCardsPlayedThisTurn ??= [])[owner] = GetSkillCardsPlayedThisTurn(owner) + 1;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.SkillCardsPlayed, GetSkillCardsPlayedThisTurn(owner) + 1);
     }
 
     public int GetSkillCardsPlayedThisTurn(Creature owner)
     {
-        if (_skillCardsPlayedThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.SkillCardsPlayed, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Player.Creature == owner
             && entry.CardPlay.Card.Type == CardType.Skill);
-        (_skillCardsPlayedThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.SkillCardsPlayed, value);
         return value;
     }
 

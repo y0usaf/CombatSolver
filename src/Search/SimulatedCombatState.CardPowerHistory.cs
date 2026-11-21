@@ -12,7 +12,7 @@ namespace CombatSolver;
 internal sealed partial class SimulatedCombatState
 {
     public void RecordPoweredCardBlockGained(Creature owner)
-        => (_blockCardsPlayedThisTurn ??= [])[owner] = GetBlockCardsPlayedThisTurn(owner) + 1;
+        => SetCreatureTurnCounter(owner, CreatureTurnCounter.BlockCardsPlayed, GetBlockCardsPlayedThisTurn(owner) + 1);
 
     public void RecordCardPlayed(PredictedCard card)
     {
@@ -20,9 +20,9 @@ internal sealed partial class SimulatedCombatState
         Creature owner = card.Preview.Owner.Creature;
         if (card.Preview.Type == CardType.Attack)
         {
-            (_attacksPlayedThisTurn ??= [])[owner] = GetAttacksPlayedThisTurn(owner) + 1;
+            SetCreatureTurnCounter(owner, CreatureTurnCounter.AttacksPlayed, GetAttacksPlayedThisTurn(owner) + 1);
             if (card.Preview.Tags.Contains(CardTag.Shiv))
-                (_shivsPlayedThisTurn ??= [])[owner] = GetShivsPlayedThisTurn(owner) + 1;
+                SetCreatureTurnCounter(owner, CreatureTurnCounter.ShivsPlayed, GetShivsPlayedThisTurn(owner) + 1);
         }
         foreach (Creature creature in Creatures)
         {
@@ -63,37 +63,37 @@ internal sealed partial class SimulatedCombatState
 
     public int GetAttacksPlayedThisTurn(Creature owner)
     {
-        if (_attacksPlayedThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.AttacksPlayed, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Card.Type == CardType.Attack
             && entry.CardPlay.Player.Creature == owner);
-        (_attacksPlayedThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.AttacksPlayed, value);
         return value;
     }
 
     public int GetShivsPlayedThisTurn(Creature owner)
     {
-        if (_shivsPlayedThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.ShivsPlayed, out int value))
             return value;
         value = _rootHistory.CardPlaysFinished.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Card.Tags.Contains(CardTag.Shiv)
             && entry.CardPlay.Player.Creature == owner);
-        (_shivsPlayedThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.ShivsPlayed, value);
         return value;
     }
 
     public int GetBlockCardsPlayedThisTurn(Creature owner)
     {
-        if (_blockCardsPlayedThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.BlockCardsPlayed, out int value))
             return value;
         value = _rootHistory.BlockGained.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay?.Player.Creature == owner
             && entry.Props.IsCardOrMonsterMove());
-        (_blockCardsPlayedThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.BlockCardsPlayed, value);
         return value;
     }
 }
