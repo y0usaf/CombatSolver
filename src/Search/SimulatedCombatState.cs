@@ -223,27 +223,11 @@ internal sealed partial class SimulatedCombatState
     private ForkableDictionary<Creature, int>? _aeonglassWitherUpgradeCount;
     private ForkableDictionary<Creature, bool>? _nemesisShouldApplyIntangible;
     private ForkableDictionary<Creature, int>? _tenderCardsPlayed;
-    private ForkableDictionary<Creature, int>? _attacksPlayedThisTurn;
-    private ForkableDictionary<Creature, int>? _shivsPlayedThisTurn;
-    private ForkableDictionary<Creature, int>? _blockCardsPlayedThisTurn;
-    private ForkableDictionary<Creature, int>? _skillCardsPlayedThisTurn;
-    private ForkableDictionary<Creature, int>? _cardsExhaustedThisTurn;
     private ForkableSet<Creature>? _doomAppliersThisTurn;
     private ForkableSet<Creature>? _unblockedDamageThisTurn;
     private ForkableDictionary<Creature, int>? _cumulativeHpLost;
     private ForkableDictionary<Creature, int>? _recoveredHp;
     private ForkableDictionary<(Creature Dealer, Creature Receiver), int>? _poweredAttackHitsThisTurn;
-    private ForkableDictionary<Creature, int>? _cardsDiscardedThisTurn;
-    private ForkableDictionary<Creature, int>? _creatureAttacksThisTurn;
-    private ForkableDictionary<Player, int>? _energySpentThisTurn;
-    private ForkableDictionary<Player, int>? _starsGainedThisTurn;
-    private ForkableDictionary<Player, int>? _nonHandDrawsThisTurn;
-    private ForkableDictionary<Player, int>? _statusCardsDrawnThisTurn;
-    private ForkableDictionary<Creature, int>? _cardPlaySeriesStartedThisTurn;
-    private ForkableDictionary<Creature, int>? _zeroCostAttackStartsThisTurn;
-    private ForkableDictionary<Creature, int>? _attackPlayStartsThisTurn;
-    private ForkableDictionary<Creature, int>? _cardPlayStartsThisTurn;
-    private ForkableDictionary<Creature, int>? _attackSkillStartsThisTurn;
     private ForkableDictionary<Player, int>? _playerTurnNumbers;
     private ForkableList<Creature> _allies;
     private ForkableList<Creature> _enemies;
@@ -1339,43 +1323,19 @@ internal sealed partial class SimulatedCombatState
         ResetCardLifecycleTurn(owner);
         if (owner.Player is { } melodyPlayer)
             _melodies?.Remove(melodyPlayer);
-        ResetTurnCounter(ref _attacksPlayedThisTurn, owner);
-        ResetTurnCounter(ref _shivsPlayedThisTurn, owner);
-        ResetTurnCounter(ref _blockCardsPlayedThisTurn, owner);
-        ResetTurnCounter(ref _skillCardsPlayedThisTurn, owner);
-        ResetTurnCounter(ref _cardsExhaustedThisTurn, owner);
-        ResetTurnCounter(ref _cardsDiscardedThisTurn, owner);
-        ResetTurnCounter(ref _creatureAttacksThisTurn, owner);
-        ResetTurnCounter(ref _cardPlaySeriesStartedThisTurn, owner);
-        ResetTurnCounter(ref _zeroCostAttackStartsThisTurn, owner);
-        ResetTurnCounter(ref _attackPlayStartsThisTurn, owner);
-        ResetTurnCounter(ref _cardPlayStartsThisTurn, owner);
-        ResetTurnCounter(ref _attackSkillStartsThisTurn, owner);
+        ResetAllCreatureTurnCounters(owner);
         if (owner.Player is { } ownerPlayer)
         {
-            ResetTurnCounter(ref _energySpentThisTurn, ownerPlayer);
-            ResetTurnCounter(ref _starsGainedThisTurn, ownerPlayer);
-            ResetTurnCounter(ref _nonHandDrawsThisTurn, ownerPlayer);
-            ResetTurnCounter(ref _statusCardsDrawnThisTurn, ownerPlayer);
+            ResetAllPlayerTurnCounters(ownerPlayer);
             // Osty is never a turn-start participant but acts during the player turn; reset its counters here.
             if (ownerPlayer.Osty is { } osty)
             {
-                ResetTurnCounter(ref _creatureAttacksThisTurn, osty);
+                ResetCreatureTurnCounter(osty, CreatureTurnCounter.CreatureAttacks);
                 RemovePoweredAttackHitsDealtBy(osty);
             }
         }
         _doomAppliersThisTurn?.Remove(owner);
         RemovePoweredAttackHitsDealtBy(owner);
-    }
-
-    private static void ResetTurnCounter<TKey>(ref ForkableDictionary<TKey, int>? counters, TKey owner)
-        where TKey : notnull
-    {
-        // An explicit zero shadows root history, so a missing entry must still be written.
-        // An existing zero needs no mutation and must not detach a shared Fork dictionary.
-        if (counters?.TryGetValue(owner, out int current) == true && current == 0)
-            return;
-        (counters ??= [])[owner] = 0;
     }
 
     private void TriggerBaseSideTurnStart(
@@ -2583,25 +2543,25 @@ internal sealed partial class SimulatedCombatState
         AddSteamEruptionPhases(ref fingerprint, _steamEruptionPhases);
         AddAeonglassCounters(ref fingerprint, 'A', _aeonglassAdditionalStrength, "AdditionalStrength");
         AddAeonglassCounters(ref fingerprint, 'W', _aeonglassWitherUpgradeCount, "WitherUpgradeCount");
-        AddCreatureIntMap(ref fingerprint, 'a', _attacksPlayedThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'j', _shivsPlayedThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'b', _blockCardsPlayedThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'l', _skillCardsPlayedThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'x', _cardsExhaustedThisTurn);
+        AddCreatureTurnCounterMap(ref fingerprint, 'a', CreatureTurnCounter.AttacksPlayed);
+        AddCreatureTurnCounterMap(ref fingerprint, 'j', CreatureTurnCounter.ShivsPlayed);
+        AddCreatureTurnCounterMap(ref fingerprint, 'b', CreatureTurnCounter.BlockCardsPlayed);
+        AddCreatureTurnCounterMap(ref fingerprint, 'l', CreatureTurnCounter.SkillCardsPlayed);
+        AddCreatureTurnCounterMap(ref fingerprint, 'x', CreatureTurnCounter.CardsExhausted);
         AddCreatureSet(ref fingerprint, 'd', _doomAppliersThisTurn);
         AddCreatureSet(ref fingerprint, 'L', _unblockedDamageThisTurn);
         AddPoweredAttackHits(ref fingerprint, _poweredAttackHitsThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'v', _cardsDiscardedThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'u', _creatureAttacksThisTurn);
-        AddPlayerIntMap(ref fingerprint, 'e', _energySpentThisTurn);
-        AddPlayerIntMap(ref fingerprint, 'z', _starsGainedThisTurn);
-        AddPlayerIntMap(ref fingerprint, 'n', _nonHandDrawsThisTurn);
-        AddPlayerIntMap(ref fingerprint, 's', _statusCardsDrawnThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'Q', _cardPlaySeriesStartedThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'q', _zeroCostAttackStartsThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'a', _attackPlayStartsThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'J', _cardPlayStartsThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'N', _attackSkillStartsThisTurn);
+        AddCreatureTurnCounterMap(ref fingerprint, 'v', CreatureTurnCounter.CardsDiscarded);
+        AddCreatureTurnCounterMap(ref fingerprint, 'u', CreatureTurnCounter.CreatureAttacks);
+        AddPlayerTurnCounterMap(ref fingerprint, 'e', PlayerTurnCounter.EnergySpent);
+        AddPlayerTurnCounterMap(ref fingerprint, 'z', PlayerTurnCounter.StarsGained);
+        AddPlayerTurnCounterMap(ref fingerprint, 'n', PlayerTurnCounter.NonHandDraws);
+        AddPlayerTurnCounterMap(ref fingerprint, 's', PlayerTurnCounter.StatusCardsDrawn);
+        AddCreatureTurnCounterMap(ref fingerprint, 'Q', CreatureTurnCounter.CardPlaySeriesStarted);
+        AddCreatureTurnCounterMap(ref fingerprint, 'q', CreatureTurnCounter.ZeroCostAttackStarts);
+        AddCreatureTurnCounterMap(ref fingerprint, 'a', CreatureTurnCounter.AttackPlayStarts);
+        AddCreatureTurnCounterMap(ref fingerprint, 'J', CreatureTurnCounter.CardPlayStarts);
+        AddCreatureTurnCounterMap(ref fingerprint, 'N', CreatureTurnCounter.AttackSkillStarts);
         AddCreatureIntMap(ref fingerprint, 'k', _knowledgeDemonCurseCounters);
         fingerprint.Add(HasPendingChoice);
         fingerprint.Add(_battlewornDummyTimedOut);

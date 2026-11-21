@@ -55,18 +55,18 @@ internal sealed partial class SimulatedCombatState
     }
 
     public void RecordCardExhausted(Creature actor)
-        => (_cardsExhaustedThisTurn ??= [])[actor] = GetCardsExhaustedThisTurn(actor) + 1;
+        => SetCreatureTurnCounter(actor, CreatureTurnCounter.CardsExhausted, GetCardsExhaustedThisTurn(actor) + 1);
 
     public void RecordCardDiscarded(Creature actor)
-        => (_cardsDiscardedThisTurn ??= [])[actor] = GetCardsDiscardedThisTurn(actor) + 1;
+        => SetCreatureTurnCounter(actor, CreatureTurnCounter.CardsDiscarded, GetCardsDiscardedThisTurn(actor) + 1);
 
     public void RecordCreatureAttacked(Creature actor)
-        => (_creatureAttacksThisTurn ??= [])[actor] = GetCreatureAttacksThisTurn(actor) + 1;
+        => SetCreatureTurnCounter(actor, CreatureTurnCounter.CreatureAttacks, GetCreatureAttacksThisTurn(actor) + 1);
 
     public void RecordEnergySpent(Player player, int amount)
     {
         if (amount > 0)
-            (_energySpentThisTurn ??= [])[player] = GetEnergySpentThisTurn(player) + amount;
+            SetPlayerTurnCounter(player, PlayerTurnCounter.EnergySpent, GetEnergySpentThisTurn(player) + amount);
     }
 
     public void AfterEnergySpent(
@@ -84,30 +84,29 @@ internal sealed partial class SimulatedCombatState
     public void RecordStarsGained(Player player, int amount)
     {
         if (amount > 0)
-            (_starsGainedThisTurn ??= [])[player] = GetStarsGainedThisTurn(player) + amount;
+            SetPlayerTurnCounter(player, PlayerTurnCounter.StarsGained, GetStarsGainedThisTurn(player) + amount);
     }
 
     public void RecordCardDrawn(PredictedCard card, bool fromHandDraw)
     {
         Player player = card.Preview.Owner;
         if (!fromHandDraw)
-            (_nonHandDrawsThisTurn ??= [])[player] = GetNonHandDrawsThisTurn(player) + 1;
+            SetPlayerTurnCounter(player, PlayerTurnCounter.NonHandDraws, GetNonHandDrawsThisTurn(player) + 1);
         if (card.Preview.Type == CardType.Status)
         {
-            (_statusCardsDrawnThisTurn ??= [])[player] =
-                GetStatusCardsDrawnThisTurn(player) + 1;
+            SetPlayerTurnCounter(player, PlayerTurnCounter.StatusCardsDrawn, GetStatusCardsDrawnThisTurn(player) + 1);
         }
     }
 
     public int GetStatusCardsDrawnThisTurn(Player player)
     {
-        if (_statusCardsDrawnThisTurn?.TryGetValue(player, out int value) == true)
+        if (TryGetPlayerTurnCounter(player, PlayerTurnCounter.StatusCardsDrawn, out int value))
             return value;
         value = _rootHistory.CardsDrawn.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.Actor.Player == player
             && entry.Card.Type == CardType.Status);
-        (_statusCardsDrawnThisTurn ??= [])[player] = value;
+        SetPlayerTurnCounter(player, PlayerTurnCounter.StatusCardsDrawn, value);
         return value;
     }
 
@@ -286,67 +285,67 @@ internal sealed partial class SimulatedCombatState
 
     public int GetCardsDiscardedThisTurn(Creature actor)
     {
-        if (_cardsDiscardedThisTurn?.TryGetValue(actor, out int value) == true)
+        if (TryGetCreatureTurnCounter(actor, CreatureTurnCounter.CardsDiscarded, out int value))
             return value;
         value = _rootHistory.CardsDiscarded.Count(entry =>
             entry.HappenedThisTurn(this) && entry.Actor == actor);
-        (_cardsDiscardedThisTurn ??= [])[actor] = value;
+        SetCreatureTurnCounter(actor, CreatureTurnCounter.CardsDiscarded, value);
         return value;
     }
 
     public int GetCreatureAttacksThisTurn(Creature actor)
     {
-        if (_creatureAttacksThisTurn?.TryGetValue(actor, out int value) == true)
+        if (TryGetCreatureTurnCounter(actor, CreatureTurnCounter.CreatureAttacks, out int value))
             return value;
         value = _rootHistory.CreatureAttacked.Count(entry =>
             entry.HappenedThisTurn(this) && entry.Actor == actor);
-        (_creatureAttacksThisTurn ??= [])[actor] = value;
+        SetCreatureTurnCounter(actor, CreatureTurnCounter.CreatureAttacks, value);
         return value;
     }
 
     public int GetEnergySpentThisTurn(Player player)
     {
-        if (_energySpentThisTurn?.TryGetValue(player, out int value) == true)
+        if (TryGetPlayerTurnCounter(player, PlayerTurnCounter.EnergySpent, out int value))
             return value;
         value = _rootHistory.EnergySpent
             .Where(entry => entry.HappenedThisTurn(this) && entry.Actor.Player == player)
             .Sum(entry => entry.Amount);
-        (_energySpentThisTurn ??= [])[player] = value;
+        SetPlayerTurnCounter(player, PlayerTurnCounter.EnergySpent, value);
         return value;
     }
 
     public int GetStarsGainedThisTurn(Player player)
     {
-        if (_starsGainedThisTurn?.TryGetValue(player, out int value) == true)
+        if (TryGetPlayerTurnCounter(player, PlayerTurnCounter.StarsGained, out int value))
             return value;
         value = _rootHistory.StarsModified
             .Where(entry => entry.HappenedThisTurn(this)
                 && entry.Actor.Player == player
                 && entry.Amount > 0)
             .Sum(entry => entry.Amount);
-        (_starsGainedThisTurn ??= [])[player] = value;
+        SetPlayerTurnCounter(player, PlayerTurnCounter.StarsGained, value);
         return value;
     }
 
     public int GetNonHandDrawsThisTurn(Player player)
     {
-        if (_nonHandDrawsThisTurn?.TryGetValue(player, out int value) == true)
+        if (TryGetPlayerTurnCounter(player, PlayerTurnCounter.NonHandDraws, out int value))
             return value;
         value = _rootHistory.CardsDrawn.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.Actor.Player == player
             && !entry.FromHandDraw);
-        (_nonHandDrawsThisTurn ??= [])[player] = value;
+        SetPlayerTurnCounter(player, PlayerTurnCounter.NonHandDraws, value);
         return value;
     }
 
     private int GetCardsExhaustedThisTurn(Creature actor)
     {
-        if (_cardsExhaustedThisTurn?.TryGetValue(actor, out int value) == true)
+        if (TryGetCreatureTurnCounter(actor, CreatureTurnCounter.CardsExhausted, out int value))
             return value;
         value = _rootHistory.CardsExhausted.Count(entry =>
             entry.HappenedThisTurn(this) && entry.Actor == actor);
-        (_cardsExhaustedThisTurn ??= [])[actor] = value;
+        SetCreatureTurnCounter(actor, CreatureTurnCounter.CardsExhausted, value);
         return value;
     }
 

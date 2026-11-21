@@ -20,8 +20,6 @@ internal sealed partial class SimulatedCombatState
     private ForkableDictionary<Player, Creature>? _simulatedOsties;
     private ForkableDictionary<Creature, int>? _simulatedOstyMaxHp;
     private HashSet<PredictedCard>? _returnToHandNextTurn;
-    private ForkableDictionary<Creature, int>? _cardsPlayedThisTurn;
-    private ForkableDictionary<Creature, int>? _manualCardsPlayedThisTurn;
     private ForkableSet<CardModel>? _fetchCardsPlayedThisTurn;
     private ISet<uint>? _activeCardExecutionDeaths;
     private int _cardExecutionScopeDepth;
@@ -154,7 +152,7 @@ internal sealed partial class SimulatedCombatState
     public void RecordCardLifecycle(CombatPredictionSimulator simulator, PredictedCard card)
     {
         Creature owner = card.Preview.Owner.Creature;
-        (_cardsPlayedThisTurn ??= [])[owner] = GetCardsPlayedThisTurn(owner) + 1;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.CardsPlayed, GetCardsPlayedThisTurn(owner) + 1);
         if (card.Preview is Fetch)
             GetFetchCardsPlayedThisTurn().Add(card.Original);
         RecordRelicCardPlayed(simulator, card.Preview.Owner, card.Preview);
@@ -209,47 +207,56 @@ internal sealed partial class SimulatedCombatState
     {
         RecordMelodyStarted(cardPlay);
         Creature owner = card.Preview.Owner.Creature;
-        (_cardPlayStartsThisTurn ??= [])[owner] = GetCardPlayStartsThisTurn(owner) + 1;
-        if (card.Preview.Type == CardType.Attack)
-            (_attackPlayStartsThisTurn ??= [])[owner] = GetAttackPlayStartsThisTurn(owner) + 1;
-        if (card.Preview.Type is CardType.Attack or CardType.Skill)
-            (_attackSkillStartsThisTurn ??= [])[owner] = GetAttackSkillStartsThisTurn(owner) + 1;
-        if (card.Preview.Type == CardType.Attack && cardPlay.Resources.EnergyValue == 0)
+        int cardPlayStarts = GetCardPlayStartsThisTurn(owner) + 1;
+        bool isAttack = card.Preview.Type == CardType.Attack;
+        bool isAttackOrSkill = card.Preview.Type is CardType.Attack or CardType.Skill;
+        bool isZeroCostAttack = isAttack && cardPlay.Resources.EnergyValue == 0;
+        int attackPlayStarts = isAttack ? GetAttackPlayStartsThisTurn(owner) + 1 : 0;
+        int attackSkillStarts = isAttackOrSkill ? GetAttackSkillStartsThisTurn(owner) + 1 : 0;
+        int zeroCostAttackStarts = isZeroCostAttack ? GetZeroCostAttackStartsThisTurn(owner) + 1 : 0;
+        int seriesStarted = cardPlay.IsFirstInSeries ? GetCardPlaySeriesStartedThisTurn(owner) + 1 : 0;
+        int manualPlayed = cardPlay.IsFirstInSeries && !cardPlay.IsAutoPlay ? GetManualCardsPlayedThisTurn(owner) + 1 : 0;
+
+        ForkableDictionary<Creature, CreatureTurnCounterBag> map = _creatureTurnCounters ??= [];
+        map.TryGetValue(owner, out CreatureTurnCounterBag bag);
+        bag.Set(CreatureTurnCounter.CardPlayStarts, cardPlayStarts);
+        if (isAttack)
+            bag.Set(CreatureTurnCounter.AttackPlayStarts, attackPlayStarts);
+        if (isAttackOrSkill)
+            bag.Set(CreatureTurnCounter.AttackSkillStarts, attackSkillStarts);
+        if (isZeroCostAttack)
+            bag.Set(CreatureTurnCounter.ZeroCostAttackStarts, zeroCostAttackStarts);
+        if (cardPlay.IsFirstInSeries)
         {
-            (_zeroCostAttackStartsThisTurn ??= [])[owner] =
-                GetZeroCostAttackStartsThisTurn(owner) + 1;
+            bag.Set(CreatureTurnCounter.CardPlaySeriesStarted, seriesStarted);
+            if (!cardPlay.IsAutoPlay)
+                bag.Set(CreatureTurnCounter.ManualCardsPlayed, manualPlayed);
         }
-        if (!cardPlay.IsFirstInSeries)
-            return;
-        (_cardPlaySeriesStartedThisTurn ??= [])[owner] = GetCardPlaySeriesStartedThisTurn(owner) + 1;
-        if (!cardPlay.IsAutoPlay)
-        {
-            (_manualCardsPlayedThisTurn ??= [])[owner] = GetManualCardsPlayedThisTurn(owner) + 1;
-        }
+        map[owner] = bag;
     }
 
     public int GetZeroCostAttackStartsThisTurn(Creature owner)
     {
-        if (_zeroCostAttackStartsThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.ZeroCostAttackStarts, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Player.Creature == owner
             && entry.CardPlay.Card.Type == CardType.Attack
             && entry.CardPlay.Resources.EnergyValue == 0);
-        (_zeroCostAttackStartsThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.ZeroCostAttackStarts, value);
         return value;
     }
 
     public int GetAttackPlayStartsThisTurn(Creature owner)
     {
-        if (_attackPlayStartsThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.AttackPlayStarts, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Player.Creature == owner
             && entry.CardPlay.Card.Type == CardType.Attack);
-        (_attackPlayStartsThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.AttackPlayStarts, value);
         return value;
     }
 
@@ -507,60 +514,60 @@ internal sealed partial class SimulatedCombatState
 
     public int GetCardsPlayedThisTurn(Creature owner)
     {
-        if (_cardsPlayedThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.CardsPlayed, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.IsFirstInSeries
             && entry.CardPlay.Player.Creature == owner);
-        (_cardsPlayedThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.CardsPlayed, value);
         return value;
     }
 
     public int GetCardPlayStartsThisTurn(Creature owner)
     {
-        if (_cardPlayStartsThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.CardPlayStarts, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this) && entry.CardPlay.Player.Creature == owner);
-        (_cardPlayStartsThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.CardPlayStarts, value);
         return value;
     }
 
     public int GetAttackSkillStartsThisTurn(Creature owner)
     {
-        if (_attackSkillStartsThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.AttackSkillStarts, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Player.Creature == owner
             && entry.CardPlay.Card.Type is CardType.Attack or CardType.Skill);
-        (_attackSkillStartsThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.AttackSkillStarts, value);
         return value;
     }
 
     public int GetManualCardsPlayedThisTurn(Creature owner)
     {
-        if (_manualCardsPlayedThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.ManualCardsPlayed, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.IsFirstInSeries
             && !entry.CardPlay.IsAutoPlay
             && entry.CardPlay.Player.Creature == owner);
-        (_manualCardsPlayedThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.ManualCardsPlayed, value);
         return value;
     }
 
     public int GetCardPlaySeriesStartedThisTurn(Creature owner)
     {
-        if (_cardPlaySeriesStartedThisTurn?.TryGetValue(owner, out int value) == true)
+        if (TryGetCreatureTurnCounter(owner, CreatureTurnCounter.CardPlaySeriesStarted, out int value))
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
             && entry.CardPlay.IsFirstInSeries
             && entry.CardPlay.Player.Creature == owner);
-        (_cardPlaySeriesStartedThisTurn ??= [])[owner] = value;
+        SetCreatureTurnCounter(owner, CreatureTurnCounter.CardPlaySeriesStarted, value);
         return value;
     }
 
@@ -579,8 +586,6 @@ internal sealed partial class SimulatedCombatState
 
     private void ResetCardLifecycleTurn(Creature owner)
     {
-        ResetTurnCounter(ref _cardsPlayedThisTurn, owner);
-        ResetTurnCounter(ref _manualCardsPlayedThisTurn, owner);
         _fetchCardsPlayedThisTurn?.Clear();
         ResetPowerLifecycleTurn(owner);
     }
@@ -589,8 +594,8 @@ internal sealed partial class SimulatedCombatState
         ref StateFingerprintBuilder fingerprint,
         CombatPredictionSimulator simulator)
     {
-        AddCreatureIntMap(ref fingerprint, 'c', _cardsPlayedThisTurn);
-        AddCreatureIntMap(ref fingerprint, 'm', _manualCardsPlayedThisTurn);
+        AddCreatureTurnCounterMap(ref fingerprint, 'c', CreatureTurnCounter.CardsPlayed);
+        AddCreatureTurnCounterMap(ref fingerprint, 'm', CreatureTurnCounter.ManualCardsPlayed);
         AddCreatureIntMap(ref fingerprint, 'o', _simulatedOstyMaxHp);
 
         ulong first = 0;
