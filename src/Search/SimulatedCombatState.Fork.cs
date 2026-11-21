@@ -94,14 +94,63 @@ internal sealed partial class SimulatedCombatState
         }
         if (_powers is not null)
         {
-            fork._powers = new Dictionary<(MegaCrit.Sts2.Core.Entities.Creatures.Creature Owner, Type Type), PowerModel>(
-                _powers.Count,
-                _powers.Comparer);
-            foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature owner, Type type), PowerModel power) in _powers)
-                fork._powers.Add((owner, type), ForkPower(power, context));
+            bool allShareable = true;
+            foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature _, Type _), PowerEntry entry) in _powers)
+            {
+                if (!IsCowShareablePower(entry.Power))
+                {
+                    allShareable = false;
+                    break;
+                }
+            }
+            if (allShareable)
+            {
+                foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature _, Type _), PowerEntry entry) in _powers)
+                    entry.Shared = true;
+                fork._powers = _powers.Fork();
+            }
+            else
+            {
+                ForkableDictionary<(MegaCrit.Sts2.Core.Entities.Creatures.Creature Owner, Type Type), PowerEntry> forkedPowers = new();
+                foreach (((MegaCrit.Sts2.Core.Entities.Creatures.Creature owner, Type type), PowerEntry entry) in _powers)
+                {
+                    if (IsCowShareablePower(entry.Power))
+                    {
+                        entry.Shared = true;
+                        forkedPowers.Add((owner, type), entry);
+                    }
+                    else
+                    {
+                        forkedPowers.Add((owner, type), new PowerEntry(ForkPower(entry.Power, context)));
+                    }
+                }
+                fork._powers = forkedPowers;
+            }
         }
         if (_powerListenerOrder is not null)
-            fork._powerListenerOrder = _powerListenerOrder.Select(context.RequireRemap).ToList();
+        {
+            bool anyRemapped = false;
+            for (int i = 0; i < _powerListenerOrder.Count; i++)
+            {
+                PowerModel pwr = _powerListenerOrder[i];
+                if (!ReferenceEquals(context.RemapOrSelf(pwr), pwr))
+                {
+                    anyRemapped = true;
+                    break;
+                }
+            }
+            if (!anyRemapped)
+            {
+                fork._powerListenerOrder = _powerListenerOrder.Fork();
+            }
+            else
+            {
+                ForkableList<PowerModel> remappedOrder = new();
+                for (int i = 0; i < _powerListenerOrder.Count; i++)
+                    remappedOrder.Add(context.RemapOrSelf(_powerListenerOrder[i]));
+                fork._powerListenerOrder = remappedOrder;
+            }
+        }
 
         if (_nightmareSelections is not null)
         {
@@ -177,11 +226,20 @@ internal sealed partial class SimulatedCombatState
 
         if (_baseHookListeners is not null)
         {
-            fork._baseHookListeners = _baseHookListeners is ConcatenatedListenerView baseView
+            if (_baseHookListeners is ConcatenatedListenerView baseView
                 && ReferenceEquals(baseView.Prefix, _baseHookListenerPrefix)
-                && fork._baseHookListenerPrefix is { } basePrefix
-                ? new ConcatenatedListenerView(basePrefix, RemapCachedModels(baseView.Suffix, context))
-                : RemapCachedModels(_baseHookListeners, context);
+                && fork._baseHookListenerPrefix is { } basePrefix)
+            {
+                IReadOnlyList<AbstractModel> remappedSuffix = RemapCachedModels(baseView.Suffix, context);
+                fork._baseHookListeners = ReferenceEquals(basePrefix, baseView.Prefix)
+                    && ReferenceEquals(remappedSuffix, baseView.Suffix)
+                    ? _baseHookListeners
+                    : new ConcatenatedListenerView(basePrefix, remappedSuffix);
+            }
+            else
+            {
+                fork._baseHookListeners = RemapCachedModels(_baseHookListeners, context);
+            }
         }
 
         if (_effectiveHookListeners is not null)
@@ -192,10 +250,15 @@ internal sealed partial class SimulatedCombatState
                 && _baseHookListeners is ConcatenatedListenerView baseView
                 && ReferenceEquals(effectiveView.Suffix, baseView.Suffix)
                 && fork._baseHookListeners is ConcatenatedListenerView forkedBase)
-                fork._effectiveHookListeners = new ConcatenatedListenerView(
-                    ReferenceEquals(effectiveView.Prefix, _effectiveHookListenerPrefix)
-                        && fork._effectiveHookListenerPrefix is { } effectivePrefix
-                        ? effectivePrefix : RemapCachedModels(effectiveView.Prefix, context), forkedBase.Suffix);
+            {
+                IReadOnlyList<AbstractModel> prefix = ReferenceEquals(effectiveView.Prefix, _effectiveHookListenerPrefix)
+                    && fork._effectiveHookListenerPrefix is { } effectivePrefix
+                    ? effectivePrefix : RemapCachedModels(effectiveView.Prefix, context);
+                fork._effectiveHookListeners = ReferenceEquals(prefix, effectiveView.Prefix)
+                    && ReferenceEquals(forkedBase.Suffix, effectiveView.Suffix)
+                    ? _effectiveHookListeners
+                    : new ConcatenatedListenerView(prefix, forkedBase.Suffix);
+            }
             else
                 fork._effectiveHookListeners = RemapCachedModels(_effectiveHookListeners, context);
         }
@@ -245,12 +308,19 @@ internal sealed partial class SimulatedCombatState
                 ? source : new ConcatenatedListenerView(prefix, suffix);
         }
         AbstractModel[]? remapped = null;
-        for (int index = 0; index < source.Count; index++)
+        int count = source.Count;
+        for (int index = 0; index < count; index++)
         {
-            AbstractModel mapped = context.RemapOrSelf(source[index]);
-            if (ReferenceEquals(mapped, source[index]))
+            AbstractModel item = source[index];
+            AbstractModel mapped = context.RemapOrSelf(item);
+            if (ReferenceEquals(mapped, item))
                 continue;
-            remapped ??= source.ToArray();
+            if (remapped is null)
+            {
+                remapped = new AbstractModel[count];
+                for (int j = 0; j < count; j++)
+                    remapped[j] = source[j];
+            }
             remapped[index] = mapped;
         }
         return remapped ?? source;
@@ -261,12 +331,19 @@ internal sealed partial class SimulatedCombatState
         PredictionForkContext context)
     {
         PowerModel[]? remapped = null;
-        for (int index = 0; index < source.Count; index++)
+        int count = source.Count;
+        for (int index = 0; index < count; index++)
         {
-            PowerModel mapped = context.RemapOrSelf(source[index]);
-            if (ReferenceEquals(mapped, source[index]))
+            PowerModel item = source[index];
+            PowerModel mapped = context.RemapOrSelf(item);
+            if (ReferenceEquals(mapped, item))
                 continue;
-            remapped ??= source.ToArray();
+            if (remapped is null)
+            {
+                remapped = new PowerModel[count];
+                for (int j = 0; j < count; j++)
+                    remapped[j] = source[j];
+            }
             remapped[index] = mapped;
         }
         return remapped ?? source;
