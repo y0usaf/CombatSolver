@@ -379,6 +379,8 @@ internal sealed partial class CombatPredictionSimulator
             card.MutablePreview.Affliction!._amount += (int)amount;
         }
 
+        if (State.CombatState is ICombatPredictionCardEventSink afflictionSink)
+            afflictionSink.RecordCardAfflicted(affliction);
         History.CardAfflicted(card, affliction);
         return card.Preview.Affliction;
     }

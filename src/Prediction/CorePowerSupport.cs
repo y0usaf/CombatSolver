@@ -31,10 +31,20 @@ internal static class CorePowerSupport
     {
         CardModel card = playedCard.Preview;
         Creature owner = playedCard.Preview.Owner.Creature;
-        bool targetDeathTriggersFatal = target == null
-            || combat.EffectivePowers()
-                .Where(power => power.Owner == target)
-                .All(power => power.ShouldOwnerDeathTriggerFatal());
+        bool targetDeathTriggersFatal = true;
+        if (target != null && card is Feed or HandOfGreed or TheHunt)
+        {
+            IReadOnlyList<PowerModel> prePowers = combat.EffectivePowers();
+            for (int i = 0; i < prePowers.Count; i++)
+            {
+                PowerModel power = prePowers[i];
+                if (ReferenceEquals(power.Owner, target) && !power.ShouldOwnerDeathTriggerFatal())
+                {
+                    targetDeathTriggersFatal = false;
+                    break;
+                }
+            }
+        }
         MonologuePower[] pendingMonologues = combat.CapturePendingMonologues(owner);
         CardOnPlaySupport.Apply(
             simulator,

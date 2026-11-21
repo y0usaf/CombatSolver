@@ -120,6 +120,7 @@ internal interface ICombatPredictionCardEventSink
     void RecordPoweredCardBlockGained(MegaCrit.Sts2.Core.Entities.Creatures.Creature cardOwner);
 
     void RecordCardExhausted(MegaCrit.Sts2.Core.Entities.Creatures.Creature actor);
+    void RecordCardAfflicted(MegaCrit.Sts2.Core.Models.AfflictionModel affliction);
 
     void RecordDamageReceived(
         MegaCrit.Sts2.Core.Entities.Creatures.Creature receiver,

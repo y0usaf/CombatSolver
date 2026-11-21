@@ -55,6 +55,22 @@ internal static class PowerLifecycleSupport
         PredictedCard card,
         int historyEntryStart)
     {
+        Creature owner = card.Preview.Owner.Creature;
+        IReadOnlyList<PowerModel> powers = combat.EffectivePowers();
+        List<PaleBlueDotPower>? dots = null;
+        for (int i = 0; i < powers.Count; i++)
+        {
+            if (powers[i] is PaleBlueDotPower power
+                && power.Amount > 0
+                && ReferenceEquals(power.Owner, owner)
+                && !combat.IsPaleBlueDotActivated(power))
+            {
+                (dots ??= []).Add(power);
+            }
+        }
+        if (dots is null)
+            return;
+
         CombatPredictionCardPlayStartedEntry? started = null;
         foreach (CombatPredictionHistoryEntry entry in simulator.History.EntriesFrom(historyEntryStart))
         {
@@ -69,16 +85,11 @@ internal static class PowerLifecycleSupport
         if (started == null)
             return;
 
-        Creature owner = card.Preview.Owner.Creature;
-        foreach (PaleBlueDotPower power in combat.EffectivePowers().OfType<PaleBlueDotPower>().ToArray())
+        if (combat.GetCardsPlayedThisTurn(owner) + 1 < PaleBlueDotPower.cardPlayThresholdValue)
+            return;
+        for (int i = 0; i < dots.Count; i++)
         {
-            if (power.Amount <= 0
-                || !ReferenceEquals(power.Owner, owner)
-                || combat.IsPaleBlueDotActivated(power)
-                || combat.GetCardsPlayedThisTurn(owner) + 1 < PaleBlueDotPower.cardPlayThresholdValue)
-            {
-                continue;
-            }
+            PaleBlueDotPower power = dots[i];
             combat.SetPaleBlueDotActivated(power, true);
             combat.Apply<DrawCardsNextTurnPower>(owner, power.Amount, owner);
         }
