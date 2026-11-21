@@ -24,8 +24,15 @@ internal sealed partial class SimulatedCombatState
             if (card.Preview.Tags.Contains(CardTag.Shiv))
                 SetCreatureTurnCounter(owner, CreatureTurnCounter.ShivsPlayed, GetShivsPlayedThisTurn(owner) + 1);
         }
-        foreach (Creature creature in Creatures)
+        ApplySlowOnCardPlayed(_allies);
+        ApplySlowOnCardPlayed(_enemies);
+    }
+
+    private void ApplySlowOnCardPlayed(ForkableList<Creature> roster)
+    {
+        for (int i = 0; i < roster.Count; i++)
         {
+            Creature creature = roster[i];
             SlowPower? slow = GetPower<SlowPower>(creature);
             if (slow == null || slow.Amount <= 0)
                 continue;

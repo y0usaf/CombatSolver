@@ -964,7 +964,16 @@ internal static class CombatStepEngine
                 return false;
 
             bool takingExtraTurn = HookMirrors.ShouldTakeExtraTurn(sim, combat, player);
-            bool hasActiveEmotionChip = combat.RelicsOf(player).Any(r => r is EmotionChip && !r.IsMelted);
+            bool hasActiveEmotionChip = false;
+            IReadOnlyList<RelicModel> playerRelics = combat.RelicsOf(player);
+            for (int i = 0; i < playerRelics.Count; i++)
+            {
+                if (playerRelics[i] is EmotionChip chip && !chip.IsMelted)
+                {
+                    hasActiveEmotionChip = true;
+                    break;
+                }
+            }
             SimCreatureState simPlayer = sim.State.GetCreature(player.Creature);
 
             if (!takingExtraTurn)
@@ -1061,7 +1070,7 @@ internal static class CombatStepEngine
                     return false;
 
                 int playerPoisonStart = sim.History.Entries.Count;
-                Creature[] alivePlayerCreatures = combat.PlayerCreatures.Where(c => sim.State.GetCreature(c).IsAlive).ToArray();
+                List<Creature> alivePlayerCreatures = CollectAliveCreatures(sim, combat.PlayerCreatures);
                 if (!CorePowerSupport.TriggerPoison(sim, combat, alivePlayerCreatures))
                     return false;
                 TriggeredPowerSupport.CompensateHistorySince(sim, combat, playerPoisonStart);
@@ -1107,7 +1116,7 @@ internal static class CombatStepEngine
             combat.RoundNumber++;
         combat.AdvancePlayerTurn(player);
         combat.BeginSideTurn(player.Creature);
-        Creature[] playerParticipants = combat.PlayerCreatures.Where(c => sim.State.GetCreature(c).IsAlive).ToArray();
+        List<Creature> playerParticipants = CollectAliveCreatures(sim, combat.PlayerCreatures);
         combat.SnapshotPowerAmountsAtTurnStart(playerParticipants);
 
         if (!HookMirrors.BeforeSideTurnStart(sim, combat.CurrentSide, [player.Creature]))
@@ -1259,5 +1268,19 @@ internal static class CombatStepEngine
             return HasRevealedChoice(actions[0]) ? UnchosenActionKey(actions[0]) : ActionKey(actions[0]);
         return string.Join(" ; ", actions.Select((a, idx) =>
             idx == actions.Count - 1 && HasRevealedChoice(a) ? UnchosenActionKey(a) : ActionKey(a)));
+    }
+
+    private static List<Creature> CollectAliveCreatures(
+        CombatPredictionSimulator sim,
+        IReadOnlyList<Creature> creatures)
+    {
+        List<Creature> alive = new(creatures.Count);
+        for (int i = 0; i < creatures.Count; i++)
+        {
+            Creature c = creatures[i];
+            if (sim.State.GetCreature(c).IsAlive)
+                alive.Add(c);
+        }
+        return alive;
     }
 }
