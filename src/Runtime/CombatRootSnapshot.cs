@@ -188,6 +188,10 @@ internal sealed class CombatRootSnapshot
 
         PowerDynamicVarWarmup.EnsureMaterialized(state);
         CardDynamicVarWarmup.EnsureMaterialized(state);
+        Engine.InCombat.Mirrors.Cards.OnPlay.CardGenerationCardMirrors.RequireConfiguredTinkerTime(
+            state.Players
+                .Where(candidate => candidate.PlayerCombatState != null)
+                .SelectMany(candidate => candidate.PlayerCombatState!.AllCards));
 
         // Listener enumeration and third-party owner discovery are part of root capture.
         // Take the baseline first so any semantic mutation in those callbacks is rejected by

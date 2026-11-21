@@ -74,6 +74,24 @@ internal static class NewSolverChecks
             case "coop-new-mirrors":
                 RunCoopNewMirrors(combat, player, loop, Check);
                 break;
+            case "setup-lethality":
+                SetupValueChecks.RunLethalityHang(combat, player, loop, Check);
+                break;
+            case "coop-legion-punch":
+                SetupValueChecks.RunLegionPunch(combat, player, loop, Check);
+                break;
+            case "coop-gift-energy":
+                SetupValueChecks.RunGiftEnergy(combat, player, loop, Check, SetupValueChecks.GiftEndTurnMode.FullAuto);
+                break;
+            case "coop-gift-energy-single":
+                SetupValueChecks.RunGiftEnergy(combat, player, loop, Check, SetupValueChecks.GiftEndTurnMode.SolverSingleTurn);
+                break;
+            case "coop-gift-energy-manual":
+                SetupValueChecks.RunGiftEnergy(combat, player, loop, Check, SetupValueChecks.GiftEndTurnMode.ManualEnd);
+                break;
+            case "coop-gift-energy-retake":
+                SetupValueChecks.RunGiftEnergy(combat, player, loop, Check, SetupValueChecks.GiftEndTurnMode.ManualRetake);
+                break;
             default:
                 throw new ArgumentException($"Unknown NewSolverChecks suite: {suite}");
         }
@@ -150,7 +168,8 @@ internal static class NewSolverChecks
         NewSolverConfig cfg = NewSolverConfig.For(SolverSpeed.Fast) with { Samples = 4, MaxParallelism = 2 };
         NewSolverDecision decision = NewFairSolver.DecideLive(combat, player, cfg, CancellationToken.None);
         bool playsRally = decision.CommittedActions.Any(a => a.Kind == PlanActionKind.PlayCard && a.CardId == "RALLY");
-        check(playsRally, $"v3 must play Rally in {combat.Players.Count}P co-op when party is under attack; chose [{FormatRoute(decision.CommittedActions)}]");
+        string cands = string.Join(" | ", decision.Candidates.Select(c => $"{FormatRoute(c.Actions)}={c.CvarUtility:F2}(m={c.MeanUtility:F2},d={c.DeathRate:F2},n={c.EvaluatedWorlds})"));
+        check(playsRally, $"v3 must play Rally in {combat.Players.Count}P co-op when party is under attack; chose [{FormatRoute(decision.CommittedActions)}] cands=[{cands}]");
     }
 
     private static void RunCoopLift(CombatState combat, Player player, MainLoopContext loop, Action<bool, string> check)
@@ -261,7 +280,7 @@ internal static class NewSolverChecks
         PlanAction? transfigure = decision.CommittedActions.FirstOrDefault(a => a.Kind == PlanActionKind.PlayCard && a.CardId == "TRANSFIGURE");
         bool targetedInflame = transfigure?.Choice?.Cards.Any(t => t.CardId == "INFLAME") == true;
         bool playedInflame = decision.CommittedActions.Any(a => a.Kind == PlanActionKind.PlayCard && a.CardId == "INFLAME");
-        string topCands = string.Join(" | ", decision.Candidates.Take(5).Select(c => $"{FormatRoute(c.Actions)}({c.Actions.FirstOrDefault(a => a.CardId == "TRANSFIGURE")?.Choice?.Cards.FirstOrDefault()?.CardId})={c.CvarUtility:F2}"));
+        string topCands = string.Join(" | ", decision.Candidates.Take(14).Select(c => $"{FormatRoute(c.Actions)}({c.Actions.FirstOrDefault(a => a.CardId == "TRANSFIGURE")?.Choice?.Cards.FirstOrDefault()?.CardId})={c.CvarUtility:F2}"));
         check(targetedInflame && playedInflame,
             $"v3 must play Transfigure targeting Inflame and play Inflame in long fight; chose [{FormatRoute(decision.CommittedActions)}] choice={transfigure?.Choice?.Cards.FirstOrDefault()?.CardId} top=[{topCands}]");
     }

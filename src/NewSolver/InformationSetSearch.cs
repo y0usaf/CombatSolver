@@ -295,6 +295,18 @@ internal static class InformationSetSearch
             .ThenBy(c => c.Key, StringComparer.Ordinal)
             .First();
 
+        // Co-op: when every evaluated line dies in every sampled world, the idle-teammate rollouts carry no ranking
+        // signal. Fall back to the one-turn evaluation with the pending enemy turn priced in: survive this round
+        // with the most HP, block and summons.
+        if (baseline.IsCoop && eligible.All(c => c.EvaluatedWorlds > 0 && c.DeathRate > 1 - 1e-6))
+        {
+            Dictionary<string, double> immediate = candidates.ToDictionary(c => c.Key, c => c.ImmediateScore, StringComparer.Ordinal);
+            best = eligible
+                .OrderByDescending(c => Math.Round(immediate[c.Key], 4))
+                .ThenBy(c => c.Key, StringComparer.Ordinal)
+                .First();
+        }
+
         IReadOnlyList<PlanAction> commit = best.Actions;
         if (commit.Count == 0)
             commit = [new PlanAction(PlanActionKind.EndTurn, turn)];
@@ -579,7 +591,8 @@ internal static class InformationSetSearch
                 initDead, initWon, 0, false);
         }
 
-        int horizonTurn = rootTurn + config.LookaheadTurns;
+        int lookahead = LookaheadTurns(config, baseline);
+        int horizonTurn = rootTurn + lookahead;
         List<(SimStepState State, double Score)> frontier = [(initialState, double.NaN)];
         double bestOverall = double.NegativeInfinity;
         bool bestOverallDead = true;
@@ -587,7 +600,7 @@ internal static class InformationSetSearch
         double bestVictory = double.NegativeInfinity;
         bool foundVictory = false;
 
-        int maxTurnIterations = config.LookaheadTurns + 1;
+        int maxTurnIterations = lookahead + 1;
         for (int iter = 0; iter < maxTurnIterations && frontier.Count > 0; iter++)
         {
             if (token.IsCancellationRequested)
@@ -693,6 +706,14 @@ internal static class InformationSetSearch
 
         return (bestOverall, bestOverallDead, bestOverallWon, totalNodes, false);
     }
+
+    // Rollouts simulate teammates as idle (they end their turn without playing). Over many turns that overstates
+    // how long enemies live and how much damage reaches the party, so co-op rollouts are trusted for a short
+    // horizon only; the horizon evaluation prices the rest.
+    internal const int CoopLookaheadTurns = 2;
+
+    private static int LookaheadTurns(NewSolverConfig config, PartyRootBaseline baseline)
+        => baseline.IsCoop ? Math.Min(config.LookaheadTurns, CoopLookaheadTurns) : config.LookaheadTurns;
 
     private static (DeterministicEndpoint? Victory, List<SimStepState> EndStates, int Nodes) SolveSingleTurnInWorld(
         SimStepState startState,

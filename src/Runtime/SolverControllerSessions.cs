@@ -165,6 +165,10 @@ internal sealed class SolverCombatSession
     public bool ManualControlObserved { get; set; }
     public bool ShowcaseMode { get; set; }
     public int? ReadyToEndTurnTurn { get; set; }
+    // Turn whose EndPlayerTurnAction the solver itself enqueued (Auto, Run This Turn or Apply). A teammate gift
+    // during that same turn may un-end it even when Auto is off, because the player asked the solver to play it.
+    public int? SolverEndedTurn { get; set; }
+    public bool SolverEndedTurnSeenReady { get; set; }
     public string? ReadyToEndTurnBaselineFingerprint { get; set; }
     public string? LastUnEndTriggerFingerprint { get; set; }
     public int UnEndTurnCountThisTurn { get; set; }

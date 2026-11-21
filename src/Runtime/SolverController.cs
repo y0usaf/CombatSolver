@@ -162,6 +162,7 @@ internal static partial class SolverController
         if (frozen)
         {
             _combat.FullAutoEnabled = false;
+            _combat.SolverEndedTurn = null;
             SolverAutoStatus.Record("stop", "route_frozen");
             CancelDeferredSearch();
         }
@@ -1313,6 +1314,7 @@ internal static partial class SolverController
         if (!enabled)
         {
             _combat.FullAutoEnabled = false;
+            _combat.SolverEndedTurn = null;
             CancelCoopAutoWait();
             CancelDeployment();
             SolverAutoStatus.Record("stop", "user_toggle_off");
@@ -1480,6 +1482,7 @@ internal static partial class SolverController
         bool controllerSearchCanceled = _search != null || _deferredSearchCts != null;
         int? generation = _search?.Generation;
         _combat.FullAutoEnabled = false;
+        _combat.SolverEndedTurn = null;
         SolverAutoStatus.Record("stop", $"user_stop_search generation={generation?.ToString() ?? "-"}");
         _combat.AutomaticSearchPaused = true;
         _combat.AutomaticSearchPausedTurn = LocalContext.GetMe(

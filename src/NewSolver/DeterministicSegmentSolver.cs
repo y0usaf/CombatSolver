@@ -14,7 +14,8 @@ internal sealed record DeterministicEndpoint(
     int MinAliveEnemyHp,
     int ProjectedPartyUnblockedDamage,
     int RemainingEnergy,
-    bool IsVictory);
+    bool IsVictory,
+    string SetupKey = "");
 
 internal sealed record RevealBranch(
     IReadOnlyList<PlanAction> Prefix,
@@ -54,6 +55,7 @@ internal static class DeterministicSegmentSolver
         bool expandReveals = false)
     {
         int startTurn = root.Combat.GetPlayerTurnNumber(player);
+        Dictionary<Type, int> rootPowers = LocalPowerAmounts(root.Combat, player);
         Dictionary<ulong, double> visited = new(Math.Min(nodeCap * 2, 1024));
         PriorityQueue<OpenNode, (double Priority, long Sequence)> open = new();
         long sequence = 0;
@@ -105,7 +107,8 @@ internal static class DeterministicSegmentSolver
             {
                 double scalingScore = PartyEvaluator.EvaluatePartyScaling(sim, combat, player, enemyHp);
                 endTurnByHash[current.Hash] = new DeterministicEndpoint(
-                    current.Actions, current.State, current.Hash, endScore, scalingScore, enemyHp, MinAliveEnemyHp(sim, combat), unblocked, energyBefore, IsVictory: false);
+                    current.Actions, current.State, current.Hash, endScore, scalingScore, enemyHp, MinAliveEnemyHp(sim, combat), unblocked, energyBefore, IsVictory: false,
+                    SetupKey: maxEndTurnEndpoints > SetupSlotMinimumLimit ? SetupKey(combat, player, rootPowers) : "");
             }
 
             if (current.Depth >= 18)
@@ -265,6 +268,19 @@ internal static class DeterministicSegmentSolver
             .First();
         TryAdd(bestScaling);
 
+        // Setup lines (a power gained or stacked this turn) pay off in later turns, so their same-turn heuristic
+        // understates them. Keep the best line of every distinct setup so rollouts, which simulate those later
+        // turns, decide between setup and tempo instead of the one-turn heuristic.
+        foreach (DeterministicEndpoint ep in byScore
+                     .Where(e => e.SetupKey.Length > 0)
+                     .GroupBy(e => e.SetupKey, StringComparer.Ordinal)
+                     .Select(g => g.First()))
+        {
+            if (chosen.Count >= limit)
+                break;
+            TryAdd(ep);
+        }
+
         int minEnergy = pool.Min(e => e.RemainingEnergy);
         foreach (DeterministicEndpoint ep in byScore.Where(e => e.RemainingEnergy == minEnergy))
         {
@@ -281,6 +297,42 @@ internal static class DeterministicSegmentSolver
         }
 
         return chosen;
+    }
+
+    // Root candidate lists are wide enough for setup slots; continuation turns keep 1-4 endpoints and skip them.
+    private const int SetupSlotMinimumLimit = 4;
+
+    private static Dictionary<Type, int> LocalPowerAmounts(SimulatedCombatState combat, Player player)
+    {
+        Dictionary<Type, int> amounts = [];
+        IReadOnlyList<MegaCrit.Sts2.Core.Models.PowerModel> powers = combat.EffectivePowers();
+        for (int i = 0; i < powers.Count; i++)
+        {
+            if (ReferenceEquals(powers[i].Owner, player.Creature))
+                amounts[powers[i].GetType()] = amounts.GetValueOrDefault(powers[i].GetType()) + powers[i].Amount;
+        }
+        return amounts;
+    }
+
+    private static string SetupKey(SimulatedCombatState combat, Player player, Dictionary<Type, int> rootPowers)
+    {
+        Dictionary<Type, int> now = LocalPowerAmounts(combat, player);
+        List<string>? gained = null;
+        IReadOnlyList<MegaCrit.Sts2.Core.Models.PowerModel> powers = combat.EffectivePowers();
+        for (int i = 0; i < powers.Count; i++)
+        {
+            MegaCrit.Sts2.Core.Models.PowerModel power = powers[i];
+            if (!ReferenceEquals(power.Owner, player.Creature)
+                || power.TypeForCurrentAmount != MegaCrit.Sts2.Core.Entities.Powers.PowerType.Buff)
+                continue;
+            Type type = power.GetType();
+            if (now[type] > rootPowers.GetValueOrDefault(type) && !(gained?.Contains(type.Name) ?? false))
+                (gained ??= []).Add(type.Name);
+        }
+        if (gained == null)
+            return "";
+        gained.Sort(StringComparer.Ordinal);
+        return string.Join('+', gained);
     }
 
     private static bool CannotBeatVictory(

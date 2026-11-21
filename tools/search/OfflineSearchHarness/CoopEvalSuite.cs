@@ -317,7 +317,17 @@ internal static class CoopEvalSuite
             Task<NewSolverDecision> task = Task.Run(() =>
                 NewFairSolver.DecideFromWorlds(roots, names, knownTop, v3Config, CancellationToken.None));
             loop.RunUntilCompleted(task, TimeSpan.FromMinutes(3), "coop v3 decision");
-            return task.GetAwaiter().GetResult().CommittedActions;
+            NewSolverDecision made = task.GetAwaiter().GetResult();
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_COOP_EVAL_TRACE") == "1")
+            {
+                Console.WriteLine($"COOP_EVAL_DECISION turn={local.PlayerCombatState!.TurnNumber} hp={local.Creature.CurrentHp} "
+                    + $"party={string.Join(',', combat.Players.Select(p => p.Creature.CurrentHp + "/" + (p.Osty?.CurrentHp ?? 0)))} "
+                    + $"enemies={string.Join(',', combat.Enemies.Where(e => e.IsAlive).Select(e => e.CurrentHp + "@" + e.Monster?.NextMove.Id))} "
+                    + $"hand={string.Join(',', local.PlayerCombatState.Hand.Cards.Select(c => c.Id.Entry))} energy={local.PlayerCombatState.Energy}");
+                foreach (NewSolverCandidate c in made.Candidates.Take(8))
+                    Console.WriteLine($"   {string.Join(" ", c.Actions.Select(a => a.Kind == PlanActionKind.EndTurn ? "End" : a.CardId + ">" + a.TargetCombatId))} cvar={c.CvarUtility:F1} m={c.MeanUtility:F1} d={c.DeathRate:F2} w={c.WinRate:F2} n={c.EvaluatedWorlds}");
+            }
+            return made.CommittedActions;
         }
         else
         {
@@ -352,7 +362,7 @@ internal static class CoopEvalSuite
         }
     }
 
-    private static bool ExecuteLocalAction(CombatState combat, Player local, PlanAction action, MainLoopContext loop)
+    internal static bool ExecuteLocalAction(CombatState combat, Player local, PlanAction action, MainLoopContext loop)
     {
         WaitForQueueIdle(loop);
         if (CheckTerminal(combat, local) != null)
@@ -472,7 +482,7 @@ internal static class CoopEvalSuite
         return bestSkill;
     }
 
-    private static void WaitForNextTurnOrEnd(CombatState combat, Player local, int finishedTurn, MainLoopContext loop)
+    internal static void WaitForNextTurnOrEnd(CombatState combat, Player local, int finishedTurn, MainLoopContext loop)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(60);
         while (DateTime.UtcNow < deadline)
@@ -493,7 +503,7 @@ internal static class CoopEvalSuite
         throw new TimeoutException($"Co-op turn advance timed out after turn {finishedTurn}.");
     }
 
-    private static void WaitForQueueIdle(MainLoopContext loop)
+    internal static void WaitForQueueIdle(MainLoopContext loop)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
@@ -506,7 +516,7 @@ internal static class CoopEvalSuite
         throw new TimeoutException("Action queue did not become idle.");
     }
 
-    private static string? CheckTerminal(CombatState combat, Player local)
+    internal static string? CheckTerminal(CombatState combat, Player local)
     {
         if (local.Creature.IsDead)
             return "defeat";

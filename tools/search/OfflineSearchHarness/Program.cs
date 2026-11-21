@@ -152,6 +152,8 @@ internal static class Program
                 NewSolverChecks.Run(combat!, options, loop, newSolverCheck);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_COOP_EVAL") is { Length: > 0 } coopEvalArg)
                 CoopEvalSuite.Run(combat!, options, loop, coopEvalArg);
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_SETUP_PLAYOUT") is { Length: > 0 } setupPlayoutArg)
+                SetupValueChecks.RunPlayout(combat!, options, loop, setupPlayoutArg);
             if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_PLAY") is { Length: > 0 } fairPlayMode)
                 FairPlay.Run(combat!, options, loop, fairPlayMode);
             payload["budget"] = DescribeBudget(options);

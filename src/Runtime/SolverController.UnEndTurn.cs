@@ -105,7 +105,12 @@ internal static partial class SolverController
             _combat.EvaluatedUnEndFingerprintsThisTurn.Clear();
         }
         _combat.ReadyToEndTurnBaselineFingerprint = CaptureReadyToEndTurnFingerprint(state, player);
+        _combat.SolverEndedTurn = turn;
+        _combat.SolverEndedTurnSeenReady = false;
     }
+
+    private static bool IsUnEndArmed(int turn)
+        => _combat.FullAutoEnabled || _combat.SolverEndedTurn == turn;
 
     private static UnEndTurnPollOutcome InspectReadyToEndTurnCandidate(
         CombatState state,
@@ -118,7 +123,7 @@ internal static partial class SolverController
         fingerprint = string.Empty;
 
         if (_solverDisabled
-            || !_combat.FullAutoEnabled
+            || !_combat.FullAutoEnabled && _combat.SolverEndedTurn == null
             || _search != null
             || _deployment != null
             || _combat.UnEndTurnInFlight)
@@ -135,6 +140,25 @@ internal static partial class SolverController
             return UnEndTurnPollOutcome.NotReady;
         }
         me = LocalContext.GetMe(state);
+        // Auto is off and the turn the solver ended was later seen un-ended without the solver doing it: the
+        // player took the turn back, so a later end turn is theirs and must not be un-ended. Requiring a prior
+        // ready observation avoids disarming while the solver's own EndPlayerTurnAction is still in flight; the
+        // solver's own re-deploy re-arms through RecordLocalReadyToEndTurnBaseline.
+        if (!_combat.FullAutoEnabled
+            && me?.PlayerCombatState is { Phase: PlayerTurnPhase.Play } ownState
+            && _combat.SolverEndedTurn == ownState.TurnNumber)
+        {
+            if (CombatManager.Instance.IsPlayerReadyToEndTurn(me))
+            {
+                _combat.SolverEndedTurnSeenReady = true;
+            }
+            else if (_combat.SolverEndedTurnSeenReady)
+            {
+                _combat.SolverEndedTurn = null;
+                _combat.SolverEndedTurnSeenReady = false;
+                return UnEndTurnPollOutcome.Idle;
+            }
+        }
         if (me == null
             || !me.Creature.IsAlive
             || me.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } pcs
@@ -144,6 +168,8 @@ internal static partial class SolverController
         }
 
         turn = pcs.TurnNumber;
+        if (!IsUnEndArmed(turn))
+            return UnEndTurnPollOutcome.Idle;
         fingerprint = CaptureReadyToEndTurnFingerprint(state, me);
 
         if (_combat.ReadyToEndTurnTurn != turn)
@@ -262,7 +288,7 @@ internal static partial class SolverController
                 while (CombatManager.Instance.IsInProgress
                        && !CombatManager.Instance.IsOverOrEnding
                        && ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
-                       && _combat.FullAutoEnabled
+                       && IsUnEndArmed(turn)
                        && me.PlayerCombatState?.TurnNumber == turn
                        && (CombatManager.Instance.IsPlayerReadyToEndTurn(me)
                            || CombatManager.Instance.PlayerActionsDisabled
@@ -277,7 +303,7 @@ internal static partial class SolverController
                     token.ThrowIfCancellationRequested();
                 }
 
-                if (!_combat.FullAutoEnabled
+                if (!IsUnEndArmed(turn)
                     || !CombatManager.Instance.IsInProgress
                     || CombatManager.Instance.IsOverOrEnding
                     || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
@@ -292,7 +318,10 @@ internal static partial class SolverController
                 _combat.ContinuationSource = null;
                 _combat.ReadyToEndTurnBaselineFingerprint = null;
                 _combat.UnEndTurnInFlight = false;
-                RequestSearch(host, state, SearchReason.FullAuto);
+                if (_combat.FullAutoEnabled)
+                    RequestSearch(host, state, SearchReason.FullAuto);
+                else
+                    RequestSearch(host, state, SearchReason.SingleTurn, deployWhenReady: true);
             }
             catch (OperationCanceledException)
             {
@@ -313,7 +342,7 @@ internal static partial class SolverController
 
     private static bool CanExecuteUnEndTurnNow(CombatState state, Player me, int turn)
         => !_solverDisabled
-            && _combat.FullAutoEnabled
+            && IsUnEndArmed(turn)
             && CombatManager.Instance.IsInProgress
             && !CombatManager.Instance.IsOverOrEnding
             && !CombatManager.Instance.EndingPlayerTurnPhaseOne
