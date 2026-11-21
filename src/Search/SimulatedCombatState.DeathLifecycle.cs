@@ -252,7 +252,10 @@ internal sealed partial class SimulatedCombatState
     }
 
     private void SetDeathPhase(Creature creature, PredictedDeathPhase phase)
-        => (_deathPhases ??= [])[creature] = phase;
+    {
+        (_deathPhases ??= [])[creature] = phase;
+        _hittableEnemiesCache = null;
+    }
 
     // One entry per creature that has started dying. Enough headroom for a full enemy roster plus
     // summons; anything larger falls back to the heap rather than growing the stack frame.

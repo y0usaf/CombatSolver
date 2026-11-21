@@ -223,7 +223,8 @@ internal sealed partial class SimulatedCombatState
     private ForkableList<Creature> _allies;
     private ForkableList<Creature> _enemies;
     private ForkableList<Creature> _knownEnemies;
-    private ForkableList<Creature> _escapedCreatures;
+    private ForkableList<Creature>? _escapedCreatures;
+    private Creature[]? _hittableEnemiesCache;
     private IReadOnlyList<Creature>? _creatures;
     private uint _nextCreatureId;
     private int _roundNumber;
@@ -414,7 +415,7 @@ internal sealed partial class SimulatedCombatState
         _allies = new ForkableList<Creature>(inner.Allies);
         _enemies = new ForkableList<Creature>(inner.Enemies);
         _knownEnemies = new ForkableList<Creature>(inner.Enemies);
-        _escapedCreatures = new ForkableList<Creature>(inner.EscapedCreatures);
+        _escapedCreatures = inner.EscapedCreatures.Count > 0 ? new ForkableList<Creature>(inner.EscapedCreatures) : null;
         _nextCreatureId = (uint)NextCreatureIdField.GetValue(inner)!;
         _roundNumber = inner.RoundNumber;
         _currentSide = inner.CurrentSide;
@@ -436,7 +437,7 @@ internal sealed partial class SimulatedCombatState
         ForkableList<Creature> allies,
         ForkableList<Creature> enemies,
         ForkableList<Creature> knownEnemies,
-        ForkableList<Creature> escapedCreatures)
+        ForkableList<Creature>? escapedCreatures)
     {
         _runState = source._runState;
         _runRngSnapshot = source._runRngSnapshot;
@@ -561,12 +562,33 @@ internal sealed partial class SimulatedCombatState
     }
     public bool BattlewornDummyTimedOut => _battlewornDummyTimedOut;
     public EncounterModel? Encounter => _encounter;
-    public IReadOnlyList<Creature> EscapedCreatures => _escapedCreatures;
+    public IReadOnlyList<Creature> EscapedCreatures => (IReadOnlyList<Creature>?)_escapedCreatures ?? Array.Empty<Creature>();
     public IReadOnlyList<Creature> CreaturesOnCurrentSide => GetCreaturesOnSide(CurrentSide);
     public IReadOnlyList<Creature> HittableEnemies => _deathPhases == null
         ? _enemies
-        : _enemies.Where(creature =>
-            _deathPhases.GetValueOrDefault(creature) == PredictedDeathPhase.None).ToArray();
+        : _hittableEnemiesCache ??= BuildHittableEnemies();
+
+    private Creature[] BuildHittableEnemies()
+    {
+        int count = _enemies.Count;
+        int hittable = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (_deathPhases!.GetValueOrDefault(_enemies[i]) == PredictedDeathPhase.None)
+                hittable++;
+        }
+        if (hittable == 0)
+            return [];
+        var result = new Creature[hittable];
+        int write = 0;
+        for (int i = 0; i < count; i++)
+        {
+            Creature creature = _enemies[i];
+            if (_deathPhases!.GetValueOrDefault(creature) == PredictedDeathPhase.None)
+                result[write++] = creature;
+        }
+        return result;
+    }
 
     internal string? NextFreeSlot()
         => _encounter == null
@@ -2927,7 +2949,7 @@ internal sealed partial class SimulatedCombatState
     }
     public void CreatureEscaped(Creature creature)
     {
-        if (_escapedCreatures.Contains(creature))
+        if (_escapedCreatures?.Contains(creature) == true)
             return;
         if (!ContainsCreature(creature))
             throw new InvalidOperationException("逃跑的生物不在当前模拟战斗中。");
@@ -2937,13 +2959,17 @@ internal sealed partial class SimulatedCombatState
         {
             SetPowerAmount(power, 0);
         }
-        _escapedCreatures.Add(creature);
+        (_escapedCreatures ??= []).Add(creature);
         _knownEnemies.Remove(creature);
         RemoveCreature(creature);
     }
     public void RemoveCreature(Creature creature, bool unattach = true)
     {
-        bool removed = _allies.Remove(creature) || _enemies.Remove(creature);
+        bool removedFromAllies = _allies.Remove(creature);
+        bool removedFromEnemies = !removedFromAllies && _enemies.Remove(creature);
+        if (removedFromEnemies)
+            _hittableEnemiesCache = null;
+        bool removed = removedFromAllies || removedFromEnemies;
         if (!removed)
             return;
         _creatures = null;
@@ -2952,7 +2978,15 @@ internal sealed partial class SimulatedCombatState
     void ICombatPredictionRosterSink.RemoveCreatureFromPrediction(Creature creature)
         => RemoveCreature(creature, unattach: false);
     public bool ContainsCreature(Creature creature) => _allies.Contains(creature) || _enemies.Contains(creature);
-    public bool ContainsMonster<T>() where T : MonsterModel => _enemies.Any(static creature => creature.Monster is T);
+    public bool ContainsMonster<T>() where T : MonsterModel
+    {
+        for (int i = 0; i < _enemies.Count; i++)
+        {
+            if (_enemies[i].Monster is T)
+                return true;
+        }
+        return false;
+    }
     bool ICombatPredictionCreatureSemantics.IsPrimaryEnemy(Creature creature)
     {
         if (creature.Side != CombatSide.Enemy)
@@ -3033,6 +3067,7 @@ internal sealed partial class SimulatedCombatState
             .ToArray();
         for (int index = 0; index < ordered.Length; index++)
             _enemies[index] = ordered[index];
+        _hittableEnemiesCache = null;
         InvalidateBaseHookListeners();
     }
     private static int GetSlotIndex(IReadOnlyList<string> slots, string? slot)
@@ -3051,6 +3086,7 @@ internal sealed partial class SimulatedCombatState
             throw new InvalidOperationException("待移动的敌人不在当前模拟战斗中。");
         _enemies.RemoveAt(current);
         _enemies.Insert(Math.Clamp(index, 0, _enemies.Count), creature);
+        _hittableEnemiesCache = null;
     }
     public void AddCreature(Creature creature)
     {
@@ -3058,7 +3094,13 @@ internal sealed partial class SimulatedCombatState
             throw new InvalidOperationException("生物属于另一场战斗。");
         if (ContainsCreature(creature))
             throw new InvalidOperationException("生物已经存在于当前模拟战斗中。");
-        (creature.Side == CombatSide.Player ? _allies : _enemies).Add(creature);
+        if (creature.Side == CombatSide.Player)
+            _allies.Add(creature);
+        else
+        {
+            _enemies.Add(creature);
+            _hittableEnemiesCache = null;
+        }
         if (creature.Side == CombatSide.Enemy && !_knownEnemies.Contains(creature))
             _knownEnemies.Add(creature);
         _creatures = null;

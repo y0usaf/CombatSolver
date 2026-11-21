@@ -14,7 +14,7 @@ internal sealed partial class SimulatedCombatState
             _allies.Fork(),
             _enemies.Fork(),
             _knownEnemies.Fork(),
-            _escapedCreatures.Fork())
+            _escapedCreatures?.Fork())
         {
             _mirroredHookLayout = _mirroredHookLayout,
             _mirroredRunHookLayout = _mirroredRunHookLayout,
@@ -42,6 +42,7 @@ internal sealed partial class SimulatedCombatState
             _monsterIntStates = _monsterIntStates?.Fork(),
             _dampenCasters = _dampenCasters?.Fork(),
             _deathPhases = _deathPhases?.Fork(),
+            _hittableEnemiesCache = _hittableEnemiesCache,
             _stolenStrength = _stolenStrength?.Fork(),
             _stolenDexterity = _stolenDexterity?.Fork(),
             _nextCreatureId = _nextCreatureId,
@@ -252,11 +253,11 @@ internal sealed partial class SimulatedCombatState
                 // use the ordinary mapping path.
                 IReadOnlyList<AbstractModel> forkedPrefix = ReferenceEquals(view.Prefix, _rootRunHookListeners)
                     ? _rootRunHookListeners : RemapCachedModels(view.Prefix, context);
-                fork._effectiveRunHookListeners =
-                    ReferenceEquals(forkedPrefix, view.Prefix)
-                        && ReferenceEquals(forkedSuffix, view.Suffix)
-                        ? _effectiveRunHookListeners
-                        : new ConcatenatedListenerView(forkedPrefix, forkedSuffix);
+                if (ReferenceEquals(forkedPrefix, view.Prefix)
+                    && ReferenceEquals(forkedSuffix, view.Suffix))
+                {
+                    fork._effectiveRunHookListeners = _effectiveRunHookListeners;
+                }
             }
             else
             {
