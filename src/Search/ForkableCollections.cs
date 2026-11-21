@@ -495,42 +495,137 @@ internal sealed class ForkableDictionary<TKey, TValue> : IReadOnlyDictionary<TKe
 
 internal sealed class ForkableSet<T> : ISet<T>, IReadOnlySet<T>
 {
-    private sealed class Storage(HashSet<T> values)
+    private const int SmallMaxCount = 8;
+
+    internal sealed class Storage
     {
-        public HashSet<T> Values { get; } = values;
+        public readonly IEqualityComparer<T>? Comparer;
         public volatile bool Shared;
+        public int Count;
+        public T Value0 = default!;
+        public T[]? Overflow;
+        public HashSet<T>? Set;
+
+        public Storage(IEqualityComparer<T>? comparer)
+        {
+            Comparer = comparer;
+        }
+
+        public Storage(Storage source)
+        {
+            Comparer = source.Comparer;
+            if (source.Set is { } set)
+            {
+                Set = new HashSet<T>(set, set.Comparer);
+            }
+            else
+            {
+                Count = source.Count;
+                Value0 = source.Value0;
+                if (source.Overflow is { } overflow && Count > 1)
+                {
+                    var copy = new T[overflow.Length];
+                    Array.Copy(overflow, copy, Count - 1);
+                    Overflow = copy;
+                }
+            }
+        }
     }
+
+    private static readonly Storage SharedEmptyDefault = new(comparer: null) { Shared = true };
 
     private Storage _storage;
 
     public ForkableSet()
-        : this(new HashSet<T>())
-    {
-    }
+        => _storage = SharedEmptyDefault;
 
     public ForkableSet(IEqualityComparer<T> comparer)
-        : this(new HashSet<T>(comparer))
-    {
-    }
+        => _storage = ReferenceEquals(comparer, EqualityComparer<T>.Default)
+            ? SharedEmptyDefault
+            : new Storage(comparer);
 
     public ForkableSet(IEnumerable<T> values)
-        : this(new HashSet<T>(values))
     {
-    }
-
-    private ForkableSet(HashSet<T> values)
-    {
-        _storage = new Storage(values);
+        _storage = new Storage(comparer: null);
+        foreach (T value in values)
+            AddCore(_storage, value);
     }
 
     private ForkableSet(Storage storage)
+        => _storage = storage;
+
+    public int Count => _storage.Set?.Count ?? _storage.Count;
+    public bool IsReadOnly => false;
+    public IEqualityComparer<T> Comparer => _storage.Comparer ?? EqualityComparer<T>.Default;
+
+    private static bool ItemEquals(IEqualityComparer<T>? comparer, T a, T b)
+        => comparer is null ? EqualityComparer<T>.Default.Equals(a, b) : comparer.Equals(a, b);
+
+    private static int FindSmallIndex(Storage s, T item)
     {
-        _storage = storage;
+        int count = s.Count;
+        if (count == 0)
+            return -1;
+        IEqualityComparer<T>? comparer = s.Comparer;
+        if (ItemEquals(comparer, s.Value0, item))
+            return 0;
+        if (count > 1 && s.Overflow is { } overflow)
+        {
+            int overflowCount = count - 1;
+            for (int i = 0; i < overflowCount; i++)
+            {
+                if (ItemEquals(comparer, overflow[i], item))
+                    return i + 1;
+            }
+        }
+        return -1;
     }
 
-    public int Count => _storage.Values.Count;
-    public bool IsReadOnly => false;
-    public IEqualityComparer<T> Comparer => _storage.Values.Comparer;
+    private static bool AddCore(Storage s, T value)
+    {
+        if (s.Set is { } set)
+            return set.Add(value);
+        if (FindSmallIndex(s, value) >= 0)
+            return false;
+        int count = s.Count;
+        if (count == 0)
+        {
+            s.Value0 = value;
+            s.Count = 1;
+            return true;
+        }
+        if (count < SmallMaxCount)
+        {
+            int overflowIdx = count - 1;
+            var overflow = s.Overflow;
+            if (overflow is null)
+            {
+                overflow = new T[3];
+                s.Overflow = overflow;
+            }
+            else if (overflowIdx >= overflow.Length)
+            {
+                Array.Resize(ref overflow, SmallMaxCount - 1);
+                s.Overflow = overflow;
+            }
+            overflow[overflowIdx] = value;
+            s.Count = count + 1;
+            return true;
+        }
+        var hs = new HashSet<T>(count + 1, s.Comparer);
+        hs.Add(s.Value0);
+        if (s.Overflow is { } existing)
+        {
+            for (int i = 0; i < count - 1; i++)
+                hs.Add(existing[i]);
+        }
+        hs.Add(value);
+        s.Set = hs;
+        s.Count = 0;
+        s.Value0 = default!;
+        s.Overflow = null;
+        return true;
+    }
 
     public ForkableSet<T> Fork()
     {
@@ -540,72 +635,225 @@ internal sealed class ForkableSet<T> : ISet<T>, IReadOnlySet<T>
 
     public bool Add(T value)
     {
-        // 重复的 Add 不得触发写时复制，所以只有共享存储才需要先探测一次。
-        // 独占存储直接加，省掉 Contains + Add 的双次哈希查找。
-        if (_storage.Shared)
+        Storage s = _storage;
+        if (s.Shared)
         {
-            if (_storage.Values.Contains(value))
+            if (Contains(value))
                 return false;
             EnsureWritable();
+            s = _storage;
         }
-        return _storage.Values.Add(value);
+        return AddCore(s, value);
     }
 
     void ICollection<T>.Add(T item) => Add(item);
 
     public bool Remove(T value)
     {
-        // 未命中的 Remove 不得触发写时复制，所以只有共享存储才需要先探测一次。
-        if (_storage.Shared)
+        Storage s = _storage;
+        if (s.Set is { } set)
         {
-            if (!_storage.Values.Contains(value))
-                return false;
-            EnsureWritable();
+            if (s.Shared)
+            {
+                if (!set.Contains(value))
+                    return false;
+                EnsureWritable();
+                set = _storage.Set!;
+            }
+            return set.Remove(value);
         }
-        return _storage.Values.Remove(value);
+        int idx = FindSmallIndex(s, value);
+        if (idx < 0)
+            return false;
+        if (s.Shared)
+        {
+            EnsureWritable();
+            s = _storage;
+        }
+        int count = s.Count;
+        if (count == 1)
+        {
+            s.Value0 = default!;
+            s.Count = 0;
+            return true;
+        }
+        var overflow = s.Overflow!;
+        int overflowCount = count - 1;
+        if (idx == 0)
+        {
+            s.Value0 = overflow[0];
+            for (int i = 1; i < overflowCount; i++)
+                overflow[i - 1] = overflow[i];
+            overflow[overflowCount - 1] = default!;
+        }
+        else
+        {
+            for (int i = idx; i < overflowCount; i++)
+                overflow[i - 1] = overflow[i];
+            overflow[overflowCount - 1] = default!;
+        }
+        s.Count = count - 1;
+        return true;
     }
 
     public void Clear()
     {
-        if (_storage.Values.Count == 0)
-            return;
-        if (_storage.Shared)
+        Storage s = _storage;
+        if (s.Set is null)
         {
-            _storage = new Storage(new HashSet<T>(_storage.Values.Comparer));
+            if (s.Count == 0)
+                return;
+            if (s.Shared)
+            {
+                _storage = s.Comparer is null ? SharedEmptyDefault : new Storage(s.Comparer);
+                return;
+            }
+            s.Value0 = default!;
+            if (s.Overflow is { } overflow && s.Count > 1)
+                Array.Clear(overflow, 0, s.Count - 1);
+            s.Count = 0;
             return;
         }
-        _storage.Values.Clear();
+        if (s.Set.Count == 0)
+            return;
+        if (s.Shared)
+        {
+            _storage = s.Comparer is null ? SharedEmptyDefault : new Storage(s.Comparer);
+            return;
+        }
+        s.Set.Clear();
     }
 
-    public bool Contains(T item) => _storage.Values.Contains(item);
-    public void CopyTo(T[] array, int arrayIndex) => _storage.Values.CopyTo(array, arrayIndex);
-    public void ExceptWith(IEnumerable<T> other)
+    public bool Contains(T item)
+    {
+        Storage s = _storage;
+        return s.Set is { } set ? set.Contains(item) : FindSmallIndex(s, item) >= 0;
+    }
+
+    public void CopyTo(T[] array, int arrayIndex)
+    {
+        Storage s = _storage;
+        if (s.Set is { } set)
+        {
+            set.CopyTo(array, arrayIndex);
+            return;
+        }
+        if (s.Count == 0)
+            return;
+        array[arrayIndex] = s.Value0;
+        if (s.Count > 1 && s.Overflow is { } overflow)
+            Array.Copy(overflow, 0, array, arrayIndex + 1, s.Count - 1);
+    }
+
+    private HashSet<T> EnsureHashSetWritable()
     {
         EnsureWritable();
-        _storage.Values.ExceptWith(other);
+        Storage s = _storage;
+        if (s.Set is { } existing)
+            return existing;
+        var hs = new HashSet<T>(s.Count, s.Comparer);
+        if (s.Count > 0)
+        {
+            hs.Add(s.Value0);
+            if (s.Overflow is { } overflow)
+            {
+                for (int i = 0; i < s.Count - 1; i++)
+                    hs.Add(overflow[i]);
+            }
+        }
+        s.Set = hs;
+        s.Count = 0;
+        s.Value0 = default!;
+        s.Overflow = null;
+        return hs;
     }
-    public void IntersectWith(IEnumerable<T> other)
+
+    private HashSet<T> ToTempHashSet()
     {
-        EnsureWritable();
-        _storage.Values.IntersectWith(other);
+        Storage s = _storage;
+        if (s.Set is { } existing)
+            return existing;
+        var hs = new HashSet<T>(s.Count, s.Comparer);
+        if (s.Count > 0)
+        {
+            hs.Add(s.Value0);
+            if (s.Overflow is { } overflow)
+            {
+                for (int i = 0; i < s.Count - 1; i++)
+                    hs.Add(overflow[i]);
+            }
+        }
+        return hs;
     }
-    public bool IsProperSubsetOf(IEnumerable<T> other) => _storage.Values.IsProperSubsetOf(other);
-    public bool IsProperSupersetOf(IEnumerable<T> other) => _storage.Values.IsProperSupersetOf(other);
-    public bool IsSubsetOf(IEnumerable<T> other) => _storage.Values.IsSubsetOf(other);
-    public bool IsSupersetOf(IEnumerable<T> other) => _storage.Values.IsSupersetOf(other);
-    public bool Overlaps(IEnumerable<T> other) => _storage.Values.Overlaps(other);
-    public bool SetEquals(IEnumerable<T> other) => _storage.Values.SetEquals(other);
-    public void SymmetricExceptWith(IEnumerable<T> other)
+
+    public void ExceptWith(IEnumerable<T> other) => EnsureHashSetWritable().ExceptWith(other);
+    public void IntersectWith(IEnumerable<T> other) => EnsureHashSetWritable().IntersectWith(other);
+    public bool IsProperSubsetOf(IEnumerable<T> other) => ToTempHashSet().IsProperSubsetOf(other);
+    public bool IsProperSupersetOf(IEnumerable<T> other) => ToTempHashSet().IsProperSupersetOf(other);
+    public bool IsSubsetOf(IEnumerable<T> other) => ToTempHashSet().IsSubsetOf(other);
+    public bool IsSupersetOf(IEnumerable<T> other) => ToTempHashSet().IsSupersetOf(other);
+    public bool Overlaps(IEnumerable<T> other) => ToTempHashSet().Overlaps(other);
+    public bool SetEquals(IEnumerable<T> other) => ToTempHashSet().SetEquals(other);
+    public void SymmetricExceptWith(IEnumerable<T> other) => EnsureHashSetWritable().SymmetricExceptWith(other);
+    public void UnionWith(IEnumerable<T> other) => EnsureHashSetWritable().UnionWith(other);
+
+    public struct Enumerator : IEnumerator<T>
     {
-        EnsureWritable();
-        _storage.Values.SymmetricExceptWith(other);
+        private readonly Storage _storage;
+        private HashSet<T>.Enumerator _setEnum;
+        private readonly bool _useSet;
+        private int _index;
+        private T _current;
+
+        internal Enumerator(Storage storage)
+        {
+            _storage = storage;
+            if (storage.Set is { } set)
+            {
+                _useSet = true;
+                _setEnum = set.GetEnumerator();
+                _index = 0;
+            }
+            else
+            {
+                _useSet = false;
+                _setEnum = default;
+                _index = -1;
+            }
+            _current = default!;
+        }
+
+        public T Current => _useSet ? _setEnum.Current : _current;
+        object? IEnumerator.Current => Current;
+
+        public bool MoveNext()
+        {
+            if (_useSet)
+                return _setEnum.MoveNext();
+            int next = _index + 1;
+            if (next >= _storage.Count)
+                return false;
+            _index = next;
+            _current = next == 0 ? _storage.Value0 : _storage.Overflow![next - 1];
+            return true;
+        }
+
+        public void Reset()
+        {
+            if (_useSet)
+                ((IEnumerator)_setEnum).Reset();
+            else
+                _index = -1;
+        }
+
+        public void Dispose()
+        {
+            if (_useSet)
+                _setEnum.Dispose();
+        }
     }
-    public void UnionWith(IEnumerable<T> other)
-    {
-        EnsureWritable();
-        _storage.Values.UnionWith(other);
-    }
-    public HashSet<T>.Enumerator GetEnumerator() => _storage.Values.GetEnumerator();
+
+    public Enumerator GetEnumerator() => new(_storage);
     IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
@@ -613,6 +861,6 @@ internal sealed class ForkableSet<T> : ISet<T>, IReadOnlySet<T>
     {
         if (!_storage.Shared)
             return;
-        _storage = new Storage(new HashSet<T>(_storage.Values, _storage.Values.Comparer));
+        _storage = new Storage(_storage);
     }
 }

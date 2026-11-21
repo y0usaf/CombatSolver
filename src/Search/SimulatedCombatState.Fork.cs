@@ -128,8 +128,8 @@ internal sealed partial class SimulatedCombatState
         fork._returnToHandNextTurn = ForkCardSet(_returnToHandNextTurn, context);
         fork._swordSageReplayBonuses = ForkCardDictionary(_swordSageReplayBonuses, context);
         fork._dampenOriginalUpgrades = ForkDampenCards(context);
-        fork._lastAttackThisTurn = ForkHistoryCourseCards(_lastAttackThisTurn, context);
-        fork._lastAttackPreviousTurn = ForkHistoryCourseCards(_lastAttackPreviousTurn, context);
+        fork._lastAttackThisTurn = _lastAttackThisTurn.Fork(context);
+        fork._lastAttackPreviousTurn = _lastAttackPreviousTurn.Fork(context);
         if (_registeredCombatCards is not null)
         {
             // 观察者只往卡上写一个回调，不读也不写任何被 ForkCard 改动的状态，
