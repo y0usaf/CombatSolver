@@ -276,9 +276,10 @@ internal static class FairPlay
             double cpuMs = (Process.GetCurrentProcess().TotalProcessorTime - cpuAtStart).TotalMilliseconds;
 
             List<string> committed = [];
-            Trace($"decision turn={turn} ms={watch.Elapsed.TotalMilliseconds:F0} hp={player.Creature.CurrentHp} block={player.Creature.Block} "
+            if (Environment.GetEnvironmentVariable("OFFLINE_HARNESS_FAIR_TRACE") == "1")
+                Trace($"decision turn={turn} ms={watch.Elapsed.TotalMilliseconds:F0} hp={player.Creature.CurrentHp} block={player.Creature.Block} "
                 + $"osty={(player.Osty is { IsAlive: true } traceOsty ? traceOsty.CurrentHp : 0)} energy={player.PlayerCombatState!.Energy} "
-                + $"enemies={string.Join(',', combat.Enemies.Where(e => e.IsAlive).Select(e => $"{e.CurrentHp}@{e.Monster?.NextMove.Id}[{string.Join(';', e.Powers.Select(p => p.Id.Entry + ":" + p.Amount))}]"))} "
+                + $"enemies={string.Join(',', combat.Enemies.Where(e => e.IsAlive).Select(e => $"{e.CurrentHp}@{e.Monster?.NextMove?.Id ?? "-"}[{string.Join(';', e.Powers.Select(p => p.Id.Entry + ":" + p.Amount))}]"))} "
                 + $"hand={string.Join(',', player.PlayerCombatState.Hand.Cards.Select(c => c.Id.Entry))} "
                 + $"route={string.Join(' ', route.Select(item => item.Kind + ":" + item.CardId))}");
             foreach (PlanAction action in route)
