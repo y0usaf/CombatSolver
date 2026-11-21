@@ -43,6 +43,11 @@ internal sealed class SimPlayerCombatState
 
     public SimCardPile PlayPile => _playPile ??= _materialized ? new SimCardPile(PileType.Play) : new SimCardPile(_liveState.PlayPile);
 
+    public int HandCount => _hand?.Cards.Count ?? (_materialized ? 0 : _liveState.Hand.Cards.Count);
+    public int DrawPileCount => _drawPile?.Cards.Count ?? (_materialized ? 0 : _liveState.DrawPile.Cards.Count);
+    public int DiscardPileCount => _discardPile?.Cards.Count ?? (_materialized ? 0 : _liveState.DiscardPile.Cards.Count);
+    public int ExhaustPileCount => _exhaustPile?.Cards.Count ?? (_materialized ? 0 : _liveState.ExhaustPile.Cards.Count);
+
     public IReadOnlyList<SimCardPile> AllPiles
         => _allPiles ??= [Hand, DrawPile, DiscardPile, ExhaustPile, PlayPile];
 

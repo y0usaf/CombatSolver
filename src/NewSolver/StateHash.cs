@@ -28,9 +28,9 @@ internal static class StateHash
         SimPlayerCombatState localState = simulator.State.GetPlayerCombatState(localPlayer);
         Mix(ref h, (ulong)localState.Energy);
         Mix(ref h, (ulong)localState.Stars);
-        Mix(ref h, (ulong)localState.DrawPile.Cards.Count);
-        Mix(ref h, (ulong)localState.DiscardPile.Cards.Count);
-        Mix(ref h, (ulong)localState.ExhaustPile.Cards.Count);
+        Mix(ref h, (ulong)localState.DrawPileCount);
+        Mix(ref h, (ulong)localState.DiscardPileCount);
+        Mix(ref h, (ulong)localState.ExhaustPileCount);
         Mix(ref h, (ulong)combat.GetCardsPlayedThisTurn(localPlayer.Creature));
 
         ulong handXor = 0;
@@ -45,7 +45,7 @@ internal static class StateHash
         Mix(ref h, handXor);
         Mix(ref h, handSum);
 
-        int topCount = Math.Min(knownTopRemaining, localState.DrawPile.Cards.Count);
+        int topCount = Math.Min(knownTopRemaining, localState.DrawPileCount);
         for (int i = 0; i < topCount; i++)
             Mix(ref h, CardHash(simulator, localState, localState.DrawPile.Cards[i]));
 
@@ -81,9 +81,9 @@ internal static class StateHash
             {
                 SimPlayerCombatState ps = simulator.State.GetPlayerCombatState(p);
                 Mix(ref h, (ulong)ps.Energy);
-                Mix(ref h, (ulong)ps.Hand.Cards.Count);
-                Mix(ref h, (ulong)ps.DrawPile.Cards.Count);
-                Mix(ref h, (ulong)ps.DiscardPile.Cards.Count);
+                Mix(ref h, (ulong)ps.HandCount);
+                Mix(ref h, (ulong)ps.DrawPileCount);
+                Mix(ref h, (ulong)ps.DiscardPileCount);
             }
             if (combat.GetOsty(p) is { } osty)
             {

@@ -547,18 +547,16 @@ internal static partial class HookMirrors
             return originalCost;
         }
 
-        var context = new ModifyStarCostMirrorContext
-        {
-            Simulator = simulator,
-            Card = card,
-            Cost = originalCost
-        };
+        decimal cost = originalCost;
+        ModifyStarCostMirrorContext? context = null;
         foreach (var listener in IterateCombatHookListeners(simulator, MirroredHookMask.TryModifyStarCost))
         {
-            context.Cost = ModifyStarCostMirrors.Invoke(listener, context);
+            context ??= new ModifyStarCostMirrorContext { Simulator = simulator, Card = card, Cost = cost };
+            cost = ModifyStarCostMirrors.Invoke(listener, context);
+            context.Cost = cost;
         }
 
-        return context.Cost;
+        return cost;
     }
 
     /// <summary>
@@ -1104,19 +1102,19 @@ internal static partial class HookMirrors
         AttackCommand command,
         int originalHitCount)
     {
-        var context = new ModifyAttackHitCountMirrorContext
-        {
-            Simulator = simulator,
-            Command = command,
-            HitCount = originalHitCount
-        };
-
+        int hitCount = originalHitCount;
+        ModifyAttackHitCountMirrorContext? context = null;
         foreach (var listener in IterateCombatHookListeners(simulator, MirroredHookMask.ModifyAttackHitCount))
         {
-            context.HitCount = ModifyAttackHitCountMirrors.Invoke(listener, context);
+            context ??= new ModifyAttackHitCountMirrorContext
+            {
+                Simulator = simulator, Command = command, HitCount = hitCount
+            };
+            hitCount = ModifyAttackHitCountMirrors.Invoke(listener, context);
+            context.HitCount = hitCount;
         }
 
-        return context.HitCount;
+        return hitCount;
     }
 
     // The simulator marks combat as ending as soon as a lethal hit resolves, earlier than the live
