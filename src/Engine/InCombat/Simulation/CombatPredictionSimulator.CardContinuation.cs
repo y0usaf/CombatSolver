@@ -81,14 +81,14 @@ internal sealed partial class CombatPredictionSimulator
             || play.IsAutoPlay || play.PlayCount != 1 || play.PlayIndex != 0
             || CurrentFrame is not { Parent: null } trace
             || _damageSource != null || _activeDrawDepth != 0 || ActionRelicTriggers != null
-            || _blockGainedByCardPlay.Count > (_blockGainedByCardPlay.ContainsKey(play) ? 1 : 0)
+            || (_blockGainedByCardPlay is { } blockMap && blockMap.Count > (blockMap.ContainsKey(play) ? 1 : 0))
             || !StateStore.SupportsManualCardChoiceContinuation
             || State.CombatState is not ICombatPredictionCardContinuationState { CanCaptureManualCardChoice: true } choices
             || !History.SupportsManualCardChoice(_manualChoiceHistoryStart, trace, play))
             return false;
         _capturedManualCardChoice = new(card, target, play, result, ownerBlockBefore,
             trace, _manualChoiceHistoryStart, _manualChoiceShuffleEvents, choices.CaptureManualCardChoice(),
-            _blockGainedByCardPlay.TryGetValue(play, out var block) ? block : null);
+            (_blockGainedByCardPlay != null && _blockGainedByCardPlay.TryGetValue(play, out var block)) ? block : null);
         return true;
     }
 
@@ -121,7 +121,7 @@ internal sealed partial class CombatPredictionSimulator
         frame = source with { Card = card, Play = play, Trace = action, Choice = source.Choice.Fork(context) };
         var child = new CombatPredictionSimulator(trace, state, Rng.Fork(), store, history,
             IsInProgress, IsAboutToLose, TerminalStamp, ShuffleEventCount, null) { _revealedDraws = _revealedDraws };
-        if (frame.Block is { } block) child._blockGainedByCardPlay.Add(play, block);
+        if (frame.Block is { } block) (child._blockGainedByCardPlay ??= []).Add(play, block);
         return child;
     }
 

@@ -56,7 +56,7 @@ internal sealed partial class CombatPredictionSimulator
             using (BeginExecutionDispatch()) sink.CompleteCardPlayEffects(this, card, ownerBlockBefore, completionHistoryStart);
             if (HasPendingChoice) return Suspend(CardPlayTailStage.Cleanup);
         }
-        _blockGainedByCardPlay.Remove(play);
+        _blockGainedByCardPlay?.Remove(play);
         return !owner.IsDead;
 
         bool Suspend(CardPlayTailStage next)
