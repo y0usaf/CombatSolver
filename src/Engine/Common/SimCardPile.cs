@@ -37,6 +37,12 @@ internal sealed class SimCardPile
 
     public PredictedCard? BottomCard => IsEmpty ? null : _cards[^1];
 
+    internal SimCardPile(PileType type)
+    {
+        Type = type;
+        _cards = [];
+    }
+
     public SimCardPile(PileType type, IEnumerable<PredictedCard> cards)
     {
         Type = type;
