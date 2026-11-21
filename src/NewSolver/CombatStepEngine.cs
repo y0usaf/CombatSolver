@@ -283,10 +283,11 @@ internal static class CombatStepEngine
         SolverDisplayNames names,
         int maxChoiceBranches,
         PartyRootBaseline? baseline = null,
-        int maxChoiceDepth = 3)
+        int maxChoiceDepth = 3,
+        bool skipCanPlayCheck = false)
     {
         List<StepOutcome> results = [];
-        ExpandActionRecursive(parent, baseAction, player, names, maxChoiceBranches, baseline, maxChoiceDepth, results, skipCanPlayCheck: true);
+        ExpandActionRecursive(parent, baseAction, player, names, maxChoiceBranches, baseline, maxChoiceDepth, results, skipCanPlayCheck);
         return results;
     }
 

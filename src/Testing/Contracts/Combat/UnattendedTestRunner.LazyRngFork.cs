@@ -81,10 +81,14 @@ internal sealed partial class UnattendedTestRunner
         {
             var mutable = field.FieldType.GetField("_mutable",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (field.GetValue(cold) is System.Collections.IDictionary playerStreams)
+            if (field.GetValue(cold) is Array playerEntries)
             {
-                foreach (object stream in playerStreams.Values)
+                foreach (object? entry in playerEntries)
                 {
+                    if (entry is null)
+                        continue;
+                    object stream = entry.GetType().GetField("Stream", System.Reflection.BindingFlags.Instance
+                        | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)!.GetValue(entry)!;
                     coldStreamCount++;
                     if (stream.GetType().GetField("_mutable", System.Reflection.BindingFlags.Instance
                             | System.Reflection.BindingFlags.NonPublic)!.GetValue(stream) is not null)
