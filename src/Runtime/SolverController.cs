@@ -586,6 +586,7 @@ internal static partial class SolverController
     public static void BeginCombat(ICombatState? state)
     {
         AssertMainThread();
+        EnsureUnEndTurnEventsHooked();
         ResetCore("combat_starting");
         SolverAutoStatus.ResetCombat();
         _combat.FullAutoEnabled = !_solverDisabled

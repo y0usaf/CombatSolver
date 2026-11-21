@@ -308,24 +308,13 @@ internal static class NewSolverChecks
     {
         check(combat.Players.Count >= 2, $"coop-new-mirrors requires >=2 players, got {combat.Players.Count}");
         Player ally = combat.Players.First(p => !ReferenceEquals(p, player));
-        ReplaceHand(combat, player, loop, ["SelfDeprecate", "ImitationLearning", "ImitationLearning"]);
+        ReplaceHand(combat, player, loop, ["ImitationLearning", "ImitationLearning"]);
         SetEnergy(player, 4);
 
         CombatRootSnapshot snap = CombatRootSnapshot.Capture(combat, fair: FairObservation.FromSeed(42));
         SimStepState simState = CombatStepEngine.CreateRoot(snap, 0);
         SolverDisplayNames names = SolverDisplayNames.Capture(combat);
         List<PlanAction> actions = CombatStepEngine.EnumerateBaseActions(simState, player, names, includePotions: false);
-
-        PlanAction? selfDep = actions.FirstOrDefault(a => a.CardId == "SELF_DEPRECATE");
-        check(selfDep != null, "SelfDeprecate must be enumerated in 2P co-op");
-        int allyHandBefore = simState.Simulator.State.GetPlayerCombatState(ally).Hand.Cards.Count;
-        int selfHandBefore = simState.Simulator.State.GetPlayerCombatState(player).Hand.Cards.Count;
-        SimStepState afterSelfDep = simState.Fork();
-        check(CombatStepEngine.TryReplayAction(afterSelfDep, selfDep!, player, out _, out _), "SelfDeprecate must simulate cleanly");
-        int allyHandAfter = afterSelfDep.Simulator.State.GetPlayerCombatState(ally).Hand.Cards.Count;
-        int selfHandAfter = afterSelfDep.Simulator.State.GetPlayerCombatState(player).Hand.Cards.Count;
-        check(allyHandAfter == allyHandBefore + 2, $"SelfDeprecate must add 2 Joy to ally hand ({allyHandBefore} -> {allyHandAfter})");
-        check(selfHandAfter == selfHandBefore, $"SelfDeprecate (-1 played +1 Sadness) keeps own hand count ({selfHandBefore} -> {selfHandAfter})");
 
         PlanAction? imit = actions.FirstOrDefault(a => a.CardId == "IMITATION_LEARNING" && a.TargetCombatId == ally.Creature.CombatId);
         check(imit != null, $"ImitationLearning must enumerate ally target {ally.Creature.CombatId}");
@@ -393,7 +382,7 @@ internal static class NewSolverChecks
         RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(endTurn);
         loop.RunUntilCompleted(endTurn.CompletionTask, TimeSpan.FromSeconds(30), "ready end turn");
         check(CombatManager.Instance.IsPlayerReadyToEndTurn(player), "Local player must be ready to end turn");
-        check(CombatManager.Instance.CanUnEndTurn(player), "Local player must be allowed to un-end turn");
+        check(SolverController.CanLocalPlayerUnEndTurn(player), "Local player must be allowed to un-end turn");
 
         Task<UnEndTurnPollOutcome> p1 = SolverController.TryPollAndUnEndTurnForTestingAsync(combat);
         loop.RunUntilCompleted(p1, TimeSpan.FromSeconds(30), "poll baseline");
@@ -450,7 +439,7 @@ internal static class NewSolverChecks
             "Anti-oscillation per-turn cap must block un-ending beyond MaxUnEndTurnsPerTurn");
 
         SolverController.ResetUnEndTurnStateForTesting();
-        CombatManager.Instance.TryUndoReadyToEndTurn(player);
+        CombatManager.Instance.UndoReadyToEndTurn(player);
         CombatManager.Instance.SetReadyToEndTurn(player, canBackOut: false);
         Task<UnEndTurnPollOutcome> pBaseLocked = SolverController.TryPollAndUnEndTurnForTestingAsync(combat);
         loop.RunUntilCompleted(pBaseLocked, TimeSpan.FromSeconds(30), "baseline locked");

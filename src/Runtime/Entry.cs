@@ -62,6 +62,7 @@ public static class Entry
         if (STS2RitsuLib.Content.ModContentRegistry.IsFrozen)
             ModelDbGetIdCachePatch.MarkModelRegistryInitialized();
         CombatManager.Instance.TurnStarted += OnTurnStarted;
+        SolverController.EnsureUnEndTurnEventsHooked();
 
         var patcher = RitsuLibFramework.CreatePatcher(ModId, "combat-solver", "战斗路线求解器");
         patcher.RegisterPatch<PlayerTurnSetupPatch>();

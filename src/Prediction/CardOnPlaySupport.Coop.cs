@@ -51,22 +51,11 @@ internal static partial class CardOnPlaySupport
             case Blaze when target != null:
                 combat.Apply<StrengthPower>(target, card.DynamicVars.Strength.IntValue, owner);
                 break;
-            case Enrapture when target != null:
-                combat.Apply<VigorPower>(target, card.DynamicVars["VigorPower"].IntValue, owner);
-                combat.Apply<StretchPower>(target, card.DynamicVars["StretchPower"].IntValue, owner);
-                break;
             case Plot:
             {
                 int count = card.DynamicVars.Cards.IntValue;
                 foreach (Creature ally in AlivePlayerTeammates(simulator, combat, owner))
                     combat.Apply<DrawCardsNextTurnPower>(ally, count, owner);
-                break;
-            }
-            case Yoga:
-            {
-                int amount = card.DynamicVars["StretchPower"].IntValue;
-                foreach (Creature ally in AlivePlayerTeammates(simulator, combat, owner))
-                    combat.Apply<StretchPower>(ally, amount, owner);
                 break;
             }
             case OneForAll:
@@ -121,12 +110,6 @@ internal static partial class CardOnPlaySupport
             case BeaconOfHope:
                 combat.Apply<BeaconOfHopePower>(owner, 1, owner);
                 break;
-            case Compost:
-                combat.Apply<CompostPower>(owner, card.DynamicVars.Energy.IntValue, owner);
-                break;
-            case CoveringFire:
-                combat.Apply<CoveringFirePower>(owner, card.DynamicVars["CoveringFirePower"].IntValue, owner);
-                break;
             case Flanking when target != null:
                 combat.Apply<FlankingPower>(target, 2, owner);
                 break;
@@ -162,9 +145,6 @@ internal static partial class CardOnPlaySupport
                 combat.Apply<HibernatePower>(owner, 1, owner);
                 simulator.OrbChannel<FrostOrb>(card.Owner, card.DynamicVars.Repeat.IntValue);
                 break;
-            case Ensemble:
-                combat.Apply<EnsemblePower>(owner, card.DynamicVars.Cards.IntValue, owner);
-                break;
             case Outrage:
             {
                 foreach (Creature ally in AlivePlayerTeammates(simulator, combat, owner))
@@ -180,45 +160,6 @@ internal static partial class CardOnPlaySupport
                         CardGenerationResultKind.Fixed);
                     if (simulator.HasPendingChoice)
                         return;
-                }
-                break;
-            }
-            case SelfDeprecate:
-            {
-                int sadnessCount = card.DynamicVars["Sadness"].IntValue;
-                if (sadnessCount > 0)
-                {
-                    List<PredictedCard> sadness = new(sadnessCount);
-                    for (int i = 0; i < sadnessCount; i++)
-                        sadness.Add(PredictedCard.Create(CanonicalModels.Card<Sadness>(), card.Owner));
-                    simulator.AddGeneratedCardsToCombat(
-                        sadness,
-                        PileType.Hand,
-                        card.Owner,
-                        CardPilePosition.Bottom,
-                        CardGenerationResultKind.Fixed);
-                    if (simulator.HasPendingChoice)
-                        return;
-                }
-                int joyCount = card.DynamicVars["Joy"].IntValue;
-                if (joyCount > 0)
-                {
-                    foreach (Creature ally in AlivePlayerTeammates(simulator, combat, owner))
-                    {
-                        if (ReferenceEquals(ally, owner))
-                            continue;
-                        List<PredictedCard> joys = new(joyCount);
-                        for (int i = 0; i < joyCount; i++)
-                            joys.Add(PredictedCard.Create(CanonicalModels.Card<Joy>(), ally.Player!));
-                        simulator.AddGeneratedCardsToCombat(
-                            joys,
-                            PileType.Hand,
-                            ally.Player!,
-                            CardPilePosition.Bottom,
-                            CardGenerationResultKind.Fixed);
-                        if (simulator.HasPendingChoice)
-                            return;
-                    }
                 }
                 break;
             }

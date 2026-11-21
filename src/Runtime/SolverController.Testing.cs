@@ -33,6 +33,7 @@ internal static partial class SolverController
 
     internal static void BeginCombatForTesting(CombatState state, bool fullAuto)
     {
+        EnsureUnEndTurnEventsHooked();
         _combat = new SolverCombatSession
         {
             State = state,
@@ -50,6 +51,7 @@ internal static partial class SolverController
         _combat.UnEndTurnCountThisTurn = 0;
         _combat.UnEndTurnInFlight = false;
         _combat.EvaluatedUnEndFingerprintsThisTurn.Clear();
+        _combat.CannotBackOutPlayers.Clear();
     }
 
     // Unattended validation installs a frozen result at the normal deployment boundary.

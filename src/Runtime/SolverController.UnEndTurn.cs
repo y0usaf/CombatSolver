@@ -29,6 +29,40 @@ internal enum UnEndTurnPollOutcome
 internal static partial class SolverController
 {
     internal const int MaxUnEndTurnsPerTurn = 4;
+    private static bool _unEndTurnEventsHooked;
+
+    internal static void EnsureUnEndTurnEventsHooked()
+    {
+        if (_unEndTurnEventsHooked)
+            return;
+        _unEndTurnEventsHooked = true;
+        CombatManager.Instance.PlayerEndedTurn += OnPlayerEndedTurnForUnEnd;
+        CombatManager.Instance.PlayerUnendedTurn += OnPlayerUnendedTurnForUnEnd;
+        CombatManager.Instance.TurnStarted += OnTurnStartedForUnEnd;
+    }
+
+    private static void OnPlayerEndedTurnForUnEnd(Player player, bool canBackOut)
+    {
+        if (canBackOut)
+            _combat.CannotBackOutPlayers.Remove(player.NetId);
+        else
+            _combat.CannotBackOutPlayers.Add(player.NetId);
+    }
+
+    private static void OnPlayerUnendedTurnForUnEnd(Player player)
+        => _combat.CannotBackOutPlayers.Remove(player.NetId);
+
+    private static void OnTurnStartedForUnEnd(CombatState _)
+        => _combat.CannotBackOutPlayers.Clear();
+
+    internal static bool CanLocalPlayerUnEndTurn(Player player)
+        => CombatManager.Instance.IsInProgress
+            && !CombatManager.Instance.IsOverOrEnding
+            && !CombatManager.Instance.EndingPlayerTurnPhaseOne
+            && !CombatManager.Instance.EndingPlayerTurnPhaseTwo
+            && CombatManager.Instance.IsPlayerReadyToEndTurn(player)
+            && !CombatManager.Instance.AllPlayersReadyToEndTurn()
+            && !_combat.CannotBackOutPlayers.Contains(player.NetId);
 
     internal static Creature? ResolveLiveActionTarget(CombatState state, PlanAction action)
         => state.GetCreature(action.TargetCombatId);
@@ -191,7 +225,7 @@ internal static partial class SolverController
         if (string.Equals(_combat.ReadyToEndTurnBaselineFingerprint, fingerprint, StringComparison.Ordinal))
             return UnEndTurnPollOutcome.Unchanged;
 
-        if (!CombatManager.Instance.CanUnEndTurn(me))
+        if (!CanLocalPlayerUnEndTurn(me))
         {
             _combat.ReadyToEndTurnBaselineFingerprint = fingerprint;
             return UnEndTurnPollOutcome.CannotUnEnd;
@@ -353,7 +387,7 @@ internal static partial class SolverController
             && me.PlayerCombatState is { Phase: PlayerTurnPhase.Play } pcs
             && pcs.TurnNumber == turn
             && CombatManager.Instance.IsPlayerReadyToEndTurn(me)
-            && CombatManager.Instance.CanUnEndTurn(me)
+            && CanLocalPlayerUnEndTurn(me)
             && !RunManager.Instance.ActionExecutor.IsRunning;
 
     internal static async Task<UnEndTurnPollOutcome> TryPollAndUnEndTurnForTestingAsync(

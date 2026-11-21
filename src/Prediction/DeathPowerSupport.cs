@@ -35,21 +35,6 @@ internal static class DeathPowerSupport
             if (power.Amount <= 0)
                 continue;
 
-            if (power is CompostPower
-                && dead.Side != power.Owner.Side
-                && simulator.State.GetCreature(power.Owner).IsAlive)
-            {
-                foreach (Creature ally in combat.GetTeammatesOf(power.Owner))
-                {
-                    if (ally != null && ally.IsPlayer && ally.Player != null
-                        && simulator.State.GetCreature(ally).IsAlive)
-                    {
-                        simulator.GainEnergy(ally.Player, power.Amount);
-                    }
-                }
-                continue;
-            }
-
             if (power is RavenousPower
                 && !ReferenceEquals(power.Owner, dead)
                 && power.Owner.Side == dead.Side

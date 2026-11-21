@@ -212,7 +212,7 @@ internal static class SetupValueChecks
         if (mode == GiftEndTurnMode.ManualRetake)
         {
             // The player cancels the solver's end turn and ends it again by hand; the turn is theirs now.
-            CombatManager.Instance.TryUndoReadyToEndTurn(local);
+            CombatManager.Instance.UndoReadyToEndTurn(local);
             CoopEvalSuite.WaitForQueueIdle(loop);
             check(!CombatManager.Instance.IsPlayerReadyToEndTurn(local), "player must be able to cancel the solver's end turn");
             Task<UnEndTurnPollOutcome> retake = SolverController.TryPollAndUnEndTurnForTestingAsync(combat);

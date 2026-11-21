@@ -174,6 +174,7 @@ internal sealed class SolverCombatSession
     public int UnEndTurnCountThisTurn { get; set; }
     public bool UnEndTurnInFlight { get; set; }
     public HashSet<string> EvaluatedUnEndFingerprintsThisTurn { get; } = new(StringComparer.Ordinal);
+    public HashSet<ulong> CannotBackOutPlayers { get; } = [];
     public CombatBugReportIssueLedger BugReportIssues { get; } = new();
 }
 

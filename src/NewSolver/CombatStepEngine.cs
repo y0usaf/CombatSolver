@@ -22,8 +22,7 @@ internal readonly record struct RngStamp(
     PredictionRngState Targets,
     PredictionRngState OrbGen,
     PredictionRngState MonsterAi,
-    PredictionRngState Niche,
-    PredictionRngState NonCombat)
+    PredictionRngState Niche)
 {
     public static RngStamp Capture(CombatPredictionSimulator sim, Player player) => new(
         sim.Rng.ShuffleState,
@@ -34,8 +33,7 @@ internal readonly record struct RngStamp(
         sim.Rng.CombatTargetsState,
         sim.Rng.CombatOrbGenerationState,
         sim.Rng.MonsterAiState,
-        sim.Rng.NicheState,
-        sim.Rng.NonCombatGenerationState(player));
+        sim.Rng.NicheState);
 }
 
 internal sealed class SimStepState(
@@ -953,7 +951,7 @@ internal static class CombatStepEngine
             if (!CorePowerSupport.ApplyEnemyDeathPowers(sim, combat, combat.KnownEnemies, state.ProcessedEnemyDeaths))
                 return false;
 
-            bool takingExtraTurn = HookMirrors.ShouldTakeExtraTurn(sim, combat, player, out AbstractModel? extraTurnSource);
+            bool takingExtraTurn = HookMirrors.ShouldTakeExtraTurn(sim, combat, player);
             bool hasActiveEmotionChip = combat.RelicsOf(player).Any(r => r is EmotionChip && !r.IsMelted);
             SimCreatureState simPlayer = sim.State.GetCreature(player.Creature);
 
@@ -1069,7 +1067,7 @@ internal static class CombatStepEngine
             {
                 if (hasActiveEmotionChip)
                     combat.RecordRelicRoundDamage(sim, player, roundHistoryStart);
-                if (!HookMirrors.AfterTakingExtraTurn(sim, combat, player, extraTurnSource!))
+                if (!HookMirrors.AfterTakingExtraTurn(sim, combat, player))
                     return false;
             }
 

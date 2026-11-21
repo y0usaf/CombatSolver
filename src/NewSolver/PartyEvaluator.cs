@@ -485,7 +485,6 @@ internal static class PartyEvaluator
                 DexterityPower => amt * 0.45 * scale,
                 FocusPower => amt * 0.60 * scale,
                 VigorPower => amt * 0.25,
-                StretchPower => amt * 0.25,
                 PlatingPower => amt * 0.30 * scale,
                 RegenPower => amt * 0.45 * shortScale,
                 BufferPower => amt * 3.5,
@@ -509,9 +508,7 @@ internal static class PartyEvaluator
                 StarNextTurnPower => amt * 0.45,
                 OneForAllPower => amt * 0.35 * scale,
                 BeaconOfHopePower => 1.4 * scale,
-                CompostPower => amt * 0.9 * scale,
                 HammerTimePower => 1.3 * scale,
-                CoveringFirePower => amt * 0.2 * scale,
                 SneakyPower => amt * 0.45 * scale,
                 SoulboundPower => 1.1 * scale,
                 ConcoctPower => amt * 0.35,
@@ -770,7 +767,6 @@ internal static class PartyEvaluator
             + g.Royalties * 2.0
             + g.Goopy * 1.0
             + g.ForbiddenGrimoire * 2.0
-            + g.MadScience * 2.0
-            + g.ShowOff * 1.0;
+            + g.MadScience * 2.0;
     }
 }
