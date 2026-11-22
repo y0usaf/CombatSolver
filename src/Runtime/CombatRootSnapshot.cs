@@ -30,6 +30,7 @@ internal sealed class CombatRootSnapshot
     public LiveCombatStamp LiveStamp { get; }
     public ContinuationStamp ContinuationStamp { get; }
     internal ulong FairSamplerSeed { get; private init; }
+    public IReadOnlyList<uint> ActingTeammateIds { get; private init; } = [];
     public int PlayerCount { get; }
     public int StartTurnNumber { get; }
     public int TotalFloor { get; }
@@ -337,7 +338,23 @@ internal sealed class CombatRootSnapshot
             potionRewardOutlook)
         {
             FairSamplerSeed = fair.Seed,
+            ActingTeammateIds = CaptureActingTeammates(state, player),
         };
+    }
+
+    private static uint[] CaptureActingTeammates(CombatState state, Player player)
+    {
+        if (state.Players.Count <= 1 || !CombatManager.Instance.IsInProgress)
+            return [];
+        List<uint>? acting = null;
+        foreach (Player mate in state.Players)
+        {
+            if (ReferenceEquals(mate, player) || mate.Creature.CombatId is not uint id || !mate.Creature.IsAlive)
+                continue;
+            if (!CombatManager.Instance.IsPlayerReadyToEndTurn(mate))
+                (acting ??= []).Add(id);
+        }
+        return acting?.ToArray() ?? [];
     }
 
     private static bool HasHealingVariables(DynamicVarSet variables)

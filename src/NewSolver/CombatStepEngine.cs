@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.ValueProps;
@@ -52,6 +53,7 @@ internal sealed class SimStepState(
     public ForkableSet<uint> ProcessedEnemyDeaths { get; } = processedEnemyDeaths;
     public int KnownTopRemaining { get; set; } = knownTopRemaining;
     public double TeammateSupportValue { get; set; } = teammateSupportValue;
+    public IReadOnlyList<uint>? ActingTeammates { get; set; }
 
     public int GetTeammateDeathTurn(uint combatId)
         => _teammateDeathTurns != null && _teammateDeathTurns.TryGetValue(combatId, out int turn) ? turn : int.MaxValue;
@@ -116,7 +118,10 @@ internal sealed class SimStepState(
         KnownTopRemaining,
         _teammateDeathTurns is { Count: > 0 } d ? new Dictionary<uint, int>(d) : null,
         TeammateSupportValue,
-        _teammatePostRootSnapshot is { Count: > 0 } s ? new Dictionary<uint, (int, int, double)>(s) : null);
+        _teammatePostRootSnapshot is { Count: > 0 } s ? new Dictionary<uint, (int, int, double)>(s) : null)
+    {
+        ActingTeammates = ActingTeammates,
+    };
 }
 
 internal readonly record struct StepOutcome(
@@ -138,7 +143,10 @@ internal static class CombatStepEngine
             if (enemy.CombatId is uint id && sim.State.GetCreature(enemy).IsDead)
                 deaths.Add(id);
         }
-        return new SimStepState(sim, deaths, initialKnownTop);
+        return new SimStepState(sim, deaths, initialKnownTop)
+        {
+            ActingTeammates = root.ActingTeammateIds.Count > 0 ? root.ActingTeammateIds : null,
+        };
     }
 
     public static List<PlanAction> EnumerateBaseActions(
@@ -936,6 +944,16 @@ internal static class CombatStepEngine
         SimulatedCombatState combat = state.Combat;
         if (!sim.IsInProgress)
             return true;
+        if (state.ActingTeammates is { } acting)
+        {
+            state.ActingTeammates = null;
+            if (HasActingTeammateBlockCopy(state, player, acting) && PlayActingTeammateBlockCopies(state.Fork(), player, acting))
+            {
+                PlayActingTeammateBlockCopies(state, player, acting);
+                if (!sim.IsInProgress)
+                    return true;
+            }
+        }
 
         IReadOnlyList<PlanCardChoice>? roundChoicePlans = turnStartChoices?
             .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse || choice.Timing != PlanChoiceTiming.EnemyTurn)
@@ -1099,6 +1117,101 @@ internal static class CombatStepEngine
         {
             combat.EndActionChoices();
         }
+    }
+
+    private static bool HasActingTeammateBlockCopy(SimStepState state, Player local, IReadOnlyList<uint> acting)
+    {
+        CombatPredictionSimulator sim = state.Simulator;
+        SimulatedCombatState combat = state.Combat;
+        foreach (Player mate in combat.Players)
+        {
+            if (ReferenceEquals(mate, local) || mate.Creature.CombatId is not uint id || !acting.Contains(id)
+                || sim.State.GetCreature(mate.Creature).IsDead)
+                continue;
+            if (sim.State.GetPlayerCombatState(mate).Hand.Cards.Any(c => c.Preview is Mimic && combat.CanPlayCard(sim, c)))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool PlayActingTeammateBlockCopies(SimStepState state, Player local, IReadOnlyList<uint> acting)
+    {
+        CombatPredictionSimulator sim = state.Simulator;
+        SimulatedCombatState combat = state.Combat;
+        IReadOnlyList<Player> players = combat.Players;
+        for (int i = 0; i < players.Count; i++)
+        {
+            Player mate = players[i];
+            if (ReferenceEquals(mate, local) || mate.Creature.CombatId is not uint id || !acting.Contains(id))
+                continue;
+            if (!sim.IsInProgress || sim.State.GetCreature(mate.Creature).IsDead)
+                continue;
+            SimPlayerCombatState ps = sim.State.GetPlayerCombatState(mate);
+            PredictedCard? mimic = ps.Hand.Cards.FirstOrDefault(c => c.Preview is Mimic && combat.CanPlayCard(sim, c));
+            if (mimic == null)
+                continue;
+            Creature? source = null;
+            int sourceBlock = 0;
+            foreach (Creature candidate in combat.GetValidManualCardTargets(mimic.Preview))
+            {
+                SimCreatureState cs = sim.State.GetCreature(candidate);
+                if (ReferenceEquals(candidate, mate.Creature) || !cs.IsAlive || cs.Block <= sourceBlock)
+                    continue;
+                source = candidate;
+                sourceBlock = cs.Block;
+            }
+            if (source == null)
+                continue;
+            if (!PlayTeammateCard(state, mimic, source))
+                return false;
+            for (int guard = ps.Hand.Cards.Count; guard > 0; guard--)
+            {
+                PredictedCard? slam = ps.Hand.Cards.FirstOrDefault(c => c.Preview is BodySlam && combat.CanPlayCard(sim, c));
+                if (slam == null || !sim.IsInProgress || sim.State.GetCreature(mate.Creature).Block <= 0)
+                    break;
+                Creature? target = null;
+                int targetHp = int.MaxValue;
+                foreach (Creature enemy in combat.GetValidManualCardTargets(slam.Preview))
+                {
+                    SimCreatureState es = sim.State.GetCreature(enemy);
+                    if (!es.IsAlive || !sim.State.IsHittable(enemy) || es.CurrentHp >= targetHp)
+                        continue;
+                    target = enemy;
+                    targetHp = es.CurrentHp;
+                }
+                if (target == null)
+                    break;
+                if (!PlayTeammateCard(state, slam, target))
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool PlayTeammateCard(SimStepState state, PredictedCard card, Creature target)
+    {
+        CombatPredictionSimulator sim = state.Simulator;
+        SimulatedCombatState combat = state.Combat;
+        combat.BeginActionChoices(TurnStartChoiceCursor.ForAutomaticPolicy(req =>
+            req.Spec != null ? CardChoiceSupport.BuildAutomaticPolicyChoice(req.Spec) : null));
+        try
+        {
+            using (combat.BeginCardExecutionScope(state.ProcessedEnemyDeaths))
+            {
+                if (!sim.ManualPlay(card, target, out _))
+                    return false;
+                bool deathsOk;
+                using (sim.BeginExecutionDispatch())
+                    deathsOk = CorePowerSupport.ApplyEnemyDeathPowers(sim, combat, combat.KnownEnemies, state.ProcessedEnemyDeaths);
+                if (!deathsOk || !SettleActionBoundary(sim, combat))
+                    return false;
+            }
+        }
+        finally
+        {
+            combat.EndActionChoices();
+        }
+        return true;
     }
 
     private static bool AdvancePlayerStart(

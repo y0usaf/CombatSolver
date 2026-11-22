@@ -92,6 +92,12 @@ internal static class NewSolverChecks
             case "coop-gift-energy-retake":
                 SetupValueChecks.RunGiftEnergy(combat, player, loop, Check, SetupValueChecks.GiftEndTurnMode.ManualRetake);
                 break;
+            case "coop-mimic-open":
+                MimicBodySlamChecks.Run(combat, player, loop, Check, open: true, options.OutputDirectory);
+                break;
+            case "coop-mimic-ready":
+                MimicBodySlamChecks.Run(combat, player, loop, Check, open: false, options.OutputDirectory);
+                break;
             default:
                 throw new ArgumentException($"Unknown NewSolverChecks suite: {suite}");
         }
