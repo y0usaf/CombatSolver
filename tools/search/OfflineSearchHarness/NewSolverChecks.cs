@@ -98,6 +98,15 @@ internal static class NewSolverChecks
             case "coop-mimic-ready":
                 MimicBodySlamChecks.Run(combat, player, loop, Check, open: false, options.OutputDirectory);
                 break;
+            case "coop-mate-win":
+                TeammateWinChecks.Run(combat, player, loop, Check, "plain", options.OutputDirectory);
+                break;
+            case "coop-mate-win-stock":
+                TeammateWinChecks.Run(combat, player, loop, Check, "stock", options.OutputDirectory);
+                break;
+            case "coop-mate-win-orb":
+                TeammateWinChecks.Run(combat, player, loop, Check, "orb", options.OutputDirectory);
+                break;
             default:
                 throw new ArgumentException($"Unknown NewSolverChecks suite: {suite}");
         }

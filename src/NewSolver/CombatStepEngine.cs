@@ -952,7 +952,7 @@ internal static class CombatStepEngine
             if (HasActingTeammateBlockCopy(state, player, acting) && PlayActingTeammateBlockCopies(state.Fork(), player, acting))
             {
                 PlayActingTeammateBlockCopies(state, player, acting);
-                if (!sim.IsInProgress)
+                if (sim.CheckWinCondition(combat.GetPlayerTurnNumber(player)))
                     return true;
             }
         }
@@ -1164,7 +1164,7 @@ internal static class CombatStepEngine
             }
             if (source == null)
                 continue;
-            if (!PlayTeammateCard(state, mimic, source))
+            if (!PlayTeammateCard(state, local, mimic, source))
                 return false;
             for (int guard = ps.Hand.Cards.Count; guard > 0; guard--)
             {
@@ -1183,14 +1183,14 @@ internal static class CombatStepEngine
                 }
                 if (target == null)
                     break;
-                if (!PlayTeammateCard(state, slam, target))
+                if (!PlayTeammateCard(state, local, slam, target))
                     return false;
             }
         }
         return true;
     }
 
-    private static bool PlayTeammateCard(SimStepState state, PredictedCard card, Creature target)
+    private static bool PlayTeammateCard(SimStepState state, Player local, PredictedCard card, Creature target)
     {
         CombatPredictionSimulator sim = state.Simulator;
         SimulatedCombatState combat = state.Combat;
@@ -1213,6 +1213,7 @@ internal static class CombatStepEngine
         {
             combat.EndActionChoices();
         }
+        sim.CheckWinCondition(combat.GetPlayerTurnNumber(local));
         return true;
     }
 
