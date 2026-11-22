@@ -52,11 +52,7 @@ internal sealed record SolverSettingsData
     public bool RetainAllCombatLogs { get; init; }
     public SolverDeploymentFastMode DeploymentFastMode { get; init; } = SolverDeploymentFastMode.FollowGame;
     public double? DeploymentInterActionDelaySeconds { get; init; }
-    /// <summary>
-    /// Chosen co-op Auto pace. Free play is the default, so a settings file written by an
-    /// older build without this property loads as Free play.
-    /// </summary>
-    public SolverCoopPlayMode CoopPlayMode { get; init; } = SolverCoopPlayMode.FreePlay;
+    public SolverCoopPlayMode CoopPlayMode { get; init; } = SolverCoopPlayMode.Wait;
 }
 
 internal sealed record SolverSettingsSnapshot(

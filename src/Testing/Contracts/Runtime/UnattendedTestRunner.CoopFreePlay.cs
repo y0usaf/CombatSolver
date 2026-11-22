@@ -30,21 +30,20 @@ internal sealed partial class UnattendedTestRunner
         SolverController.SetCoopPlayModeForTesting(SolverCoopPlayMode.FreePlay);
         try
         {
-            // 0. Free play is the default, and a chosen pace survives a settings reload.
             SolverSettingsData defaults = SolverSettings.DeserializeForTesting("{}");
-            if (defaults.CoopPlayMode != SolverCoopPlayMode.FreePlay)
+            if (defaults.CoopPlayMode != SolverCoopPlayMode.Wait)
             {
                 throw new InvalidOperationException(
-                    $"Free play is not the default pace for a settings file without the property: {defaults.CoopPlayMode}.");
+                    $"Wait is not the default pace for a settings file without the property: {defaults.CoopPlayMode}.");
             }
             SolverSettingsData reloaded = SolverSettings.RoundTripForTesting(
-                settingsBefore with { CoopPlayMode = SolverCoopPlayMode.Wait });
-            if (reloaded.CoopPlayMode != SolverCoopPlayMode.Wait)
+                settingsBefore with { CoopPlayMode = SolverCoopPlayMode.FreePlay });
+            if (reloaded.CoopPlayMode != SolverCoopPlayMode.FreePlay)
             {
                 throw new InvalidOperationException(
                     $"The chosen pace does not survive a settings reload: {reloaded.CoopPlayMode}.");
             }
-            _completedChecks.Add("CoopFreePlay:Settings:DefaultFreePlayAndPersistedChoice");
+            _completedChecks.Add("CoopFreePlay:Settings:DefaultWaitAndPersistedChoice");
 
             await WaitForSolverIdleAsync("free_play_initial_idle");
             if (CombatManager.Instance.IsPlayerReadyToEndTurn(teammate))
