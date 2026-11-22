@@ -18,11 +18,11 @@
 
 无长期无头合同；菜单只调用已有入口（`SolverAutoToggle.SetAuto`、`SetCoopPlayMode`、`ExecuteSingleTurn`、新增 `SetDeploymentFastMode`）。本轮在 Xvfb + llvmpipe（`opengl3`）下以非 `--headless` 方式启动隔离实例（一次性改写的启动器，未入库），用 `--keep-game-open --hold-after-initial-search` 停在 SMOKE-001 战斗中，xdotool 发送按键/鼠标并截图、OCR 与 `[CombatSolver/Auto]` 日志对账：Ctrl+F9 开关、Esc 关闭；↓↓↓ 后 →/← 依次写入 `deployment_fast_mode=Normal/Fast/Instant/Fast`；数字 2 与鼠标左键第 2 行分别写入 `coop_play_mode=Wait/FreePlay`；速度行右键回退到 `Normal`；回车/空格在第 1 行产生 `start user_toggle_on` / `stop user_toggle_off`；鼠标点击「执行本回合」产生 `single_turn` 并关闭菜单。战斗外（主菜单）同一菜单也可打开，执行本回合置灰。首次探针暴露 `RefreshControls` 对已释放的顶部栏开关调用 `SyncState`（`ObjectDisposedException`，旧 Ctrl+F11 路径同样可达），已改为逐个检查实例有效后复测为 0 次。
 
-同一最终构建上 `COOP-AUTO-EXECUTE`（2 人）与 `BETA-DEPLOY-IRONCLAD-SENTINEL` Passed。`COOP-FREE-PLAY-EXECUTE`（2 人）在未改动的 a4560194 上同样失败（2/2，`The discarded free-play turn ended unexpectedly.`：夹具关闭 Auto 前重排后的路线已结束回合），不是本改动引入；未验证：真实可见 Steam 窗口下的排版与手柄、真实联机房间中「瞬间（联机不生效）」标注。
+同一最终构建上 `COOP-AUTO-EXECUTE`（2 人）与 `BETA-DEPLOY-IRONCLAD-SENTINEL` Passed。`COOP-FREE-PLAY-EXECUTE`（2 人）当时在未改动的 a4560194 上同样失败（2/2，`The discarded free-play turn ended unexpectedly.`）。根因是夹具竞态而非求解器缺陷：自 657e1f08 起空手重排 0 ms 完成，Auto 在夹具仅翻转测试标志（不会取消已开始的部署）之前就部署了重排后的结束回合；夹具已改为等待该回合由重排路线结束后在下一回合测试 `Ctrl+F8`；未验证：真实可见 Steam 窗口下的排版与手柄、真实联机房间中「瞬间（联机不生效）」标注。
 
 ## 联机自动模式节奏
 
-`COOP-FREE-PLAY-EXECUTE` 覆盖「自由行动」节奏：设置层证明自由行动是缺省值且选择可回读；`WaitForCoopStableBoardAsync` 在队友未准备时立即返回；Auto 在队友仍在行动时就打出本地牌（队友手牌与出牌记录不变）；队友中途改变棋盘后丢弃剩余路线并立即重新求解，期间不进入队友等待；最后 `Ctrl+F8` 仍只执行一个本地回合并关闭 Auto，且同一卡实例不会被出两次。`COOP-AUTO-EXECUTE` 覆盖「等待队友」节奏：等待、切换成自由行动即解除等待、切回等待后重新阻塞、队友准备后在稳定根恢复、首次出牌后改棋盘丢弃余下路线、`Ctrl+F8` 只出本地牌且 Auto 保持关闭。
+`COOP-FREE-PLAY-EXECUTE` 覆盖「自由行动」节奏：设置层证明自由行动是缺省值且选择可回读；`WaitForCoopStableBoardAsync` 在队友未准备时立即返回；Auto 在队友仍在行动时就打出本地牌（队友手牌与出牌记录不变）；队友中途改变棋盘后丢弃剩余路线并立即重新求解，期间不进入队友等待；手牌已空时重排路线由仍开启的 Auto 结束回合，夹具确认结束回合的是棋盘变化之后的新决定（`CoopFreePlay:BoardChangeAfterFirstAction:ReplannedRouteEndedTurn`），再用玩家开关关闭 Auto；下一回合 `Ctrl+F8` 仍只执行一个本地回合并关闭 Auto，且同一卡实例不会被出两次。`COOP-AUTO-EXECUTE` 覆盖「等待队友」节奏：等待、切换成自由行动即解除等待、切回等待后重新阻塞、队友准备后在稳定根恢复、首次出牌后改棋盘丢弃余下路线、`Ctrl+F8` 只出本地牌且 Auto 保持关闭。
 
 ```text
 pwsh -NoProfile -File tools/testing/run-unattended-test.ps1 -ScenarioId COOP-FREE-PLAY-EXECUTE -PlayerCount 2 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -Seed COOPFREE1 -EnemyCurrentHp 60 -FixedSearchBudget -SearchBudgetOverrideMilliseconds 1500 -TimeoutSeconds 180 -CleanupInstanceOnExit
