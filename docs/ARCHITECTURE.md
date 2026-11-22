@@ -143,7 +143,9 @@ Fork 发生在动作、选牌、Power、死亡和出牌事务允许复制的稳�
 
 界面只有自动开关、单回合按钮、联机节奏按钮与只读状态面板：`SolverOverlay` 把 `SolverAutoToggle`、`SolverExecuteTurnButton`、`SolverCoopModeButton` 依次插进原生顶部栏，紧挨 Map 按钮左侧，纹理与字体取自原生 End Turn 按钮。自动开关只调用 `SolverController.SetFullAuto` 并把 `autoPlay` 写回设置，不读取搜索分支、快照或 `ModelDb`；关闭为蓝、开启为绿、开启且求解器出错或未能行动为红。节奏按钮只调用 `SolverController.SetCoopPlayMode`，把 `coopPlayMode`（自由行动绿／等待队友蓝）写回设置；单回合按钮只调用 `SolverController.ExecuteSingleTurn`。
 
-`SolverOverlayHost` 独占 Ctrl+F9（切换自动）、Ctrl+F11（切换自由行动／等待队友）、Ctrl+F8（立即执行本回合）与 Ctrl+F10（状态面板）四个热键，并在原生顶部栏出现后接入这些控件。`SolverStatusPanel` 消费 `SolverController.AutoStatus` 的只读快照（当前状态、上次决策与耗时、最近事件）。事件来源 `SolverAutoStatus` 归 Runtime 所有：它只记录状态、跳过、出错与停止的原因，同一行同时写入游戏日志前缀 `[CombatSolver/Auto]`。
+`SolverQuickMenu` 是 Ctrl+F9 打开的四项菜单，挂在同一 `CombatSolverOverlay` 图层：自动模式（`SolverAutoToggle.SetAuto`，与顶部栏开关同一路径）、自由行动（`SolverOverlay.CycleCoopPlayMode`）、执行本回合（`SolverController.ExecuteSingleTurn`，可用性与单回合按钮同为 `SolverExecuteTurnButton.IsReady`）与速度（`SolverController.SetDeploymentFastMode`，在 `deploymentFastMode` 的 `FollowGame → Normal → Fast → Instant` 间循环）。菜单只在打开时自行处理方向键、回车、空格、数字 1–4 与 Esc，不改变游戏焦点。
+
+`SolverOverlayHost` 独占 Ctrl+F9（打开/关闭求解器菜单）、Ctrl+F11（切换自由行动／等待队友）、Ctrl+F8（立即执行本回合）与 Ctrl+F10（状态面板）四个热键，并在原生顶部栏出现后接入这些控件。`SolverStatusPanel` 消费 `SolverController.AutoStatus` 的只读快照（当前状态、上次决策与耗时、最近事件）。事件来源 `SolverAutoStatus` 归 Runtime 所有：它只记录状态、跳过、出错与停止的原因，同一行同时写入游戏日志前缀 `[CombatSolver/Auto]`。
 
 路线、摘要、设置页与内存条已移除；所有策略值固定在 `SolverSettings.Capture`，控制器只负责政策冻结和续用失效。自动开关只由玩家关闭：预测胜利回合、预测死亡回合、重算战损上升、搜索或部署异常、实机收尾风险都不再关闭开关，而是跳过该回合、把回合交回玩家并记录原因；停止开关的旧开关只保留给无人测试显式启用。开关与面板文案中英同时维护。
 

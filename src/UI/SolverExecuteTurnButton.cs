@@ -60,7 +60,7 @@ internal sealed partial class SolverExecuteTurnButton : Button
         TooltipText = SolverText.Get("Ctrl+F8 立即求解并执行当前回合，然后停止自动模式");
     }
 
-    private static bool IsReady()
+    internal static bool IsReady()
     {
         CombatState? state = CombatManager.Instance.DebugOnlyGetState();
         return CombatManager.Instance.IsInProgress

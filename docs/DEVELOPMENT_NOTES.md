@@ -26,6 +26,12 @@
 
 ## 下一版本（开发中）
 
+### Ctrl+F9 求解器菜单：自动模式、自由行动、执行本回合与速度
+
+- `Ctrl+F9` 不再直接切换自动模式，改为打开/关闭一个四项小菜单 `SolverQuickMenu`（顶部栏下方右侧，固定 340 像素宽）：1 自动模式开关（与顶部栏开关同一 `SolverAutoToggle.SetAuto` 路径，仍写回 `autoPlay`）；2 自由行动开关（关即「等待队友」，同 `Ctrl+F11`）；3 执行本回合（同 `Ctrl+F8`，可用性与顶部栏按钮同为 `SolverExecuteTurnButton.IsReady`，执行后关闭菜单）；4 速度，在已有设置 `deploymentFastMode` 的 跟随游戏 → 普通 → 快速 → 瞬间 间循环（新增 `SolverController.SetDeploymentFastMode`，持久化并写 `DEPLOYMENT_FAST_MODE` 日志）。
+- 速度语义沿用原实现：普通/快速只在求解器部署期间临时写 `PrefsSave.FastMode` 并在结束后恢复；瞬间由 `CombatInstantModePatch` 在战斗计时代码读取 `FastMode` 处局部返回 `FastModeType.Instant`（玩家与怪物行动都走原生 Instant 分支），不改游戏偏好，战斗外与联机会话（`IsMultiplayerSession`）不生效，联机时菜单显示「瞬间（联机不生效）」。原版设置界面只有普通/快速勾选（`NFastModeTickbox`），Instant 原本只能通过开发者控制台 `instant`（`InstantConsoleCmd`）打开。
+- 输入：菜单打开时自行处理 ↑/↓ 选择、回车/空格执行、数字 1–4 直接执行、速度项 ←/→ 反向/正向循环、Esc 关闭，带 Ctrl/Alt/Meta 的按键不拦截；鼠标悬停选中、左键执行、速度项右键反向循环。按钮不取焦点，不改变游戏手柄/键盘焦点。`Ctrl+F8`／`Ctrl+F10`／`Ctrl+F11`／`Ctrl+F7` 不变。
+
 ### v3 公平求解器：联机格挡模拟、奥斯蒂、铺垫牌、赠能撤销与疯狂科学
 
 - 联机格挡（模拟正确性）：`MultiplayerScalingModel` 的格挡镜像原先把**所有**格挡乘以人数（2 人 ×2、4 人 ×4×幕系数），原版只放大敌方、且只放大带 `Move` 未 `Unpowered` 的格挡。玩家与奥斯蒂的格挡不再被放大。直接证据：`coop-legion-punch` 位置（实机误判 b）修复前模拟预计本回合掉 0 HP、实机掉 4；修复后预计与实机逐人一致（本人 2/2，队友 51/51）。
@@ -59,7 +65,7 @@
 - 自由行动：不做队友等待。`WaitForCoopStableBoardAsync` 直接判定棋盘可用，`SolverDeploymentSession.RequireCoopStableBoard` 为否，因此部署只受「原生动作队列空闲 + `CoopBoardStamp` 未变」约束。每次出牌前和结束回合前仍逐项比较 `CoopBoardStamp`；队友改变棋盘时丢弃剩余路线并立即重新求解（同一回合内重排，而不是等队友准备）。没有任何复制牌或代打路径：动作仍只来自本地玩家的手牌／药水与 `EndPlayerTurnAction`，卡实例由 `FindCardForDeployment` 按出现序号匹配。
 - 等待队友：与原行为一致——`SetFullAuto`、战斗重新挂载、命中过期结果、丢弃路线和回合开始的自动搜索都先等稳定棋盘。
 - 立即生效：已在等待中的 `WaitForCoopStableBoardAsync` 每帧重读节奏；玩家切成自由行动后它在下一帧返回，挂起的搜索或部署继续，不需要再点一次 Auto。`SetCoopPlayMode` 只负责持久化与刷新。
-- 界面：顶部栏新增「自由行动／等待队友」按钮（在「执行本回合」左侧），`Ctrl+F11` 同义；状态面板显示当前节奏。`Ctrl+F7`／`Ctrl+F8`／`Ctrl+F9`／`Ctrl+F10` 语义不变。
+- 界面：顶部栏新增「自由行动／等待队友」按钮（在「执行本回合」左侧），`Ctrl+F11` 同义；状态面板显示当前节奏。`Ctrl+F7`／`Ctrl+F8`／`Ctrl+F9`／`Ctrl+F10` 语义不变（`Ctrl+F9` 后改为打开求解器菜单，见上）。
 - 验证：虚拟 2／4 人 `COOP-FREE-PLAY-EXECUTE` 与 `COOP-AUTO-EXECUTE` 各 Passed（自由行动：队友仍在行动时先出本地牌、队友中途改棋盘后丢弃路线并在同回合重排、重排后把该回合剩余的本地手牌打完（`CoopFreePlay:TeammateChangeMidTurn:ReplannedLocalActions=3`，无重复卡实例、无代打）、`Ctrl+F8` 只出本地牌且 Auto 保持关闭；等待节奏：阻塞、切自由行动解除、切回再阻塞、稳定根、丢弃余下路线、单回合）。队友改变棋盘由夹具注入：探测确认单进程虚拟跑局无法让其他玩家出牌（Auto 关闭时注入并原生出牌 exit 139，只注入不出牌 Passed），所以「Auto 部署途中真实队友出牌」仍属未验证项，留给真实联机。单人 `BETA-DEPLOY-IRONCLAD-SENTINEL` Passed（第 1 回合结束，HP 80/80）。跑局都停在夹具第 2 回合终点，战斗未结束。0.111 副本同批 8 项全部 Passed。真实 Steam 双人房间仍未验证。重跑入口见[测试矩阵](TEST_MATRIX.md#联机自动模式节奏)。
 
 ### 多人联机自动模式与单回合执行
@@ -86,7 +92,7 @@
 
 - 关闭路径审计：`FULL_AUTO_STOP reason=combat_end_turn` 在真实战斗日志中反复出现在预测胜利的那一回合（`SolverController.StartFullAutoDeployment` 的预测结束回合判断），是「自动自己关掉」的直接原因；死亡回合、重算战损上升和实机收尾风险同一形状。四个自动停机条件现在默认关闭，只在无人测试显式打开时生效。
 - 开关不再被搜索失败（旧 `PotionPolicyUnsatisfiedException`）、部署失败、原生选牌失败或「自动搜索已暂停」的后续搜索请求关闭；这些情况保留开关、跳过该回合、把回合交回玩家，并记录原因。开启开关时若当前状态不可求解，也保持开启并记录跳过原因。
-- 开关从 End Turn 按钮上方移到原生顶部栏、Map 按钮左侧，纹理与字体取自原生 End Turn 按钮与主题；关闭为蓝、开启为绿、开启且出错或未能行动为红。Ctrl+F9 切换，Ctrl+F10 打开只读状态面板（当前状态、上次决策与耗时、最近事件）。
+- 开关从 End Turn 按钮上方移到原生顶部栏、Map 按钮左侧，纹理与字体取自原生 End Turn 按钮与主题；关闭为蓝、开启为绿、开启且出错或未能行动为红。Ctrl+F9 切换（后改为打开求解器菜单，见上），Ctrl+F10 打开只读状态面板（当前状态、上次决策与耗时、最近事件）。
 - 新增 `SolverAutoStatus`（Runtime）记录状态、跳过、出错与停止原因，事件同时写入游戏日志的 `[CombatSolver/Auto]` 前缀，便于从 `godot.log` 直接 grep；`SolverOverlayHost` 独占热键，`SolverStatusPanel` 只消费只读快照。
 - 开关状态在战斗之间保持：`BeginCombat` 仍按 `autoPlay` 恢复，战斗结束的会话重建不再把开关当作关闭信号。
 - 验证：Release 构建 0 警告 0 错误；`tools/inspection/verify-refactor-boundaries.sh` 通过；离线 harness 的 fair-play v2 同种子对照 SILENT/NIBBITS（victory，损血 19，8 次决策）与 FOOL/NIBBITS（victory，损血 9，6 次决策）改动前后完全一致。顶部栏位置、三种颜色与热键的真实画面仍需可见游戏验收。

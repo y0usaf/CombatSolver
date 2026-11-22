@@ -13,7 +13,7 @@
   "自动模式：{0} {1}": "Auto Mode: {0} {1}",
   "自动模式：{0}（故障） {1}": "Auto Mode: {0} (error) {1}",
   "自动模式出错：{0}": "Auto Mode error: {0}",
-  "Ctrl+F9 切换自动模式，Ctrl+F11 切换自由行动/等待队友，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态": "Ctrl+F9 toggles Auto Mode, Ctrl+F11 switches Free play/Wait, Ctrl+F8 runs the current turn now, Ctrl+F10 shows solver status",
+  "Ctrl+F9 打开求解器菜单，Ctrl+F11 切换自由行动/等待队友，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态": "Ctrl+F9 opens the solver menu, Ctrl+F11 switches Free play/Wait, Ctrl+F8 runs the current turn now, Ctrl+F10 shows solver status",
   "执行本回合": "Run This Turn",
   "自由行动": "Free play",
   "等待队友": "Wait",
@@ -25,5 +25,15 @@
   "性能录制失败：请勿继续测试": "Performance recording failed: do not continue the test",
   "性能录制中（状态日志＋调用栈）": "Performance recording active (status log + call stacks)",
   "性能录制待就绪／中断：请稍候": "Performance recording starting or interrupted: wait",
-  "Ctrl＋F7：卡顿时保存内存现场（会短暂停顿）": "Ctrl+F7: capture a memory snapshot when the game stutters (brief pause)"
+  "Ctrl＋F7：卡顿时保存内存现场（会短暂停顿）": "Ctrl+F7: capture a memory snapshot when the game stutters (brief pause)",
+  "自动模式：{0}": "Auto Mode: {0}",
+  "自由行动：{0}": "Free play: {0}",
+  "关闭（等待队友）": "Off (wait for teammates)",
+  "速度：{0}": "Speed: {0}",
+  "跟随游戏": "Game setting",
+  "普通": "Normal",
+  "快速": "Fast",
+  "瞬间": "Instant",
+  "{0}（联机不生效）": "{0} (no effect online)",
+  "方向键选择，回车或数字键执行，左右键调速度，Esc 关闭": "Arrow keys select, Enter or 1-4 applies, Left/Right change speed, Esc closes"
 }
