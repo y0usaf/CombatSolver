@@ -13,8 +13,9 @@ internal sealed partial class UnattendedTestRunner
     /// <summary>
     /// Virtual two/three/four-seat co-op scenario for the Free play pace. It proves Auto plays the
     /// local hand while a teammate is still thinking, that a teammate playing a real card mid-turn
-    /// drops the stale plan and replans without waiting, that the replanned turn continues with the
-    /// remaining local cards, that no card is played twice, that the teammate's side is never
+    /// drops the stale plan and replans without waiting, that a replanned turn with the hand spent is
+    /// ended by the new route rather than the discarded one, that the replanned turn continues with
+    /// the remaining local cards, that no card is played twice, that the teammate's side is never
     /// played for them, and that Ctrl+F8 still plays exactly one local turn.
     /// </summary>
     private async Task AssertCoopFreePlayExecuteAsync(CombatState combat, Player player)
@@ -134,20 +135,41 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidOperationException("Free play stopped Auto Mode after the board changed.");
             _completedChecks.Add("CoopFreePlay:BoardChangeAfterFirstAction:StalePlanDroppedAndReplanned");
 
-            // Keep the player turn alive for the single-turn fixture below.
-            SolverController.SetFullAutoEnabledForTesting(false);
-            SolverController.CancelCoopWaitForTesting();
+            // The replanned route is the live plan for the rest of this turn. The one Strike is
+            // spent, so it is a bare End Turn and Auto deploys it while still on: that is correct
+            // Free play. Flipping the test-only Auto flag cannot stop a deployment that already
+            // started (the player's Auto toggle cancels it), and the replan can start deploying
+            // within a single fixture frame, so let the turn end and check who ended it instead.
+            await PumpUntilAsync(
+                () => player.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } live
+                      || live.TurnNumber > turn,
+                TimeSpan.FromSeconds(60),
+                "free_play_replan_ends_turn");
+            SolverController.SetFullAuto(host, combat, false);
             await PumpUntilAsync(
                 () => !SolverController.IsSearching && !SolverController.IsDeploying,
                 TimeSpan.FromSeconds(60),
                 "free_play_replan_settled");
-            if (player.PlayerCombatState!.Phase != PlayerTurnPhase.Play)
-                throw new InvalidOperationException("The discarded free-play turn ended unexpectedly.");
+            AssertTurnEndedByReplannedRoute(turn);
+            if (CountCardPlays(player) != playsAtChange)
+                throw new InvalidOperationException("The replanned free-play turn replayed a spent card.");
+            if (CountCardPlays(teammate) != teammatePlaysBefore)
+                throw new InvalidOperationException("The replanned free-play turn played a teammate's card.");
+            _completedChecks.Add("CoopFreePlay:BoardChangeAfterFirstAction:ReplannedRouteEndedTurn");
 
             // 4. Ctrl+F8 still plays one local turn in Free play and stops.
             // The virtual run keeps the single-player net service, so ending the local turn also
             // advances the round and legitimately redraws the teammate's hand: only the local
             // card plays and the teammate's own card plays are evidence here.
+            await PumpUntilAsync(
+                () => CombatManager.Instance.IsInProgress
+                      && LocalContext.GetMe(combat)?.PlayerCombatState is { Phase: PlayerTurnPhase.Play } live
+                      && live.TurnNumber > turn,
+                TimeSpan.FromSeconds(90),
+                "free_play_execute_turn");
+            if (SolverController.FullAutoEnabled)
+                throw new InvalidOperationException("Auto stayed on after the player toggled it off.");
+            int executeTurn = player.PlayerCombatState!.TurnNumber;
             await PrepareLocalStrikesAsync(combat, player, 2);
             int localPlaysBeforeExecute = CountCardPlays(player);
             int teammatePlaysBeforeExecute = CountCardPlays(teammate);
@@ -180,7 +202,7 @@ internal sealed partial class UnattendedTestRunner
             await PumpUntilAsync(
                 () => CombatManager.Instance.IsInProgress
                       && LocalContext.GetMe(combat)?.PlayerCombatState is { Phase: PlayerTurnPhase.Play } live
-                      && live.TurnNumber > turn,
+                      && live.TurnNumber > executeTurn,
                 TimeSpan.FromSeconds(90),
                 "free_play_next_turn");
             int nextTurn = player.PlayerCombatState!.TurnNumber;
@@ -257,6 +279,37 @@ internal sealed partial class UnattendedTestRunner
         }
         if (player.PlayerCombatState!.Phase != PlayerTurnPhase.Play)
             throw new InvalidOperationException($"The {label} probe ended the local turn.");
+    }
+
+    /// <summary>
+    /// The turn must have been ended by the solver through a route chosen after the teammate's
+    /// board change: the discarded deployment stops before End Turn, so a deployment decision has
+    /// to follow the latest <c>coop_board_changed</c> stop in the status log.
+    /// </summary>
+    private static void AssertTurnEndedByReplannedRoute(int turn)
+    {
+        if (SolverController.LastSolverDeployedTurnForBugReport != turn)
+        {
+            throw new InvalidOperationException(
+                $"The free-play turn ended without a solver End Turn: last_solver_turn={SolverController.LastSolverDeployedTurnForBugReport?.ToString() ?? "-"} turn={turn}.");
+        }
+        IReadOnlyList<SolverAutoEvent> events = SolverController.AutoStatus.Events;
+        int discarded = -1;
+        for (int index = events.Count - 1; index >= 0 && discarded < 0; index--)
+        {
+            if (events[index].Detail.Contains($"coop_board_changed turn={turn} ", StringComparison.Ordinal))
+                discarded = index;
+        }
+        if (discarded < 0)
+            throw new InvalidOperationException("The board-change stop is missing from the status log.");
+        bool replannedDeployment = events.Skip(discarded + 1).Any(entry =>
+            entry.Kind == "decision"
+            && entry.Detail.StartsWith($"turn={turn} ", StringComparison.Ordinal));
+        if (!replannedDeployment)
+        {
+            throw new InvalidOperationException(
+                "The free-play turn ended without a deployment chosen after the teammate's board change.");
+        }
     }
 
     private static int CountCoopBoardChanges()
