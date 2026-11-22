@@ -52,6 +52,7 @@ internal sealed class SolvedRouteCache(string path)
             Modifiers = state.Modifiers.Select(modifier => modifier.Id.Entry).ToArray(),
             Native = writer.Buffer.AsSpan(0, writer.BytePosition).ToArray(),
             root.ContinuationStamp.StateText,
+            root.ActingTeammateIds,
             damage,
             policy.Profile,
             policy.PotionPolicy,

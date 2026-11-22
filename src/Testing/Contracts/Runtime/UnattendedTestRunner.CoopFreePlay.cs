@@ -70,6 +70,16 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidOperationException("Free play reported a teammate wait.");
             _completedChecks.Add("CoopFreePlay:DoesNotWaitForTeammates");
 
+            await AssertStaleDuringSearchAsync(host, combat, player, "ready",
+                () => SetTeammatesReadyForTest(combat, player, ready: true),
+                () => SetTeammatesReadyForTest(combat, player, ready: false));
+            _completedChecks.Add("CoopFreePlay:TeammateReadiedDuringSearch:StaleResultDroppedAndReplanned");
+            int teammateEnergy = teammate.PlayerCombatState!.Energy;
+            await AssertStaleDuringSearchAsync(host, combat, player, "energy",
+                () => SetEnergy(teammate, teammateEnergy + 1),
+                () => SetEnergy(teammate, teammateEnergy));
+            _completedChecks.Add("CoopFreePlay:TeammateEnergyChangedDuringSearch:StaleResultDroppedAndReplanned");
+
             // 2. Auto plays the local hand while the teammate is still thinking.
             await PrepareLocalStrikesAsync(combat, player, 1);
             int teammatePlaysBefore = CountCardPlays(teammate);
@@ -215,6 +225,38 @@ internal sealed partial class UnattendedTestRunner
             SolverController.CancelCoopWaitForTesting();
             SolverController.SetCoopPlayModeForTesting(settingsBefore.CoopPlayMode);
         }
+    }
+
+    private async Task AssertStaleDuringSearchAsync(NGame host, CombatState combat, Player player, string label, Action mutate, Action restore)
+    {
+        await PrepareLocalStrikesAsync(combat, player, 1);
+        int searchesBefore = SolverController.SearchesStartedForTesting;
+        int deployedBefore = SolverController.DeployedActionCountForTesting;
+        SolverController.SetFullAuto(host, combat, true);
+        await PumpUntilAsync(() => SolverController.IsSearching, TimeSpan.FromSeconds(20), $"free_play_{label}_flip_search");
+        mutate();
+        await PumpUntilAsync(
+            () => SolverController.SearchesStartedForTesting > searchesBefore + 1
+                  || SolverController.DeployedActionCountForTesting > deployedBefore,
+            TimeSpan.FromSeconds(30),
+            $"free_play_{label}_flip_replan");
+        int deployed = SolverController.DeployedActionCountForTesting - deployedBefore;
+        int searches = SolverController.SearchesStartedForTesting - searchesBefore;
+        SolverController.SetFullAutoEnabledForTesting(false);
+        SolverController.CancelCoopWaitForTesting();
+        SolverController.CancelSearchForTesting();
+        await PumpUntilAsync(
+            () => !SolverController.IsSearching && !SolverController.IsDeploying,
+            TimeSpan.FromSeconds(30),
+            $"free_play_{label}_flip_settled");
+        restore();
+        if (deployed != 0 || searches < 2)
+        {
+            throw new InvalidOperationException(
+                $"A teammate {label} change during the search must drop the stale result and replan: searches={searches} deployed={deployed}.");
+        }
+        if (player.PlayerCombatState!.Phase != PlayerTurnPhase.Play)
+            throw new InvalidOperationException($"The {label} probe ended the local turn.");
     }
 
     private static int CountCoopBoardChanges()

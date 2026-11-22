@@ -198,7 +198,7 @@ internal sealed class CombatRootSnapshot
         // Take the baseline first so any semantic mutation in those callbacks is rejected by
         // the existing after-capture stamp without paying for another full serialization.
         ContinuationStamp continuationBefore = ContinuationStamp.CaptureLive(state);
-        LiveCombatStamp liveBefore = LiveCombatStamp.FromContinuation(continuationBefore);
+        LiveCombatStamp liveBefore = LiveCombatStamp.FromContinuation(continuationBefore, state);
 
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("找不到本地玩家。");
@@ -268,7 +268,7 @@ internal sealed class CombatRootSnapshot
         }
 
         ContinuationStamp continuationAfter = ContinuationStamp.CaptureLive(state);
-        LiveCombatStamp liveAfter = LiveCombatStamp.FromContinuation(continuationAfter);
+        LiveCombatStamp liveAfter = LiveCombatStamp.FromContinuation(continuationAfter, state);
         if (!string.Equals(liveBefore.StateText, liveAfter.StateText, StringComparison.Ordinal)
             || !string.Equals(
                 continuationBefore.StateText,
