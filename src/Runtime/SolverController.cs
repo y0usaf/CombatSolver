@@ -837,6 +837,14 @@ internal static partial class SolverController
             session.TurnSetupResumeState = null;
             if (resumedReason == SearchReason.AutoTurnStart && !ShouldAutomaticallySearchNextTurn)
                 return;
+            if (resumedReason == SearchReason.AutoTurnStart
+                && !CoopFreePlayEnabled
+                && IsMultiplayerCombat(state)
+                && !CombatStability.IsCoopBoardStable(state))
+            {
+                ScheduleCoopAutoSearch(host, state, turn);
+                return;
+            }
             searchRequested = true;
             RequestSearch(host, state, resumedReason, deployWhenReady);
         }
