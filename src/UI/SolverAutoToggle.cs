@@ -43,9 +43,6 @@ internal sealed partial class SolverAutoToggle : Button
         ApplyFont();
     }
 
-    public void ToggleFromHotkey()
-        => Apply(NGame.Instance, CombatManager.Instance.DebugOnlyGetState(), !IsOn());
-
     public void SyncState()
     {
         bool on = IsOn();
@@ -61,10 +58,10 @@ internal sealed partial class SolverAutoToggle : Button
         }
         TooltipText = status.Failed
             ? SolverText.Format($"自动模式出错：{status.FailureReason}")
-            : SolverText.Get("Ctrl+F9 切换自动模式，Ctrl+F11 切换自由行动/等待队友，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态");
+            : SolverText.Get("Ctrl+F9 打开求解器菜单，Ctrl+F11 切换自由行动/等待队友，Ctrl+F8 立即执行本回合，Ctrl+F10 查看求解器状态");
     }
 
-    private bool IsOn()
+    internal static bool IsOn()
         => CombatManager.Instance.IsInProgress
             ? SolverController.FullAutoEnabled
             : SolverController.AutoRequested;
@@ -108,19 +105,23 @@ internal sealed partial class SolverAutoToggle : Button
     }
 
     private void OnPressed()
-        => Apply(NGame.Instance, CombatManager.Instance.DebugOnlyGetState(), ButtonPressed);
+    {
+        SetAuto(ButtonPressed);
+        SyncState();
+    }
 
-    private void Apply(NGame? host, CombatState? state, bool enabled)
+    internal static void SetAuto(bool enabled)
     {
         if (SolverController.SolverDisabled)
         {
-            SyncState();
+            SolverOverlay.RefreshControls();
             return;
         }
+        NGame? host = NGame.Instance;
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
         if (host != null && state != null && CombatManager.Instance.IsInProgress)
             SolverController.SetFullAuto(host, state, enabled);
         SolverSettings.Update(SolverSettings.Current with { AutoPlay = enabled });
         SolverOverlay.RefreshControls();
-        SyncState();
     }
 }

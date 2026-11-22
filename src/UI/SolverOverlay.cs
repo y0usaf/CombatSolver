@@ -18,6 +18,7 @@ internal static class SolverOverlay
     private static SolverCoopModeButton? _coopMode;
     private static SolverExecuteTurnButton? _executeTurn;
     private static SolverStatusPanel? _panel;
+    private static SolverQuickMenu? _menu;
     private static Font? _font;
     private static int _framesUntilSync;
     private static int _framesUntilAttach;
@@ -42,20 +43,31 @@ internal static class SolverOverlay
         EnsureLayer(host);
         if (!IsToggleAlive)
             TryAttachTopBar(host);
-        _toggle?.SyncState();
-        _coopMode?.SyncState();
-        _executeTurn?.SyncState();
+        if (IsLive(_toggle))
+            _toggle!.SyncState();
+        if (IsLive(_coopMode))
+            _coopMode!.SyncState();
+        if (IsLive(_executeTurn))
+            _executeTurn!.SyncState();
+        if (QuickMenuVisible)
+            _menu!.Sync();
     }
+
+    private static bool IsLive(GodotObject? node)
+        => node != null && GodotObject.IsInstanceValid(node);
 
     /// <summary>Flips the co-op Auto pace between Free play and Wait and stores the choice.</summary>
     public static void CycleCoopPlayMode()
         => SolverController.SetCoopPlayMode(
             SolverController.CoopFreePlayEnabled ? SolverCoopPlayMode.Wait : SolverCoopPlayMode.FreePlay);
 
-    public static void ToggleAuto()
+    public static bool QuickMenuVisible
+        => _menu != null && GodotObject.IsInstanceValid(_menu) && _menu.Visible;
+
+    public static void ToggleQuickMenu()
     {
-        RefreshControls();
-        _toggle?.ToggleFromHotkey();
+        if (_menu != null && GodotObject.IsInstanceValid(_menu))
+            _menu.Toggle();
     }
 
     public static void TogglePanel()
@@ -81,6 +93,7 @@ internal static class SolverOverlay
         _coopMode = null;
         _executeTurn = null;
         _panel = null;
+        _menu = null;
         _layer = null;
     }
 
@@ -118,6 +131,8 @@ internal static class SolverOverlay
         _layer.AddChild(new SolverOverlayHost { Name = "Hotkeys" });
         _panel = new SolverStatusPanel { Name = "StatusPanel" };
         _layer.AddChild(_panel);
+        _menu = new SolverQuickMenu { Name = "QuickMenu" };
+        _layer.AddChild(_menu);
         host.AddChild(_layer);
         _framesUntilSync = SyncIntervalFrames;
         _framesUntilAttach = AttachIntervalFrames;
@@ -162,6 +177,7 @@ internal static class SolverOverlay
                 map.Position.Y);
         }
         _panel?.AttachStyleSource(topBar, _font);
+        _menu?.AttachStyleSource(topBar, _font);
         _toggle.SyncState();
         _coopMode.SyncState();
         _executeTurn.SyncState();

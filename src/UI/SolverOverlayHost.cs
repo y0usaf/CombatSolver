@@ -17,7 +17,7 @@ internal sealed partial class SolverOverlayHost : Node
                 SolverController.ExecuteSingleTurn();
                 break;
             case Key.F9:
-                SolverOverlay.ToggleAuto();
+                SolverOverlay.ToggleQuickMenu();
                 break;
             case Key.F10:
                 SolverOverlay.TogglePanel();

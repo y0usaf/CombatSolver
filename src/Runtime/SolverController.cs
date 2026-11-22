@@ -1420,6 +1420,17 @@ internal static partial class SolverController
         SolverOverlay.RefreshControls();
     }
 
+    public static void SetDeploymentFastMode(SolverDeploymentFastMode mode)
+    {
+        AssertMainThread();
+        if (SolverSettings.Current.DeploymentFastMode == mode)
+            return;
+        SolverSettings.Update(SolverSettings.Current with { DeploymentFastMode = mode });
+        SolverAutoStatus.Record("mode", $"deployment_fast_mode={mode}");
+        Entry.Logger.Info($"[CombatSolver/Test] DEPLOYMENT_FAST_MODE mode={mode}");
+        SolverOverlay.RefreshControls();
+    }
+
     public static bool PrepareAutomaticSearchForTurn(NGame host, CombatState state)
     {
         AssertMainThread();
